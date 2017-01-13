@@ -23,17 +23,20 @@ from autotest_lib.site_utils.stable_images import assign_stable_images
 #     + Board with no "beta" channel.
 #     + Board with "beta" and another channel.
 #     + Board with only a "beta" channel.
+#     + Board with no "chrome_version" entry.
 #     + Obsolete board with "is_active" set to false.
 # The JSON content of the file is a subset of an actual
-# `omaha_status.json` file copied when this unit test was new.
+# `omaha_status.json` file copied when the unit test was last
+# updated.
 #
 # _EXPECTED_OMAHA_VERSIONS - The expected output produced by
 #   _STUB_OMAHA_DATA.
 #
 _OMAHA_TEST_DATA = 'test_omaha_status.json'
 
-_EXPECTED_OMAHA_VERSIONS = {'arkham': 'R53-8530.71.1',
-                            'auron-paine': 'R54-8743.44.0',
+_EXPECTED_OMAHA_VERSIONS = {'auron-paine': 'R55-8872.54.0',
+                            'gale': 'R55-8872.40.9',
+                            'kevin': 'R55-8872.64.0',
                             'zako-freon': 'R41-6680.52.0'}
 
 _DEFAULT_BOARD = assign_stable_images._DEFAULT_BOARD
@@ -54,6 +57,38 @@ class OmahaDataTests(unittest.TestCase):
         omaha_versions = assign_stable_images._make_omaha_versions(
                 json.load(open(data_file_path, 'r')))
         self.assertEqual(omaha_versions, _EXPECTED_OMAHA_VERSIONS)
+
+
+class KeyPathTests(unittest.TestCase):
+    """Tests for the `_get_by_key_path()` function."""
+
+    DICTDICT = {'level0': 'OK', 'level1_a': {'level1_b': 'OK'}}
+
+    def _get_by_key_path(self, keypath):
+        get_by_key_path = assign_stable_images._get_by_key_path
+        return get_by_key_path(self.DICTDICT, keypath)
+
+    def _check_path_valid(self, keypath):
+        self.assertEqual(self._get_by_key_path(keypath), 'OK')
+
+    def _check_path_invalid(self, keypath):
+        self.assertIsNone(self._get_by_key_path(keypath))
+
+    def test_one_element(self):
+        """Test a single-element key path with a valid key."""
+        self._check_path_valid(['level0'])
+
+    def test_two_element(self):
+        """Test a two-element key path with a valid key."""
+        self._check_path_valid(['level1_a', 'level1_b'])
+
+    def test_one_element_invalid(self):
+        """Test a single-element key path with an invalid key."""
+        self._check_path_invalid(['absent'])
+
+    def test_two_element_invalid(self):
+        """Test a two-element key path with an invalid key."""
+        self._check_path_invalid(['level1_a', 'absent'])
 
 
 class GetUpgradeTests(unittest.TestCase):
@@ -237,6 +272,16 @@ _OLD_VERSION = 'old-board-version'
 _NEW_VERSION = 'new-board-version'
 
 
+class _StubAFE(object):
+    """Stubbed out version of `server.frontend.AFE`."""
+
+    CROS_IMAGE_TYPE = 'cros-image-type'
+    FIRMWARE_IMAGE_TYPE = 'firmware-image-type'
+
+    def get_stable_version_map(self, image_type):
+        return image_type
+
+
 class _TestUpdater(assign_stable_images._VersionUpdater):
     """
     Subclass of `_VersionUpdater` for testing.
@@ -258,7 +303,7 @@ class _TestUpdater(assign_stable_images._VersionUpdater):
     """
 
     def __init__(self, testcase):
-        super(_TestUpdater, self).__init__(None)
+        super(_TestUpdater, self).__init__(_StubAFE())
         self._testcase = testcase
         self._default_changed = None
         self._reported_mappings = None
@@ -618,6 +663,62 @@ class ApplyCrOSUpgradesTests(unittest.TestCase):
         self._apply_upgrades({'board': _NEW_DEFAULT},
                              {'board': _NEW_DEFAULT},
                              True)
+
+
+class ApplyFirmwareUpgradesTests(unittest.TestCase):
+    """Tests for the `_apply_firmware_upgrades()` function."""
+
+    def _apply_upgrades(self, old_versions, new_versions):
+        """
+        Test a single call to `_apply_firmware_upgrades()`.
+
+        All assertions are handled by an instance of `_TestUpdater`.
+
+        @param old_versions   Parameter to be passed to
+                              `_apply_firmware_upgrades()`.
+        @param new_versions   Parameter to be passed to
+                              `_apply_firmware_upgrades()`.
+        """
+        updater = _TestUpdater(self)
+        updater.pretest_init(old_versions, new_versions)
+        assign_stable_images._apply_firmware_upgrades(
+            updater, old_versions, new_versions)
+        updater.check_results(False)
+
+    def test_no_changes(self):
+        """
+        Test an empty upgrade that does nothing.
+
+        Test the boundary case of an upgrade where there are no boards.
+        """
+        self._apply_upgrades({}, {})
+
+    def test_board_added(self):
+        """
+        Test an upgrade that adds a new board.
+
+        Test the case of an upgrade where a board that was previously
+        unmapped is added.
+        """
+        self._apply_upgrades({}, {'board': _NEW_VERSION})
+
+    def test_board_unchanged(self):
+        """
+        Test an upgrade with no changes to a board.
+
+        Test the case of an upgrade with a board that stays the same.
+        """
+        self._apply_upgrades({'board': _NEW_VERSION},
+                             {'board': _NEW_VERSION})
+
+    def test_board_upgrade_and_change_default(self):
+        """
+        Test upgrading a board.
+
+        Test the case of upgrading a board to a new version.
+        """
+        self._apply_upgrades({'board': _OLD_VERSION},
+                             {'board': _NEW_VERSION})
 
 
 if __name__ == '__main__':

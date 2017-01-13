@@ -123,6 +123,30 @@ def bool_str(x):
             '%s is not one of True or False' % (x,))
 
 
+def _get_priority_value(x):
+    """Convert a priority representation to its int value.
+
+    Priorities can be described either by an int value (possibly as a string)
+    or a name string.  This function coerces both forms to an int value.
+
+    This function is intended for casting command line arguments during
+    parsing.
+
+    @param x: priority value as an int, int string, or name string
+
+    @returns: int value of priority
+    """
+    try:
+        return int(x)
+    except ValueError:
+        try:
+            return priorities.Priority.get_value(x)
+        except AttributeError:
+            raise argparse.ArgumentTypeError(
+                'Unknown priority level %s.  Try one of %s.'
+                % (x, ', '.join(priorities.Priority.names)))
+
+
 def make_parser():
     """Make ArgumentParser instance for run_suite.py."""
     parser = argparse.ArgumentParser(
@@ -184,6 +208,7 @@ def make_parser():
     # know what you're doing, one can specify a custom priority level between
     # other levels.
     parser.add_argument("-r", "--priority", dest="priority",
+                        type=_get_priority_value,
                         default=priorities.Priority.DEFAULT,
                         action="store",
                         help="Priority of suite. Either numerical value, or "
@@ -211,8 +236,8 @@ def make_parser():
                         default=None, action="store",
                         help="Argument string for suite control file.")
     parser.add_argument('--offload_failures_only',
-                        dest='offload_failures_only',
-                        action='store', default='False',
+                        dest='offload_failures_only', type=bool_str,
+                        action='store', default=False,
                         help='Only enable gs_offloading for failed tests. '
                         'Successful tests will be deleted. Must pass "True"'
                         ' or "False" if used.')
@@ -1489,14 +1514,15 @@ class ResultCollector(object):
                 self._board, self._build, self._num_child_jobs, runtime_in_secs)
 
 
-@retry.retry(error.StageControlFileFailure, timeout_min=10)
-def create_suite(afe, options):
-    """Create a suite with retries.
+def _make_builds_from_options(options):
+    """Create a dict of builds for creating a suite job.
 
-    @param afe: The afe object to insert the new suite job into.
-    @param options: The options to use in creating the suite.
+    The returned dict maps version label prefixes to build names.  Together,
+    each key-value pair describes a complete label.
 
-    @return: The afe_job_id of the new suite job.
+    @param options: SimpleNamespace from argument parsing.
+
+    @return: dict mapping version label prefixes to build names
     """
     builds = {}
     if options.build:
@@ -1510,38 +1536,43 @@ def create_suite(afe, options):
         builds[provision.FW_RW_VERSION_PREFIX] = options.firmware_rw_build
     if options.firmware_ro_build:
         builds[provision.FW_RO_VERSION_PREFIX] = options.firmware_ro_build
-    wait = not options.no_wait
-    file_bugs = options.file_bugs
-    retry = options.retry
-    offload_failures_only = options.offload_failures_only == 'True'
-    try:
-        priority = int(options.priority)
-    except ValueError:
-        try:
-            priority = priorities.Priority.get_value(options.priority)
-        except AttributeError:
-            print 'Unknown priority level %s.  Try one of %s.' % (
-                  options.priority, ', '.join(priorities.Priority.names))
-            raise
+    return builds
+
+
+@retry.retry(error.StageControlFileFailure, timeout_min=10)
+def create_suite(afe, options):
+    """Create a suite with retries.
+
+    @param afe: The afe object to insert the new suite job into.
+    @param options: The options to use in creating the suite.
+
+    @return: The afe_job_id of the new suite job.
+    """
     logging.info('%s Submitted create_suite_job rpc',
                  diagnosis_utils.JobTimer.format_time(datetime.now()))
-    # Adjust timeout based on the delay_minutes setting.
-    timeout_mins = options.timeout_mins + options.delay_minutes
-    max_runtime_mins = options.max_runtime_mins + options.delay_minutes
-    return afe.run('create_suite_job', name=options.name,
-                   board=options.board, build=options.build,
-                   builds=builds, test_source_build=options.test_source_build,
-                   check_hosts=wait, pool=options.pool,
-                   num=options.num,
-                   file_bugs=file_bugs, priority=priority,
-                   suite_args=options.suite_args,
-                   wait_for_results=wait,
-                   timeout_mins=timeout_mins, max_runtime_mins=max_runtime_mins,
-                   job_retry=retry, max_retries=options.max_retries,
-                   suite_min_duts=options.suite_min_duts,
-                   offload_failures_only=offload_failures_only,
-                   run_prod_code=options.run_prod_code,
-                   delay_minutes=options.delay_minutes)
+    return afe.run(
+        'create_suite_job',
+        name=options.name,
+        board=options.board,
+        build=options.build,
+        builds=_make_builds_from_options(options),
+        test_source_build=options.test_source_build,
+        check_hosts=not options.no_wait,
+        pool=options.pool,
+        num=options.num,
+        file_bugs=options.file_bugs,
+        priority=options.priority,
+        suite_args=options.suite_args,
+        wait_for_results=not options.no_wait,
+        timeout_mins=options.timeout_mins + options.delay_minutes,
+        max_runtime_mins=options.max_runtime_mins + options.delay_minutes,
+        job_retry=options.retry,
+        max_retries=options.max_retries,
+        suite_min_duts=options.suite_min_duts,
+        offload_failures_only=options.offload_failures_only,
+        run_prod_code=options.run_prod_code,
+        delay_minutes=options.delay_minutes,
+    )
 
 
 SuiteResult = namedtuple('SuiteResult', ['return_code', 'output_dict'])
@@ -1736,7 +1767,7 @@ def _handle_job_wait(afe, job_id, options, job_timer, is_real_time):
                       timedelta(hours=0.3))
             rpc_helper.diagnose_pool(
                     options.board, options.pool, cutoff)
-        except proxy.JSONRPCException as e:
+        except proxy.JSONRPCException:
             logging.warning('Unable to display pool info.')
 
     # And output return message.

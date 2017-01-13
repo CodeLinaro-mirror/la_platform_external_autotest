@@ -8,31 +8,192 @@
 """Unit tests for server/cros/dynamic_suite/dynamic_suite.py."""
 
 import collections
-import mox
+from collections import OrderedDict
+import contextlib
+import itertools
 import os
 import shutil
 import tempfile
 import unittest
-from collections import OrderedDict
+
+import mock
+import mox
 
 import common
 
-from autotest_lib.client.common_lib import base_job, control_data
+from autotest_lib.client.common_lib import base_job
+from autotest_lib.client.common_lib import control_data
+from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import priorities
-from autotest_lib.client.common_lib import utils, error
+from autotest_lib.client.common_lib import utils
 from autotest_lib.client.common_lib.cros import dev_server
+from autotest_lib.server import frontend
 from autotest_lib.server.cros import provision
 from autotest_lib.server.cros.dynamic_suite import control_file_getter
+from autotest_lib.server.cros.dynamic_suite import constants
 from autotest_lib.server.cros.dynamic_suite import job_status
 from autotest_lib.server.cros.dynamic_suite import reporting
-from autotest_lib.server.cros.dynamic_suite.comparators import StatusContains
 from autotest_lib.server.cros.dynamic_suite import suite as SuiteBase
-from autotest_lib.server.cros.dynamic_suite.suite import Suite
-from autotest_lib.server.cros.dynamic_suite.suite import RetryHandler
+from autotest_lib.server.cros.dynamic_suite.comparators import StatusContains
 from autotest_lib.server.cros.dynamic_suite.fakes import FakeControlData
 from autotest_lib.server.cros.dynamic_suite.fakes import FakeJob
-from autotest_lib.server import frontend
+from autotest_lib.server.cros.dynamic_suite.suite import RetryHandler
+from autotest_lib.server.cros.dynamic_suite.suite import Suite
 from autotest_lib.site_utils import phapi_lib
+
+
+class _RetryHandlerShouldRetryMeta(type):
+    """Metaclass for generating tests for RetryHandler.should_retry().
+
+    Tests are generated using permutations of input values and expected
+    results, which come from a list of _ShouldRetryTestSpec instances assigned
+    to the `tests` class attribute in the class definition.
+    """
+
+    def __new__(cls, name, bases, dct):
+        def make_test_method(name, spec):
+            """Make test method for the given test spec.
+
+            @param name: Name of test method.
+            @param spec: _ShouldRetryTestSpec instance.
+            @returns: test method function.
+            """
+            test_doc = 'Test should_retry with %r' % (spec,)
+            def test_method(self):
+                """Test method."""
+                status = make_status_stub(spec)
+                handler = RetryHandler({})
+                with make_handler_patch(handler, spec):
+                    got = handler.should_retry(status)
+                self.assertEqual(got, spec.expected)
+            test_method.__name__ = name
+            test_method.__doc__ = test_doc
+            return test_method
+
+        def make_status_stub(spec):
+            """Make a stub Status instance.
+
+            @param spec: _ShouldRetryTestSpec instance.
+            @returns: Status stub instance.
+            """
+            status = mock.create_autospec(job_status.Status, instance=True)
+            status.id = spec.status_id
+            status.test_executed = spec.test_executed
+            status.is_worse_than.return_value = spec.is_worse_than
+            return status
+
+        @contextlib.contextmanager
+        def make_handler_patch(handler, spec):
+            """Make a mock patch context for RetryHandler.
+
+            @param handler: RetryHandler instance.
+            @param spec: _ShouldRetryTestSpec instance.
+            @returns: test method function.
+            """
+            with mock.patch.multiple(handler, suite_max_reached=mock.DEFAULT,
+                                     _retry_map=spec.retry_map) as mocks:
+                mocks['suite_max_reached'].return_value = spec.max_reached
+                yield mocks
+
+        for i, spec in enumerate(dct['tests']):
+            test_name = 'test_should_retry_%d' % i
+            test_method = make_test_method(test_name, spec)
+            dct[test_name] = test_method
+        return type.__new__(cls, name, bases, dct)
+
+
+_ShouldRetryTestSpec = collections.namedtuple(
+    '_ShouldRetryTestSpec',
+    ['max_reached',
+     'status_id',
+     'test_executed',
+     'is_worse_than',
+     'retry_map',
+     'expected'])
+_NOT_ATTEMPTED = RetryHandler.States.NOT_ATTEMPTED
+_RETRY_MAP_PERMUTATIONS = [
+    {'status_id': {
+        'state': state,
+        'retry_max': retry_max}}
+    for state in RetryHandler.States.values
+    for retry_max in (-1, 0, 1)
+]
+
+
+class RetryHandlerShouldRetryTest(unittest.TestCase):
+    """Tests for RetryHandler.should_retry().
+
+    See _RetryHandlerShouldRetryMeta for how the tests are generated.
+    """
+    __metaclass__ = _RetryHandlerShouldRetryMeta
+    tests = list(itertools.chain(
+        # Cases where max_reached=True
+        (_ShouldRetryTestSpec(
+            max_reached=True,
+            status_id='status_id',
+            test_executed=test_executed,
+            is_worse_than=is_worse_than,
+            retry_map=retry_map,
+            expected=False)
+         for test_executed in (True, False)
+         for is_worse_than in (True, False)
+         for retry_map in _RETRY_MAP_PERMUTATIONS),
+
+        # Cases where test_executed=False
+        (_ShouldRetryTestSpec(
+            max_reached=False,
+            status_id='status_id',
+            test_executed=False,
+            is_worse_than=is_worse_than,
+            retry_map=retry_map,
+            expected=False)
+         for is_worse_than in (True, False)
+         for retry_map in _RETRY_MAP_PERMUTATIONS),
+
+        # Cases where is_worse_than=False
+        (_ShouldRetryTestSpec(
+            max_reached=False,
+            status_id='status_id',
+            test_executed=True,
+            is_worse_than=False,
+            retry_map=retry_map,
+            expected=False)
+         for retry_map in _RETRY_MAP_PERMUTATIONS),
+
+        # Cases where status_id not in retry_map
+        [_ShouldRetryTestSpec(
+            max_reached=False,
+            status_id='status_id',
+            test_executed=True,
+            is_worse_than=True,
+            retry_map={},
+            expected=False)],
+
+        # Cases where status state is not _NOT_ATTEMPTED or retry_max greater
+        # than zero.
+        (_ShouldRetryTestSpec(
+            max_reached=False,
+            status_id='status_id',
+            test_executed=True,
+            is_worse_than=True,
+            retry_map=retry_map,
+            expected=False)
+         for retry_map in _RETRY_MAP_PERMUTATIONS
+         if retry_map['status_id']['state'] != _NOT_ATTEMPTED
+         or not retry_map['status_id']['retry_max'] > 0),
+
+        # Case where should_retry() is True
+        (_ShouldRetryTestSpec(
+            max_reached=False,
+            status_id='status_id',
+            test_executed=True,
+            is_worse_than=True,
+            retry_map=retry_map,
+            expected=True)
+         for retry_map in _RETRY_MAP_PERMUTATIONS
+         if retry_map['status_id']['state'] == _NOT_ATTEMPTED
+         and retry_map['status_id']['retry_max'] > 0),
+    ))
 
 
 class SuiteTest(mox.MoxTestBase):
@@ -250,10 +411,10 @@ class SuiteTest(mox.MoxTestBase):
 
         self.assertFalse(self.files['one'] in suite.tests)
         self.assertFalse(self.files['two'] in suite.tests)
-        self.assertFalse(self.files['one'] in suite.unstable_tests())
-        self.assertFalse(self.files['two'] in suite.stable_tests())
-        self.assertFalse(self.files['one'] in suite.stable_tests())
-        self.assertFalse(self.files['two'] in suite.unstable_tests())
+        self.assertFalse(self.files['one'] in suite.unstable_tests)
+        self.assertFalse(self.files['two'] in suite.stable_tests)
+        self.assertFalse(self.files['one'] in suite.stable_tests)
+        self.assertFalse(self.files['two'] in suite.unstable_tests)
         self.assertFalse(self.files['four'] in suite.tests)
         self.assertTrue(self.files['five'] in suite.tests)
 
@@ -269,10 +430,10 @@ class SuiteTest(mox.MoxTestBase):
 
         self.assertTrue(self.files['one'] in suite.tests)
         self.assertTrue(self.files['two'] in suite.tests)
-        self.assertTrue(self.files['one'] in suite.unstable_tests())
-        self.assertTrue(self.files['two'] in suite.stable_tests())
-        self.assertFalse(self.files['one'] in suite.stable_tests())
-        self.assertFalse(self.files['two'] in suite.unstable_tests())
+        self.assertTrue(self.files['one'] in suite.unstable_tests)
+        self.assertTrue(self.files['two'] in suite.stable_tests)
+        self.assertFalse(self.files['one'] in suite.stable_tests)
+        self.assertFalse(self.files['two'] in suite.unstable_tests)
         # Sanity check.
         self.assertFalse(self.files['four'] in suite.tests)
 
@@ -382,9 +543,18 @@ class SuiteTest(mox.MoxTestBase):
 
     def testScheduleStableTests(self):
         """Should schedule only stable tests with the AFE."""
+        # Since test data_one is experimental, it will be skip.
+        name_list = ['name-data_two', 'name-data_three',
+                     'name-data_four', 'name-data_five', 'name-data_six',
+                     'name-data_seven']
+        keyval_dict = {constants.SCHEDULED_TEST_COUNT_KEY: 6,
+                       constants.SCHEDULED_TEST_NAMES_KEY: repr(name_list)}
+
         self.mock_control_file_parsing()
         recorder = self.mox.CreateMock(base_job.base_job)
         self.expect_job_scheduling(recorder, add_experimental=False)
+        self.mox.StubOutWithMock(utils, 'write_keyval')
+        utils.write_keyval(None, keyval_dict)
 
         self.mox.ReplayAll()
         suite = Suite.create_from_name(self._TAG, self._BUILDS, self._BOARD,
@@ -395,10 +565,19 @@ class SuiteTest(mox.MoxTestBase):
 
     def testScheduleStableTestsIgnoreDeps(self):
         """Should schedule only stable tests with the AFE."""
+        # Since test data_one is experimental, it will be skip.
+        name_list = ['name-data_two', 'name-data_three',
+                     'name-data_four', 'name-data_five', 'name-data_six',
+                     'name-data_seven']
+        keyval_dict = {constants.SCHEDULED_TEST_COUNT_KEY: 6,
+                       constants.SCHEDULED_TEST_NAMES_KEY: repr(name_list)}
+
         self.mock_control_file_parsing()
         recorder = self.mox.CreateMock(base_job.base_job)
         self.expect_job_scheduling(recorder, add_experimental=False,
                                    ignore_deps=True)
+        self.mox.StubOutWithMock(utils, 'write_keyval')
+        utils.write_keyval(None, keyval_dict)
 
         self.mox.ReplayAll()
         suite = Suite.create_from_name(self._TAG, self._BUILDS, self._BOARD,
@@ -410,9 +589,17 @@ class SuiteTest(mox.MoxTestBase):
 
     def testScheduleUnrunnableTestsTESTNA(self):
         """Tests which fail to schedule should be TEST_NA."""
+        # Since all tests will be fail to schedule, the num of scheduled tests
+        # will be zero.
+        name_list = []
+        keyval_dict = {constants.SCHEDULED_TEST_COUNT_KEY: 0,
+                       constants.SCHEDULED_TEST_NAMES_KEY: repr(name_list)}
+
         self.mock_control_file_parsing()
         recorder = self.mox.CreateMock(base_job.base_job)
         self.expect_job_scheduling(recorder, add_experimental=True, raises=True)
+        self.mox.StubOutWithMock(utils, 'write_keyval')
+        utils.write_keyval(None, keyval_dict)
         self.mox.ReplayAll()
         suite = Suite.create_from_name(self._TAG, self._BUILDS, self._BOARD,
                                        self.devserver,
@@ -422,9 +609,17 @@ class SuiteTest(mox.MoxTestBase):
 
     def testRetryMapAfterScheduling(self):
         """Test job-test and test-job mapping are correctly updated."""
+        name_list = ['name-data_two', 'name-data_three',
+                     'name-data_four', 'name-data_five', 'name-data_six',
+                     'name-data_seven', 'experimental_name-data_one']
+        keyval_dict = {constants.SCHEDULED_TEST_COUNT_KEY: 7,
+                       constants.SCHEDULED_TEST_NAMES_KEY: repr(name_list)}
+
         self.mock_control_file_parsing()
         recorder = self.mox.CreateMock(base_job.base_job)
         self.expect_job_scheduling(recorder, add_experimental=True)
+        self.mox.StubOutWithMock(utils, 'write_keyval')
+        utils.write_keyval(None, keyval_dict)
         self.mox.ReplayAll()
         suite = Suite.create_from_name(self._TAG, self._BUILDS, self._BOARD,
                                        self.devserver,
@@ -447,9 +642,18 @@ class SuiteTest(mox.MoxTestBase):
 
 
     def testSuiteMaxRetries(self):
+        """Test suite max retries."""
+        name_list = ['name-data_two', 'name-data_three',
+                     'name-data_four', 'name-data_five', 'name-data_six',
+                     'name-data_seven', 'experimental_name-data_one']
+        keyval_dict = {constants.SCHEDULED_TEST_COUNT_KEY: 7,
+                       constants.SCHEDULED_TEST_NAMES_KEY: repr(name_list)}
+
         self.mock_control_file_parsing()
         recorder = self.mox.CreateMock(base_job.base_job)
         self.expect_job_scheduling(recorder, add_experimental=True)
+        self.mox.StubOutWithMock(utils, 'write_keyval')
+        utils.write_keyval(None, keyval_dict)
         self.mox.ReplayAll()
         suite = Suite.create_from_name(self._TAG, self._BUILDS, self._BOARD,
                                        self.devserver,
@@ -465,10 +669,19 @@ class SuiteTest(mox.MoxTestBase):
 
     def testSuiteDependencies(self):
         """Should add suite dependencies to tests scheduled."""
+        # Since add_experimental set to False, will skip experimental data_one.
+        name_list = ['name-data_two', 'name-data_three',
+                     'name-data_four', 'name-data_five', 'name-data_six',
+                     'name-data_seven']
+        keyval_dict = {constants.SCHEDULED_TEST_COUNT_KEY: 6,
+                       constants.SCHEDULED_TEST_NAMES_KEY: repr(name_list)}
+
         self.mock_control_file_parsing()
         recorder = self.mox.CreateMock(base_job.base_job)
         self.expect_job_scheduling(recorder, add_experimental=False,
                                    suite_deps=['extra'])
+        self.mox.StubOutWithMock(utils, 'write_keyval')
+        utils.write_keyval(None, keyval_dict)
 
         self.mox.ReplayAll()
         suite = Suite.create_from_name(self._TAG, self._BUILDS, self._BOARD,

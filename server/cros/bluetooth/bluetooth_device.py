@@ -546,13 +546,17 @@ class BluetoothDevice(object):
         self._proxy.btmon_stop()
 
 
-    def btmon_get(self):
+    def btmon_get(self, search_str='', start_str=''):
         """Get btmon output contents.
+
+        @param search_str: only lines with search_str would be kept.
+        @param start_str: all lines before the occurrence of start_str would be
+                filtered.
 
         @returns: the recorded btmon output.
 
         """
-        return self._proxy.btmon_get()
+        return self._proxy.btmon_get(search_str, start_str)
 
 
     def btmon_find(self, pattern_str):
@@ -580,6 +584,17 @@ class BluetoothDevice(object):
 
         """
         return self._proxy.register_advertisement(advertisement_data)
+
+
+    def unregister_advertisement(self, advertisement_data):
+        """Unregister an advertisement.
+
+        @param advertisement_data: a dict of the advertisement to unregister.
+
+        @returns: True on success. False otherwise.
+
+        """
+        return self._proxy.unregister_advertisement(advertisement_data)
 
 
     def set_advertising_intervals(self, min_adv_interval_ms,

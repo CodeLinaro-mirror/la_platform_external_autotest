@@ -260,7 +260,8 @@ class ServoHost(ssh_host.SSHHost):
 
     def run(self, command, timeout=3600, ignore_status=False,
             stdout_tee=utils.TEE_TO_LOGS, stderr_tee=utils.TEE_TO_LOGS,
-            connect_timeout=30, options='', stdin=None, verbose=True, args=()):
+            connect_timeout=30, ssh_failure_retry_ok=False,
+            options='', stdin=None, verbose=True, args=()):
         """Run a command on the servo host.
 
         Extends method `run` in SSHHost. If the servo host is a remote device,
@@ -279,6 +280,9 @@ class ServoHost(ssh_host.SSHHost):
                                 Ignored if host is 'localhost'.
         @param options: String with additional ssh command options
                         Ignored if host is 'localhost'.
+        @param ssh_failure_retry_ok: when True and ssh connection failure is
+                                     suspected, OK to retry command (but not
+                                     compulsory, and likely not needed here)
         @param stdin: Stdin to pass (a string) to the executed command.
         @param verbose: Log the commands.
         @param args: Sequence of strings to pass as arguments to command by
@@ -539,10 +543,14 @@ class ServoHost(ssh_host.SSHHost):
                          self.hostname)
             return
 
-        target_build = afe_utils.get_stable_cros_version(self.get_board())
+        target_build = afe_utils.get_stable_cros_image_name(self.get_board())
         target_build_number = server_site_utils.ParseBuildName(
                 target_build)[3]
-        ds = dev_server.ImageServer.resolve(self.hostname)
+        # For servo image staging, we want it as more widely distributed as
+        # possible, so that devservers' load can be evenly distributed. So use
+        # hostname instead of target_build as hash.
+        ds = dev_server.ImageServer.resolve(self.hostname,
+                                            hostname=self.hostname)
         url = ds.get_update_url(target_build)
 
         updater = autoupdater.ChromiumOSUpdater(update_url=url, host=self)

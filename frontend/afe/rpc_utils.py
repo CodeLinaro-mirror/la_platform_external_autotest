@@ -19,6 +19,7 @@ from autotest_lib.frontend.afe import models, model_logic
 from autotest_lib.client.common_lib import control_data, error
 from autotest_lib.client.common_lib import global_config, priorities
 from autotest_lib.client.common_lib import time_utils
+from autotest_lib.client.common_lib.cros import dev_server
 # TODO(akeshet): Replace with monarch once we know how to instrument rpc server
 # with ts_mon.
 from autotest_lib.client.common_lib.cros.graphite import autotest_stats
@@ -1301,53 +1302,58 @@ def route_rpc_to_master(func):
 
     @returns: A function replacing the RPC func.
     """
+    argspec = inspect.getargspec(func)
+    if argspec.varargs is not None:
+        raise Exception('RPC function must not have *args.')
+
     @wraps(func)
     def replacement(*args, **kwargs):
+        """We need special handling when decorating an RPC that can be called
+        directly using positional arguments.
+
+        One example is rpc_interface.create_job().
+        rpc_interface.create_job_page_handler() calls the function using both
+        positional and keyword arguments.  Since frontend.RpcClient.run()
+        takes only keyword arguments for an RPC, positional arguments of the
+        RPC function need to be transformed into keyword arguments.
         """
-        We need a special care when decorating an RPC that can be called
-        directly using positional arguments. One example is
-        rpc_interface.create_job().
-        rpc_interface.create_job_page_handler() calls the function using
-        positional and keyword arguments.
-        Since frontend.RpcClient.run() takes only keyword arguments for
-        an RPC, positional arguments of the RPC function need to be
-        transformed to key-value pair (dictionary type).
-
-        inspect.getcallargs() is a useful utility to achieve the goal,
-        however, we need an additional effort when an RPC function has
-        **kwargs argument.
-        Let's say we have a following form of RPC function.
-
-        def rpcfunc(a, b, **kwargs)
-
-        When we call the function like "rpcfunc(1, 2, id=3, name='mk')",
-        inspect.getcallargs() returns a dictionary like below.
-
-        {'a':1, 'b':2, 'kwargs': {'id':3, 'name':'mk'}}
-
-        This is an incorrect form of arguments to pass to the rpc function.
-        Instead, the dictionary should be like this.
-
-        {'a':1, 'b':2, 'id':3, 'name':'mk'}
-        """
-        argspec = inspect.getargspec(func)
-        if argspec.varargs is not None:
-            raise Exception('RPC function must not have *args.')
-        funcargs = inspect.getcallargs(func, *args, **kwargs)
-        kwargs = dict()
-        for k, v in funcargs.iteritems():
-            if argspec.keywords and k == argspec.keywords:
-                kwargs.update(v)
-            else:
-                kwargs[k] = v
-
+        kwargs = _convert_to_kwargs_only(func, args, kwargs)
         if server_utils.is_shard():
             afe = frontend_wrappers.RetryingAFE(
                     server=server_utils.get_global_afe_hostname(),
                     user=thread_local.get_user())
             return afe.run(func.func_name, **kwargs)
         return func(**kwargs)
+
     return replacement
+
+
+def _convert_to_kwargs_only(func, args, kwargs):
+    """Convert a function call's arguments to a kwargs dict.
+
+    This is best illustrated with an example.  Given:
+
+    def foo(a, b, **kwargs):
+        pass
+    _to_kwargs(foo, (1, 2), {'c': 3})  # corresponding to foo(1, 2, c=3)
+
+        foo(**kwargs)
+
+    @param func: function whose signature to use
+    @param args: positional arguments of call
+    @param kwargs: keyword arguments of call
+
+    @returns: kwargs dict
+    """
+    argspec = inspect.getargspec(func)
+    # callargs looks like {'a': 1, 'b': 2, 'kwargs': {'c': 3}}
+    callargs = inspect.getcallargs(func, *args, **kwargs)
+    if argspec.keywords is None:
+        kwargs = {}
+    else:
+        kwargs = callargs.pop(argspec.keywords)
+    kwargs.update(callargs)
+    return kwargs
 
 
 def get_sample_dut(board, pool):
@@ -1361,7 +1367,7 @@ def get_sample_dut(board, pool):
 
     @return: Name of a dut with the given board and pool.
     """
-    if not board or not pool:
+    if not (dev_server.PREFER_LOCAL_DEVSERVER and pool and board):
         return None
 
     hosts = get_host_query(

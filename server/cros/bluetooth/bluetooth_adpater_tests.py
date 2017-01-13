@@ -6,6 +6,7 @@
 
 import functools
 import logging
+import re
 import time
 
 from autotest_lib.client.bin import utils
@@ -329,6 +330,26 @@ def _test_retry_and_log(test_method_or_retry_flag):
         return decorator
 
 
+def test_case_log(method):
+    """A decorator for test case methods.
+
+    The main purpose of this decorator is to display the test case name
+    in the test log which looks like
+
+        <... test_case_RA3_CD_SI200_CD_PC_CD_UA3 ...>
+
+    @param method: the test case method to decorate.
+
+    @returns: a wrapper function of the decorated method.
+
+    """
+    @functools.wraps(method)
+    def wrapper(instance, *args, **kwargs):
+        logging.info('\n<... %s ...>', method.__name__)
+        method(instance, *args, **kwargs)
+    return wrapper
+
+
 class BluetoothAdapterTests(test.test):
     """Server side bluetooth adapter tests.
 
@@ -360,6 +381,12 @@ class BluetoothAdapterTests(test.test):
     DAFAULT_MIN_ADVERTISEMENT_INTERVAL_MS = 1280
     DAFAULT_MAX_ADVERTISEMENT_INTERVAL_MS = 1280
     ADVERTISING_INTERVAL_UNIT = 0.625
+
+    # Error messages about advertising dbus methods.
+    ERROR_MAX_ADVERTISEMENTS = (
+            'org.bluez.Error.Failed: Maximum advertisements reached')
+    ERROR_INVALID_ADVERTISING_INTERVALS = (
+            'org.bluez.Error.InvalidArguments: Invalid arguments')
 
     # Supported profiles by chrome os.
     SUPPORTED_UUIDS = {
@@ -987,16 +1014,19 @@ class BluetoothAdapterTests(test.test):
         return discovered_class_of_device == expected_class_of_device
 
 
-    def _get_btmon_log(self, method, *args, **kwargs):
+    def _get_btmon_log(self, method, logging_timespan=1):
         """Capture the btmon log when executing the specified method.
 
         @param method: the method to capture log.
+                       The method would be executed only when it is not None.
+                       This allows us to simply capture btmon log without
+                       executing any command.
+        @param logging_timespan: capture btmon log for logging_timespan seconds.
 
         """
         self.bluetooth_le_facade.btmon_start()
-        time.sleep(1)
-        method(*args, **kwargs)
-        time.sleep(1)
+        self.advertising_msg = method() if method else ''
+        time.sleep(logging_timespan)
         self.bluetooth_le_facade.btmon_stop()
 
 
@@ -1010,6 +1040,150 @@ class BluetoothAdapterTests(test.test):
         """
         return adv_interval_ms / self.ADVERTISING_INTERVAL_UNIT
 
+
+    def compute_duration(self, max_adv_interval_ms):
+        """Compute duration from max_adv_interval_ms.
+
+        Advertising duration is calculated approximately as
+            duration = max_adv_interval_ms / 1000.0 * 1.1
+
+        @param max_adv_interval_ms: max advertising interval in milliseconds.
+
+        @returns: duration in seconds.
+
+        """
+        return max_adv_interval_ms / 1000.0 * 1.1
+
+
+    def compute_logging_timespan(self, max_adv_interval_ms):
+        """Compute the logging timespan from max_adv_interval_ms.
+
+        The logging timespan is the time needed to record btmon log.
+
+        @param max_adv_interval_ms: max advertising interval in milliseconds.
+
+        @returns: logging_timespan in seconds.
+
+        """
+        duration = self.compute_duration(max_adv_interval_ms)
+        logging_timespan = max(self.count_advertisements * duration, 1)
+        return logging_timespan
+
+
+    @_test_retry_and_log(False)
+    def test_check_duration_and_intervals(self, min_adv_interval_ms,
+                                          max_adv_interval_ms,
+                                          number_advertisements):
+        """Verify that every advertisements are scheduled according to the
+        duration and intervals.
+
+        An advertisement would be scheduled at the time span of
+             duration * number_advertisements
+
+        @param min_adv_interval_ms: min advertising interval in milliseconds.
+        @param max_adv_interval_ms: max advertising interval in milliseconds.
+        @param number_advertisements: the number of existing advertisements
+
+        @returns: True if all advertisements are scheduled based on the
+                duration and intervals.
+
+        """
+
+
+        def within_tolerance(a, b, ratio=0.1):
+            return abs(a - b) / abs(a) <= ratio
+
+
+        start_str = 'Set Advertising Intervals:'
+        search_strings = ['HCI Command: LE Set Advertising Data', 'Company']
+        search_str = '|'.join(search_strings)
+
+        contents = self.bluetooth_le_facade.btmon_get(search_str=search_str,
+                                                      start_str=start_str)
+
+        # Company string looks like
+        #   Company: not assigned (65283)
+        company_pattern = re.compile('Company:.*\((\d*)\)')
+
+        # The string with timestamp looks like
+        #   < HCI Command: LE Set Advertising Data (0x08|0x0008) [hci0] 3.799236
+        set_adv_time_str = 'LE Set Advertising Data.*\[hci\d\].*(\d+\.\d+)'
+        set_adv_time_pattern = re.compile(set_adv_time_str)
+
+        adv_timestamps = {}
+        timestamp = None
+        manufacturer_id = None
+        for line in contents:
+            result = set_adv_time_pattern.search(line)
+            if result:
+                timestamp = float(result.group(1))
+
+            result = company_pattern.search(line)
+            if result:
+                manufacturer_id = '0x%04x' % int(result.group(1))
+
+            if timestamp and manufacturer_id:
+                if manufacturer_id not in adv_timestamps:
+                    adv_timestamps[manufacturer_id] = []
+                adv_timestamps[manufacturer_id].append(timestamp)
+                timestamp = None
+                manufacturer_id = None
+
+        duration = self.compute_duration(max_adv_interval_ms)
+        expected_timespan = duration * number_advertisements
+
+        check_duration = True
+        for manufacturer_id, values in adv_timestamps.iteritems():
+            logging.debug('manufacturer_id %s: %s', manufacturer_id, values)
+            timespans = [values[i] - values[i - 1]
+                         for i in xrange(1, len(values))]
+            errors = [timespans[i] for i in xrange(len(timespans))
+                      if not within_tolerance(expected_timespan, timespans[i])]
+            logging.debug('timespans: %s', timespans)
+            logging.debug('errors: %s', errors)
+            if bool(errors):
+                check_duration = False
+
+        # Verify that the advertising intervals are also correct.
+        min_adv_interval_ms_found, max_adv_interval_ms_found = (
+                self._verify_advertising_intervals(min_adv_interval_ms,
+                                                   max_adv_interval_ms))
+
+        self.results = {
+                'check_duration': check_duration,
+                'max_adv_interval_ms_found': max_adv_interval_ms_found,
+                'max_adv_interval_ms_found': max_adv_interval_ms_found,
+        }
+        return all(self.results.values())
+
+
+    def _get_min_max_intervals_strings(self, min_adv_interval_ms,
+                                       max_adv_interval_ms):
+        """Get the min and max advertising intervals strings shown in btmon.
+
+        Advertising intervals shown in the btmon log look like
+            Min advertising interval: 1280.000 msec (0x0800)
+            Max advertising interval: 1280.000 msec (0x0800)
+
+        @param min_adv_interval_ms: min advertising interval in milliseconds.
+        @param max_adv_interval_ms: max advertising interval in milliseconds.
+
+        @returns: the min and max intervals strings.
+
+        """
+        min_str = ('Min advertising interval: %.3f msec (0x%04x)' %
+                   (min_adv_interval_ms,
+                    min_adv_interval_ms / self.ADVERTISING_INTERVAL_UNIT))
+        logging.debug('min_adv_interval_ms: %s', min_str)
+
+        max_str = ('Max advertising interval: %.3f msec (0x%04x)' %
+                   (max_adv_interval_ms,
+                    max_adv_interval_ms / self.ADVERTISING_INTERVAL_UNIT))
+        logging.debug('max_adv_interval_ms: %s', max_str)
+
+        return (min_str, max_str)
+
+
     def _verify_advertising_intervals(self, min_adv_interval_ms,
                                       max_adv_interval_ms):
         """Verify min and max advertising intervals.
@@ -1018,26 +1192,18 @@ class BluetoothAdapterTests(test.test):
             Min advertising interval: 1280.000 msec (0x0800)
             Max advertising interval: 1280.000 msec (0x0800)
 
-        @param min_adv_interval_ms: the min advertising interval
-            in milli-second.
-        @param max_adv_interval_ms: the max advertising interval
-            in milli-second.
+        @param min_adv_interval_ms: min advertising interval in milliseconds.
+        @param max_adv_interval_ms: max advertising interval in milliseconds.
 
         @returns: a tuple of (True, True) if both min and max advertising
             intervals could be found. Otherwise, the corresponding element
             in the tuple if False.
 
         """
-        min_str = ('Min advertising interval: %.3f msec (0x%04x)' %
-                   (min_adv_interval_ms,
-                    min_adv_interval_ms / self.ADVERTISING_INTERVAL_UNIT))
-        logging.debug('min_adv_interval_ms: %s', min_str)
-        min_adv_interval_ms_found = self.bluetooth_le_facade.btmon_find(min_str)
+        min_str, max_str = self._get_min_max_intervals_strings(
+                min_adv_interval_ms, max_adv_interval_ms)
 
-        max_str = ('Max advertising interval: %.3f msec (0x%04x)' %
-                   (max_adv_interval_ms,
-                    max_adv_interval_ms / self.ADVERTISING_INTERVAL_UNIT))
-        logging.debug('max_adv_interval_ms: %s', max_str)
+        min_adv_interval_ms_found = self.bluetooth_le_facade.btmon_find(min_str)
         max_adv_interval_ms_found = self.bluetooth_le_facade.btmon_find(max_str)
 
         return min_adv_interval_ms_found, max_adv_interval_ms_found
@@ -1046,11 +1212,11 @@ class BluetoothAdapterTests(test.test):
     @_test_retry_and_log(False)
     def test_register_advertisement(self, advertisement_data, instance_id,
                                     min_adv_interval_ms, max_adv_interval_ms):
-        """Test that an advertisement could be registered correctly.
+        """Verify that an advertisement is registered correctly.
 
         This test verifies the following data:
         - advertisement added
-        - manufactureri data
+        - manufacturer data
         - service UUIDs
         - service data
         - advertising intervals
@@ -1058,15 +1224,22 @@ class BluetoothAdapterTests(test.test):
 
         @param advertisement_data: the data of an advertisement to register.
         @param instance_id: the instance id which starts at 1.
-        @param min_adv_interval_ms: min_adv_interval in milli-second.
-        @param max_adv_interval_ms: max_adv_interval in milli-second.
+        @param min_adv_interval_ms: min_adv_interval in milliseconds.
+        @param max_adv_interval_ms: max_adv_interval in milliseconds.
 
         @returns: True if the advertisement is registered correctly.
                   False otherwise.
 
         """
-        self._get_btmon_log(self.bluetooth_le_facade.register_advertisement,
-                            advertisement_data)
+        # When registering a new advertisement, it is possible that another
+        # instance is advertising. It may need to wait for all other
+        # advertisements to complete advertising once.
+        self.count_advertisements += 1
+        logging_timespan = self.compute_logging_timespan(max_adv_interval_ms)
+        self._get_btmon_log(
+                lambda: self.bluetooth_le_facade.register_advertisement(
+                        advertisement_data),
+                logging_timespan=logging_timespan)
 
         # Verify that a new advertisement is added.
         advertisement_added = self.bluetooth_le_facade.btmon_find(
@@ -1077,6 +1250,8 @@ class BluetoothAdapterTests(test.test):
         for manufacturer_id in manufacturer_data:
             # The 'not assigned' text below means the manufacturer id
             # is not actually assigned to any real manufacturer.
+            # For real 16-bit manufacturer UUIDs, refer to
+            #  https://www.bluetooth.com/specifications/assigned-numbers/16-bit-UUIDs-for-Members
             manufacturer_data_found = self.bluetooth_le_facade.btmon_find(
                     'Company: not assigned (%d)' % int(manufacturer_id, 16))
 
@@ -1086,6 +1261,8 @@ class BluetoothAdapterTests(test.test):
             # Service UUIDs looks like ['0x180D', '0x180F']
             #   Heart Rate (0x180D)
             #   Battery Service (0x180F)
+            # For actual 16-bit service UUIDs, refer to
+            #   https://www.bluetooth.com/specifications/gatt/services
             if not self.bluetooth_le_facade.btmon_find('0x%s' % uuid):
                 service_uuids_found = False
                 break
@@ -1124,9 +1301,121 @@ class BluetoothAdapterTests(test.test):
 
 
     @_test_retry_and_log(False)
+    def test_fail_to_register_advertisement(self, advertisement_data,
+                                            min_adv_interval_ms,
+                                            max_adv_interval_ms):
+        """Verify that failure is incurred when max advertisements are reached.
+
+        This test verifies that a registration failure is incurred when
+        max advertisements are reached. The error message looks like:
+
+            org.bluez.Error.Failed: Maximum advertisements reached
+
+        @param advertisement_data: the advertisement to register.
+        @param min_adv_interval_ms: min_adv_interval in milliseconds.
+        @param max_adv_interval_ms: max_adv_interval in milliseconds.
+
+        @returns: True if the error message is received correctly.
+                  False otherwise.
+
+        """
+        logging_timespan = self.compute_logging_timespan(max_adv_interval_ms)
+        self._get_btmon_log(
+                lambda: self.bluetooth_le_facade.register_advertisement(
+                        advertisement_data),
+                logging_timespan=logging_timespan)
+
+        # Verify that max advertisements are reached.
+        max_advertisements_error = (
+                self.ERROR_MAX_ADVERTISEMENTS in self.advertising_msg)
+
+        # Verify that no new advertisement is added.
+        advertisement_not_added = not self.bluetooth_le_facade.btmon_find(
+                'Advertising Added:')
+
+        # Verify that the advertising intervals are correct.
+        min_adv_interval_ms_found, max_adv_interval_ms_found = (
+                self._verify_advertising_intervals(min_adv_interval_ms,
+                                                   max_adv_interval_ms))
+
+        # Verify advertising remains enabled.
+        advertising_enabled = self.bluetooth_le_facade.btmon_find(
+                'Advertising: Enabled (0x01)')
+
+        self.results = {
+                'max_advertisements_error': max_advertisements_error,
+                'advertisement_not_added': advertisement_not_added,
+                'min_adv_interval_ms_found': min_adv_interval_ms_found,
+                'max_adv_interval_ms_found': max_adv_interval_ms_found,
+                'advertising_enabled': advertising_enabled,
+        }
+        return all(self.results.values())
+
+
+    @_test_retry_and_log(False)
+    def test_unregister_advertisement(self, advertisement_data, instance_id,
+                                      min_adv_interval_ms, max_adv_interval_ms,
+                                      advertising_disabled):
+        """Verify that an advertisement is unregistered correctly.
+
+        This test verifies the following data:
+        - advertisement removed
+        - advertising status: enabled if there are advertisements left;
+                              disabled otherwise.
+
+        @param advertisement_data: the data of an advertisement to unregister.
+        @param instance_id: the instance id of the advertisement to remove.
+        @param min_adv_interval_ms: min_adv_interval in milliseconds.
+        @param max_adv_interval_ms: max_adv_interval in milliseconds.
+        @param advertising_disabled: is advertising disabled? This happens
+                only when all advertisements are removed.
+
+        @returns: True if the advertisement is unregistered correctly.
+                  False otherwise.
+
+        """
+        self.count_advertisements -= 1
+        self._get_btmon_log(
+                lambda: self.bluetooth_le_facade.unregister_advertisement(
+                        advertisement_data))
+
+        # Verify that the advertisement is removed.
+        advertisement_removed = self.bluetooth_le_facade.btmon_find(
+                'Advertising Removed: %d' % instance_id)
+
+        # If advertising_disabled is True, there should be no log like
+        #       'Advertising: Enabled (0x01)'
+        # If advertising_disabled is False, there should be log like
+        #       'Advertising: Enabled (0x01)'
+
+        # Only need to check advertising status when the last advertisement
+        # is removed. For any other advertisements prior to the last one,
+        # we may or may not observe 'Advertising: Enabled (0x01)' message.
+        # Hence, the test would become flaky if we insist to see that message.
+        # A possible workaround is to sleep for a while and then check the
+        # message. The drawback is that we may need to wait up to 10 seconds
+        # if the advertising duration and intervals are long.
+        # In a test case, we always run test_check_duration_and_intervals()
+        # to check if advertising duration and intervals are correct after
+        # un-registering one or all advertisements, it is safe to do so.
+        advertising_enabled_found = self.bluetooth_le_facade.btmon_find(
+                'Advertising: Enabled (0x01)')
+        advertising_disabled_found = self.bluetooth_le_facade.btmon_find(
+                'Advertising: Disabled (0x00)')
+        advertising_status_correct = not advertising_disabled or (
+                advertising_disabled_found and not advertising_enabled_found)
+
+        self.results = {
+                'advertisement_removed': advertisement_removed,
+                'advertising_status_correct': advertising_status_correct,
+        }
+        return all(self.results.values())
+
+
+    @_test_retry_and_log(False)
     def test_set_advertising_intervals(self, min_adv_interval_ms,
                                        max_adv_interval_ms):
-        """Test that new advertising intervals could be set correctly.
+        """Verify that new advertising intervals are set correctly.
 
         Note that setting advertising intervals does not enable/disable
         advertising. Hence, there is no need to check the advertising
@@ -1139,8 +1428,9 @@ class BluetoothAdapterTests(test.test):
                   False otherwise.
 
         """
-        self._get_btmon_log(self.bluetooth_le_facade.set_advertising_intervals,
-                            min_adv_interval_ms, max_adv_interval_ms)
+        self._get_btmon_log(
+                lambda: self.bluetooth_le_facade.set_advertising_intervals(
+                        min_adv_interval_ms, max_adv_interval_ms))
 
         # Verify the new advertising intervals.
         # With intervals of 200 ms and 200 ms, the log looks like
@@ -1155,8 +1445,108 @@ class BluetoothAdapterTests(test.test):
 
 
     @_test_retry_and_log(False)
-    def test_reset_advertising(self, instance_ids):
-        """Test that advertising is reset correctly.
+    def test_fail_to_set_advertising_intervals(
+            self, invalid_min_adv_interval_ms, invalid_max_adv_interval_ms,
+            orig_min_adv_interval_ms, orig_max_adv_interval_ms):
+        """Verify that setting invalid advertising intervals results in error.
+
+        If invalid min/max advertising intervals are given, it would incur
+        the error: 'org.bluez.Error.InvalidArguments: Invalid arguments'.
+        Note that valid advertising intervals fall between 20 ms and 10,240 ms.
+
+        @param invalid_min_adv_interval_ms: the invalid min advertising interval
+                in ms.
+        @param invalid_max_adv_interval_ms: the invalid max advertising interval
+                in ms.
+        @param orig_min_adv_interval_ms: the original min advertising interval
+                in ms.
+        @param orig_max_adv_interval_ms: the original max advertising interval
+                in ms.
+
+        @returns: True if it fails to set invalid advertising intervals.
+                  False otherwise.
+
+        """
+        self._get_btmon_log(
+                lambda: self.bluetooth_le_facade.set_advertising_intervals(
+                        invalid_min_adv_interval_ms,
+                        invalid_max_adv_interval_ms))
+
+        # Verify that the invalid error is observed in the dbus error callback
+        # message.
+        invalid_intervals_error = (self.ERROR_INVALID_ADVERTISING_INTERVALS in
+                                   self.advertising_msg)
+
+        # Verify that the min/max advertising intervals remain the same
+        # after setting the invalid advertising intervals.
+        #
+        # In btmon log, we would see the following message first.
+        #    bluetoothd: Set Advertising Intervals: 0x0010, 0x0010
+        # And then, we should check if "Min advertising interval" and
+        # "Max advertising interval" remain the same.
+        start_str = 'bluetoothd: Set Advertising Intervals: 0x%04x, 0x%04x' % (
+                self.convert_to_adv_jiffies(invalid_min_adv_interval_ms),
+                self.convert_to_adv_jiffies(invalid_max_adv_interval_ms))
+
+        search_strings = ['Min advertising interval:',
+                          'Max advertising interval:']
+        search_str = '|'.join(search_strings)
+
+        contents = self.bluetooth_le_facade.btmon_get(search_str=search_str,
+                                                      start_str=start_str)
+
+        # The min/max advertising intervals of all advertisements should remain
+        # the same as the previous valid ones.
+        min_max_str = '[Min|Max] advertising interval: (\d*\.\d*) msec'
+        min_max_pattern = re.compile(min_max_str)
+        correct_orig_min_adv_interval = True
+        correct_orig_max_adv_interval = True
+        for line in contents:
+            result = min_max_pattern.search(line)
+            if result:
+                interval = float(result.group(1))
+                if 'Min' in line and interval != orig_min_adv_interval_ms:
+                    correct_orig_min_adv_interval = False
+                elif 'Max' in line and interval != orig_max_adv_interval_ms:
+                    correct_orig_max_adv_interval = False
+
+        self.results = {
+                'invalid_intervals_error': invalid_intervals_error,
+                'correct_orig_min_adv_interval': correct_orig_min_adv_interval,
+                'correct_orig_max_adv_interval': correct_orig_max_adv_interval}
+
+        return all(self.results.values())
+
+
+    @_test_retry_and_log(False)
+    def test_check_advertising_intervals(self, min_adv_interval_ms,
+                                         max_adv_interval_ms):
+        """Verify that the advertising intervals are as expected.
+
+        @param min_adv_interval_ms: the min advertising interval in ms.
+        @param max_adv_interval_ms: the max advertising interval in ms.
+
+        @returns: True if the advertising intervals are correct.
+                  False otherwise.
+
+        """
+        self._get_btmon_log(None)
+
+        # Verify that the advertising intervals are correct.
+        min_adv_interval_ms_found, max_adv_interval_ms_found = (
+                self._verify_advertising_intervals(min_adv_interval_ms,
+                                                   max_adv_interval_ms))
+
+        self.results = {
+                'min_adv_interval_ms_found': min_adv_interval_ms_found,
+                'max_adv_interval_ms_found': max_adv_interval_ms_found,
+        }
+        return all(self.results.values())
+
+
+    @_test_retry_and_log(False)
+    def test_reset_advertising(self, instance_ids=[]):
+        """Verify that advertising is reset correctly.
 
         Note that reset advertising would set advertising intervals to
         the default values. However, we would not be able to observe
@@ -1164,13 +1554,22 @@ class BluetoothAdapterTests(test.test):
         Therefore, it is required that a test_register_advertisement()
         test is conducted after this test.
 
+        If instance_ids is [], all advertisements would still be removed
+        if there are any. However, no need to check 'Advertising Removed'
+        in btmon log since we may or may not be able to observe the message.
+        This feature is needed if this test is invoked as the first one in
+        a test case to reset advertising. In this situation, this test does
+        not know how many advertisements exist.
+
         @param instance_ids: the list of instance IDs that should be removed.
 
         @returns: True if advertising is reset correctly.
                   False otherwise.
 
         """
-        self._get_btmon_log(self.bluetooth_le_facade.reset_advertising)
+        self.count_advertisements = 0
+        self._get_btmon_log(
+                lambda: self.bluetooth_le_facade.reset_advertising())
 
         # Verify that every advertisement is removed. When an advertisement
         # with instance id 1 is removed, the log looks like
@@ -1185,12 +1584,21 @@ class BluetoothAdapterTests(test.test):
         else:
             advertisement_removed = True
 
+        # Verify that "Reset Advertising Intervals" command has been issued.
+        reset_advertising_intervals = self.bluetooth_le_facade.btmon_find(
+                'bluetoothd: Reset Advertising Intervals')
+
         # Verify the advertising is disabled.
-        advertising_disabled = self.bluetooth_le_facade.btmon_find(
+        advertising_disabled_observied = self.bluetooth_le_facade.btmon_find(
                 'Advertising: Disabled')
+        # If there are no existing advertisements, we may not observe
+        # 'Advertising: Disabled'.
+        advertising_disabled = (instance_ids == [] or
+                                advertising_disabled_observied)
 
         self.results = {
                 'advertisement_removed': advertisement_removed,
+                'reset_advertising_intervals': reset_advertising_intervals,
                 'advertising_disabled': advertising_disabled,
         }
         return all(self.results.values())
@@ -1211,6 +1619,8 @@ class BluetoothAdapterTests(test.test):
         for device_type in SUPPORTED_DEVICE_TYPES:
             self.devices[device_type] = None
 
+        # The count of registered advertisements.
+        self.count_advertisements = 0
 
     def run_once(self, *args, **kwargs):
         """This method should be implemented by children classes.

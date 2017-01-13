@@ -151,6 +151,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                 'btmon', stop_delay_secs=self.BTMON_STOP_DELAY_SECS)
 
         self.advertisements = []
+        self._adv_mainloop = gobject.MainLoop()
 
 
     @xmlrpc_server.dbus_safe(False)
@@ -1056,13 +1057,18 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         self.btmon.stop()
 
 
-    def btmon_get(self):
+    def btmon_get(self, search_str, start_str):
         """Get btmon output contents.
+
+        @param search_str: only lines with search_str would be kept.
+        @param start_str: all lines before the occurrence of start_str would be
+                filtered.
 
         @returns: the recorded btmon output.
 
         """
-        return self.btmon.get_contents()
+        return self.btmon.get_contents(search_str=search_str,
+                                       start_str=start_str)
 
 
     def btmon_find(self, pattern_str):
@@ -1086,33 +1092,35 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         @param error_handler: the error handler for the dbus method.
         @param *args: additional arguments for the dbus method.
 
-        @returns: True on success. False otherwise.
+        @returns: an empty string '' on success;
+                  None if there is no _advertising interface manager; and
+                  an error string if the dbus method fails.
 
         """
 
         def successful_cb():
             """Called when the dbus_method completed successfully."""
             reply_handler()
-            mainloop.quit()
+            self.advertising_cb_msg = ''
+            self._adv_mainloop.quit()
 
 
         def error_cb(error):
             """Called when the dbus_method failed."""
             error_handler(error)
-            mainloop.quit()
+            self.advertising_cb_msg = str(error)
+            self._adv_mainloop.quit()
 
 
         if not self._advertising:
-            return False
+            return None
 
-        mainloop = gobject.MainLoop()
-
-        # Call the RegisterAdvertisement dbus method.
+        # Call dbus_method with handlers.
         dbus_method(*args, reply_handler=successful_cb, error_handler=error_cb)
 
-        mainloop.run()
+        self._adv_mainloop.run()
 
-        return True
+        return self.advertising_cb_msg
 
 
     def register_advertisement(self, advertisement_data):
@@ -1138,6 +1146,47 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                     'register_advertisement: failed: %s', str(error)),
                 # other arguments
                 adv.get_path(), {})
+
+
+    def unregister_advertisement(self, advertisement_data):
+        """Unregister an advertisement.
+
+        Note that to unregister an advertisement, it is required to use
+        the same self._advertising interface manager. This is because
+        bluez only allows the same sender to invoke UnregisterAdvertisement
+        method. Hence, watch out that the bluetoothd is not restarted or
+        self.start_bluetoothd() is not executed between the time span that
+        an advertisement is registered and unregistered.
+
+        @param advertisement_data: a dict of the advertisements to unregister.
+
+        @returns: True on success. False otherwise.
+
+        """
+        path = advertisement_data.get('Path')
+        for index, adv in enumerate(self.advertisements):
+            if adv.get_path() == path:
+                break
+        else:
+            logging.error('Fail to find the advertisement under the path: %s',
+                          path)
+            return False
+
+        result = self.advertising_async_method(
+                self._advertising.UnregisterAdvertisement,
+                # reply handler
+                lambda: logging.info('unregister_advertisement: succeeded.'),
+                # error handler
+                lambda error: logging.error(
+                    'unregister_advertisement: failed: %s', str(error)),
+                # other arguments
+                adv.get_path())
+
+        # Call remove_from_connection() so that the same path could be reused.
+        adv.remove_from_connection()
+        del self.advertisements[index]
+
+        return result
 
 
     def set_advertising_intervals(self, min_adv_interval_ms,

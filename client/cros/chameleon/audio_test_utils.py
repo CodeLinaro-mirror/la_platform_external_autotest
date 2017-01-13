@@ -10,6 +10,8 @@
 import logging
 import multiprocessing
 import os
+import pprint
+import re
 import time
 from contextlib import contextmanager
 
@@ -235,6 +237,41 @@ def dump_cros_audio_logs(host, audio_facade, directory, suffix=''):
                   get_file_path('multimedia_xmlrpc_server.log'))
 
 
+def examine_audio_diagnostics(path):
+    """Examines audio diagnostic content.
+
+    @param path: Path to audio diagnostic file.
+
+    @raise: error.TestFail if there is unexpected result.
+
+    """
+    error_msgs = []
+    line_number = 1
+
+    underrun_pattern = re.compile('num_underruns: (\d*)')
+
+    with open(path) as f:
+        for line in f.readlines():
+
+            # Check for number of underruns.
+            search_result = underrun_pattern.search(line)
+            if search_result:
+                num_underruns = int(search_result.group(1))
+                if num_underruns != 0:
+                    error_msgs.append(
+                            'Found nonzero underrun at line %d: %s' % (
+                                    line_number, line))
+
+            # TODO(cychiang) add other check like maximum client reply delay.
+            line_number = line_number + 1
+
+    if error_msgs:
+        raise error.TestFail('Found issue in audio diganostics result : %s',
+                             '\n'.join(error_msgs))
+
+    logging.info('audio_diagnostic result looks fine')
+
+
 @contextmanager
 def monitor_no_nodes_changed(audio_facade, callback=None):
     """Context manager to monitor nodes changed signal on Cros device.
@@ -286,6 +323,11 @@ DEFAULT_TOLERANT_NOISE_LEVEL = 0.01
 # If relative error of two durations is less than 0.2,
 # they will be considered equivalent.
 DEFAULT_EQUIVALENT_THRESHOLD = 0.2
+
+# The frequency at lower than _DC_FREQ_THRESHOLD should have coefficient
+# smaller than _DC_COEFF_THRESHOLD.
+_DC_FREQ_THRESHOLD = 0.001
+_DC_COEFF_THRESHOLD = 0.01
 
 def get_second_peak_ratio(source_id, recorder_id, is_hsp=False):
     """Gets the second peak ratio suitable for use case.
@@ -420,6 +462,7 @@ def check_recorded_frequency(
                                         normalized_signal,
                                         data_format['rate'],
                                         dominant_frequency=dominant_frequency)
+            logging.debug('Quality measurement result:\n%s', pprint.pformat(result))
             if check_artifacts:
                 if len(result['artifacts']['noise_before_playback']) > 0:
                     errors.append(
@@ -507,16 +550,28 @@ def check_recorded_frequency(
         def should_be_ignored(frequency):
             """Checks if frequency is close to any frequency in ignore list.
 
+            The ignore list is harmonics of frequency to be ignored
+            (like power noise), plus harmonics of dominant frequencies,
+            plus DC.
+
             @param frequency: The frequency to be tested.
 
             @returns: True if the frequency should be ignored. False otherwise.
 
             """
-            for ignore_frequency in ignore_frequencies_harmonics + harmonics:
+            for ignore_frequency in (ignore_frequencies_harmonics + harmonics
+                                     + [0.0]):
                 if (abs(frequency - ignore_frequency) <
                     frequency_diff_threshold):
                     logging.debug('Ignore frequency: %s', frequency)
                     return True
+
+        # Checks DC is small enough.
+        for freq, coeff in spectral:
+            if freq < _DC_FREQ_THRESHOLD and coeff > _DC_COEFF_THRESHOLD:
+                errors.append(
+                        'Channel %d: Found large DC coefficient: '
+                        '(%f Hz, %f)' % (test_channel, freq, coeff))
 
         # Filter out the frequencies to be ignored.
         spectral = [x for x in spectral if not should_be_ignored(x[0])]

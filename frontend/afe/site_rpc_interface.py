@@ -52,7 +52,7 @@ def formatted_now():
     return datetime.datetime.now().strftime(time_utils.TIME_FMT)
 
 
-def _get_control_file_contents_by_name(build, ds, suite_name):
+def _get_control_file_by_build(build, ds, suite_name):
     """Return control file contents for |suite_name|.
 
     Query the dev server at |ds| for the control file |suite_name|, included
@@ -69,9 +69,9 @@ def _get_control_file_contents_by_name(build, ds, suite_name):
     @return the contents of the desired control file.
     """
     getter = control_file_getter.DevServerGetter.create(build, ds)
+    devserver_name = ds.get_server_name(ds.url())
     timer = autotest_stats.Timer('control_files.parse.%s.%s' %
-                                 (ds.get_server_name(ds.url()
-                                                     ).replace('.', '_'),
+                                 (devserver_name.replace('.', '_'),
                                   suite_name.rsplit('.')[-1]))
     # Get the control file for the suite.
     try:
@@ -79,10 +79,13 @@ def _get_control_file_contents_by_name(build, ds, suite_name):
             control_file_in = getter.get_control_file_contents_by_name(
                     suite_name)
     except error.CrosDynamicSuiteException as e:
-        raise type(e)("%s while testing %s." % (e, build))
+        raise type(e)('Failed to get control file for %s '
+                      '(devserver: %s) (error: %s)' %
+                      (build, devserver_name, e))
     if not control_file_in:
         raise error.ControlFileEmpty(
-                "Fetching %s returned no data." % suite_name)
+            "Fetching %s returned no data. (devserver: %s)" %
+            (suite_name, devserver_name))
     # Force control files to only contain ascii characters.
     try:
         control_file_in.encode('ascii')
@@ -90,6 +93,18 @@ def _get_control_file_contents_by_name(build, ds, suite_name):
         raise error.ControlFileMalformed(str(e))
 
     return control_file_in
+
+
+def _get_control_file_by_suite(suite_name):
+    """Get control file contents by suite name.
+
+    @param suite_name: Suite name as string.
+    @returns: Control file contents as string.
+    """
+    getter = control_file_getter.FileSystemGetter(
+        [_CONFIG.get_config_value('SCHEDULER',
+                                  'drone_installation_directory')])
+    return getter.get_control_file_contents_by_name(suite_name)
 
 
 def _stage_build_artifacts(build, hostname=None):
@@ -111,28 +126,46 @@ def _stage_build_artifacts(build, hostname=None):
     # on the dev server. However set synchronous to False to allow other
     # components to be downloaded in the background.
     ds = dev_server.resolve(build, hostname=hostname)
+    ds_name = ds.get_server_name(ds.url())
     timings[constants.DOWNLOAD_STARTED_TIME] = formatted_now()
     timer = autotest_stats.Timer('control_files.stage.%s' % (
-            ds.get_server_name(ds.url()).replace('.', '_')))
+            ds_name.replace('.', '_')))
     try:
         with timer:
             ds.stage_artifacts(image=build, artifacts=['test_suites'])
     except dev_server.DevServerException as e:
         raise error.StageControlFileFailure(
-                "Failed to stage %s: %s" % (build, e))
+                "Failed to stage %s on %s: %s" % (build, ds_name, e))
     timings[constants.PAYLOAD_FINISHED_TIME] = formatted_now()
     return (ds, timings)
 
 
 @rpc_utils.route_rpc_to_master
-def create_suite_job(name='', board='', pool='', control_file='',
-                     check_hosts=True, num=None, file_bugs=False, timeout=24,
-                     timeout_mins=None, priority=priorities.Priority.DEFAULT,
-                     suite_args=None, wait_for_results=True, job_retry=False,
-                     max_retries=None, max_runtime_mins=None, suite_min_duts=0,
-                     offload_failures_only=False, builds={},
-                     test_source_build=None, run_prod_code=False,
-                     delay_minutes=0, is_cloning=False, **kwargs):
+def create_suite_job(
+        name='',
+        board='',
+        pool='',
+        control_file='',
+        check_hosts=True,
+        num=None,
+        file_bugs=False,
+        timeout=24,
+        timeout_mins=None,
+        priority=priorities.Priority.DEFAULT,
+        suite_args=None,
+        wait_for_results=True,
+        job_retry=False,
+        max_retries=None,
+        max_runtime_mins=None,
+        suite_min_duts=0,
+        offload_failures_only=False,
+        builds=None,
+        test_source_build=None,
+        run_prod_code=False,
+        delay_minutes=0,
+        is_cloning=False,
+        **kwargs
+):
     """
     Create a job to run a test suite on the given device with the given image.
 
@@ -200,47 +233,34 @@ def create_suite_job(name='', board='', pool='', control_file='',
         logging.warning("Can't run on 0 hosts; using default.")
         num = None
 
+    if builds is None:
+        builds = {}
+
     # Default test source build to CrOS build if it's not specified and
     # run_prod_code is set to False.
     if not run_prod_code:
         test_source_build = Suite.get_test_source_build(
                 builds, test_source_build=test_source_build)
 
-    # If 'prefer_local_devserver' is True in global setting, and both board
-    # and pool are specified, pick a dut in the given board and pool, and
-    # use that to help to pick a devserver in the same subnet of the duts
-    # to be used to run tests.
-    if dev_server.PREFER_LOCAL_DEVSERVER and pool and board:
-        sample_dut = rpc_utils.get_sample_dut(board, pool)
-    else:
-        sample_dut = None
+    sample_dut = rpc_utils.get_sample_dut(board, pool)
 
     suite_name = canonicalize_suite_name(name)
     if run_prod_code:
         ds = dev_server.resolve(test_source_build, hostname=sample_dut)
         keyvals = {}
-        getter = control_file_getter.FileSystemGetter(
-                [_CONFIG.get_config_value('SCHEDULER',
-                                          'drone_installation_directory')])
-        control_file = getter.get_control_file_contents_by_name(suite_name)
     else:
         (ds, keyvals) = _stage_build_artifacts(
                 test_source_build, hostname=sample_dut)
     keyvals[constants.SUITE_MIN_DUTS_KEY] = suite_min_duts
 
-    if not control_file:
-        # No control file was supplied so look it up from the build artifacts.
-        suite_name = canonicalize_suite_name(name)
-        control_file = _get_control_file_contents_by_name(test_source_build,
-                                                          ds, suite_name)
     # Do not change this naming convention without updating
     # site_utils.parse_job_name.
-    if not run_prod_code:
-        name = '%s-%s' % (test_source_build, suite_name)
-    else:
+    if run_prod_code:
         # If run_prod_code is True, test_source_build is not set, use the
         # first build in the builds list for the sutie job name.
         name = '%s-%s' % (builds.values()[0], suite_name)
+    else:
+        name = '%s-%s' % (test_source_build, suite_name)
 
     timeout_mins = timeout_mins or timeout * 60
     max_runtime_mins = max_runtime_mins or timeout * 60
@@ -248,33 +268,42 @@ def create_suite_job(name='', board='', pool='', control_file='',
     if not board:
         board = utils.ParseBuildName(builds[provision.CROS_VERSION_PREFIX])[0]
 
-    # Prepend builds and board to the control file.
-    inject_dict = {'board': board,
-                   # `build` is needed for suites like AU to stage image inside
-                   # suite control file.
-                   'build': test_source_build,
-                   'builds': builds,
-                   'check_hosts': check_hosts,
-                   'pool': pool,
-                   'num': num,
-                   'file_bugs': file_bugs,
-                   'timeout': timeout,
-                   'timeout_mins': timeout_mins,
-                   'devserver_url': ds.url(),
-                   'priority': priority,
-                   'suite_args' : suite_args,
-                   'wait_for_results': wait_for_results,
-                   'job_retry': job_retry,
-                   'max_retries': max_retries,
-                   'max_runtime_mins': max_runtime_mins,
-                   'offload_failures_only': offload_failures_only,
-                   'test_source_build': test_source_build,
-                   'run_prod_code': run_prod_code,
-                   'delay_minutes': delay_minutes,
-                   }
+    if run_prod_code:
+        control_file = _get_control_file_by_suite(suite_name)
 
+    if not control_file:
+        # No control file was supplied so look it up from the build artifacts.
+        control_file = _get_control_file_by_build(
+                test_source_build, ds, suite_name)
+
+    # Prepend builds and board to the control file.
     if is_cloning:
         control_file = tools.remove_injection(control_file)
+
+    inject_dict = {
+        'board': board,
+        # `build` is needed for suites like AU to stage image inside suite
+        # control file.
+        'build': test_source_build,
+        'builds': builds,
+        'check_hosts': check_hosts,
+        'pool': pool,
+        'num': num,
+        'file_bugs': file_bugs,
+        'timeout': timeout,
+        'timeout_mins': timeout_mins,
+        'devserver_url': ds.url(),
+        'priority': priority,
+        'suite_args' : suite_args,
+        'wait_for_results': wait_for_results,
+        'job_retry': job_retry,
+        'max_retries': max_retries,
+        'max_runtime_mins': max_runtime_mins,
+        'offload_failures_only': offload_failures_only,
+        'test_source_build': test_source_build,
+        'run_prod_code': run_prod_code,
+        'delay_minutes': delay_minutes,
+    }
     control_file = tools.inject_vars(inject_dict, control_file)
 
     return rpc_utils.create_job_common(name,
@@ -623,15 +652,17 @@ def _initialize_control_file_getter(build):
     # Stage the test artifacts.
     try:
         ds = dev_server.ImageServer.resolve(build)
+        ds_name = ds.get_server_name(ds.url())
         build = ds.translate(build)
     except dev_server.DevServerException as e:
-        raise ValueError('Could not resolve build %s: %s' % (build, e))
+        raise ValueError('Could not resolve build %s: %s' %
+                         (build, e))
 
     try:
         ds.stage_artifacts(image=build, artifacts=['test_suites'])
     except dev_server.DevServerException as e:
         raise error.StageControlFileFailure(
-                'Failed to stage %s: %s' % (build, e))
+                'Failed to stage %s on %s: %s' % (build, ds_name, e))
 
     # Collect the control files specified in this build
     return control_file_getter.DevServerGetter.create(build, ds)

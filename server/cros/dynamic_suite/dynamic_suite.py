@@ -10,7 +10,6 @@ import common
 
 from autotest_lib.client.common_lib import base_job
 from autotest_lib.client.common_lib import error
-from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import priorities
 from autotest_lib.client.common_lib import time_utils
 from autotest_lib.client.common_lib import utils
@@ -197,16 +196,6 @@ Step by step:
 
 DEFAULT_TRY_JOB_TIMEOUT_MINS = tools.try_job_timeout_mins()
 
-# For builds older than R50 and suite control files in private repos, the suite
-# control files may not be updated to the new format, i.e., making call like:
-#   dynamic_suite.reimage_and_run(**args_dict)
-# The config AUTOSERV/support_builds_arg_in_suite_job can be manually set to
-# False to support these suite control files.
-# TODO (dshi): Remove this config once R52 is off the stable channel and there
-# is no more need to test older builds.
-SUPPORT_BUILDS_ARG = global_config.global_config.get_config_value(
-        'AUTOSERV', 'support_builds_arg_in_suite_job', type=bool, default=True)
-
 # Relevant CrosDynamicSuiteExceptions are defined in client/common_lib/error.py.
 
 class SuiteSpec(object):
@@ -243,16 +232,47 @@ class SuiteSpec(object):
                       on the SUITE field of control files.
     """
 
-    def __init__(self, builds=None, board=None, name=None, job=None,
-                 pool=None, num=None, check_hosts=True,
-                 add_experimental=True, file_bugs=False,
-                 file_experimental_bugs=False, max_runtime_mins=24*60,
-                 timeout=24, timeout_mins=None, suite_dependencies=[],
-                 bug_template={}, devserver_url=None,
-                 priority=priorities.Priority.DEFAULT, predicate=None,
-                 wait_for_results=True, job_retry=False, max_retries=None,
-                 offload_failures_only=False, test_source_build=None,
-                 run_prod_code=False, delay_minutes=0, **dargs):
+    _REQUIRED_KEYWORDS = {
+            'board': str,
+            'builds': dict,
+            'name': str,
+            'job': base_job.base_job,
+            'devserver_url': str,
+    }
+
+    _VERSION_PREFIXES = frozenset((
+            provision.CROS_VERSION_PREFIX,
+            provision.ANDROID_BUILD_VERSION_PREFIX,
+    ))
+
+    def __init__(
+            self,
+            builds=None,
+            board=None,
+            name=None,
+            job=None,
+            pool=None,
+            num=None,
+            check_hosts=True,
+            add_experimental=True,
+            file_bugs=False,
+            file_experimental_bugs=False,
+            max_runtime_mins=24*60,
+            timeout=24,
+            timeout_mins=None,
+            suite_dependencies=[],
+            bug_template={},
+            devserver_url=None,
+            priority=priorities.Priority.DEFAULT,
+            predicate=None,
+            wait_for_results=True,
+            job_retry=False,
+            max_retries=None,
+            offload_failures_only=False,
+            test_source_build=None,
+            run_prod_code=False,
+            delay_minutes=0,
+            **dargs):
         """
         Vets arguments for reimage_and_run() and populates self with supplied
         values.
@@ -323,55 +343,18 @@ class SuiteSpec(object):
                         deprecate and remove arguments in ToT while not
                         breaking branch builds.
         """
-        required_keywords = {'board': str,
-                             'name': str,
-                             'job': base_job.base_job,
-                             'devserver_url': str}
-        if SUPPORT_BUILDS_ARG:
-            required_keywords['builds'] = dict
-        else:
-            logging.debug('Global config AUTOSERV/'
-                          'support_builds_arg_in_suite_job is set to False. '
-                          'Skip enforcing `builds` argument in the suite job.')
-            build = dargs.get('build')
-            if not build:
-                raise  error.SuiteArgumentException(
-                        'reimage_and_run() needs argument `build` or `builds`.')
-            builds = {provision.CROS_VERSION_PREFIX: build}
-
-        for key, expected in required_keywords.iteritems():
-            value = locals().get(key)
-            if not value or not isinstance(value, expected):
-                raise error.SuiteArgumentException(
-                        'reimage_and_run() needs %s=<%r>' % (key, expected))
+        self._check_init_params(
+                board=board,
+                builds=builds,
+                name=name,
+                job=job,
+                devserver_url=devserver_url)
 
         self.board = 'board:%s' % board
         self.builds = builds
-
-        if provision.ANDROID_BUILD_VERSION_PREFIX in self.builds:
-            self.devserver = dev_server.AndroidBuildServer(devserver_url)
-        else:
-            self.devserver = dev_server.ImageServer(devserver_url)
-
-        for system_image_prefix in [provision.CROS_VERSION_PREFIX,
-                                    provision.ANDROID_BUILD_VERSION_PREFIX]:
-            if system_image_prefix in self.builds:
-                translated_build = self.devserver.translate(
-                    self.builds[system_image_prefix])
-                self.builds[system_image_prefix] = translated_build
-
-        if test_source_build:
-            test_source_build = self.devserver.translate(test_source_build)
-
-        self.test_source_build = Suite.get_test_source_build(
-                self.builds, test_source_build=test_source_build)
-
         self.name = name
         self.job = job
-        if pool:
-            self.pool = 'pool:%s' % pool
-        else:
-            self.pool = pool
+        self.pool = ('pool:%s' % pool) if pool else pool
         self.num = num
         self.check_hosts = check_hosts
         self.skip_reimage = skip_reimage
@@ -382,20 +365,90 @@ class SuiteSpec(object):
         self.max_runtime_mins = max_runtime_mins
         self.timeout = timeout
         self.timeout_mins = timeout_mins or timeout * 60
-        if isinstance(suite_dependencies, str):
-            self.suite_dependencies = [dep.strip(' ') for dep
-                                       in suite_dependencies.split(',')]
-        else:
-            self.suite_dependencies = suite_dependencies
         self.bug_template = bug_template
         self.priority = priority
-        self.predicate = predicate
         self.wait_for_results = wait_for_results
         self.job_retry = job_retry
         self.max_retries = max_retries
         self.offload_failures_only = offload_failures_only
         self.run_prod_code = run_prod_code
         self.delay_minutes = delay_minutes
+
+        self._init_predicate(predicate)
+        self._init_suite_dependencies(suite_dependencies)
+        self._init_devserver(devserver_url)
+        self._init_test_source_build(test_source_build)
+        self._translate_builds()
+        self._add_builds_to_suite_deps()
+
+    def _check_init_params(self, **kwargs):
+        for key, expected_type in self._REQUIRED_KEYWORDS.iteritems():
+            value = kwargs.get(key)
+            # TODO(ayatane): `not value` includes both the cases where value is
+            # None and where value is the correct type, but empty (e.g., empty
+            # dict).  It looks like this is NOT the intended behavior, but I'm
+            # hesitant to remove it in case something is actually relying on
+            # this behavior.
+            if not value or not isinstance(value, expected_type):
+                raise error.SuiteArgumentException(
+                        'reimage_and_run() needs %s=<%r>'
+                        % (key, expected_type))
+
+    def _init_predicate(self, predicate):
+        """Initialize predicate attribute."""
+        if predicate is None:
+            self.predicate = Suite.name_in_tag_predicate(self.name)
+        else:
+            self.predicate = predicate
+
+
+    def _init_suite_dependencies(self, suite_dependencies):
+        """Initialize suite dependencies attribute."""
+        if isinstance(suite_dependencies, str):
+            self.suite_dependencies = [dep.strip(' ') for dep
+                                       in suite_dependencies.split(',')]
+        else:
+            self.suite_dependencies = suite_dependencies
+
+    def _init_devserver(self, devserver_url):
+        """Initialize devserver attribute."""
+        if provision.ANDROID_BUILD_VERSION_PREFIX in self.builds:
+            self.devserver = dev_server.AndroidBuildServer(devserver_url)
+        else:
+            self.devserver = dev_server.ImageServer(devserver_url)
+
+    def _init_test_source_build(self, test_source_build):
+        """Initialize test_source_build attribute."""
+        if test_source_build:
+            test_source_build = self.devserver.translate(test_source_build)
+
+        self.test_source_build = Suite.get_test_source_build(
+                self.builds, test_source_build=test_source_build)
+
+    def _translate_builds(self):
+        """Translate build names if they are in LATEST format."""
+        for prefix in self._VERSION_PREFIXES:
+            if prefix in self.builds:
+                translated_build = self.devserver.translate(
+                        self.builds[prefix])
+                self.builds[prefix] = translated_build
+
+    def _add_builds_to_suite_deps(self):
+        """Add builds to suite_dependencies.
+
+        To support provision both CrOS and firmware, option builds are added to
+        SuiteSpec, e.g.,
+
+        builds = {'cros-version:': 'x86-alex-release/R18-1655.0.0',
+                  'fwrw-version:': 'x86-alex-firmware/R36-5771.50.0'}
+
+        version_prefix+build should make it into each test as a DEPENDENCY.
+        The easiest way to do this is to tack it onto the suite_dependencies.
+        """
+        self.suite_dependencies.extend(
+                provision.join(version_prefix, build)
+                for version_prefix, build in self.builds.iteritems()
+        )
 
 
 def skip_reimage(g):
@@ -462,16 +515,6 @@ def reimage_and_run(**dargs):
     """
     suite_spec = SuiteSpec(**dargs)
 
-    # To support provision both CrOS and firmware, option builds is added to
-    # SuiteSpec, e.g.,
-    # builds = {'cros-version:': 'x86-alex-release/R18-1655.0.0',
-    #           'fwrw-version:': 'x86-alex-firmware/R36-5771.50.0'}
-    # version_prefix+build should make it into each test as a DEPENDENCY.  The
-    # easiest way to do this is to tack it onto the suite_dependencies.
-    suite_spec.suite_dependencies.extend(
-            provision.join(version_prefix, build)
-            for version_prefix, build in suite_spec.builds.items())
-
     afe = frontend_wrappers.RetryingAFE(timeout_min=30, delay_sec=10,
                                         user=suite_spec.job.user, debug=False)
     tko = frontend_wrappers.RetryingTKO(timeout_min=30, delay_sec=10,
@@ -484,40 +527,26 @@ def reimage_and_run(**dargs):
         my_job_id = None
         logging.warning('Could not determine own job id.')
 
-    if suite_spec.predicate is None:
-        predicate = Suite.name_in_tag_predicate(suite_spec.name)
-    else:
-        predicate = suite_spec.predicate
-
-    _perform_reimage_and_run(suite_spec, afe, tko,
-                             predicate, suite_job_id=my_job_id)
+    _perform_reimage_and_run(suite_spec, afe, tko, suite_job_id=my_job_id)
 
     logging.debug('Returning from dynamic_suite.reimage_and_run.')
 
 
-def _perform_reimage_and_run(spec, afe, tko, predicate, suite_job_id=None):
+def _perform_reimage_and_run(spec, afe, tko, suite_job_id=None):
     """
     Do the work of reimaging hosts and running tests.
 
     @param spec: a populated SuiteSpec object.
     @param afe: an instance of AFE as defined in server/frontend.py.
     @param tko: an instance of TKO as defined in server/frontend.py.
-    @param predicate: A function mapping ControlData objects to True if they
-                      should be included in the suite.
     @param suite_job_id: Job id that will act as parent id to all sub jobs.
                          Default: None
     """
     # We can't do anything else until the devserver has finished downloading
     # control_files and test_suites packages so that we can get the control
     # files we should schedule.
-    try:
-        if not spec.run_prod_code:
-            spec.devserver.stage_artifacts(
-                    image=spec.test_source_build,
-                    artifacts=['control_files', 'test_suites'])
-    except dev_server.DevServerException as e:
-        # If we can't get the control files, there's nothing to run.
-        raise error.AsynchronousBuildFailure(e)
+    if not spec.run_prod_code:
+        _stage_artifacts(spec)
 
     timestamp = datetime.datetime.now().strftime(time_utils.TIME_FMT)
     utils.write_keyval(
@@ -525,19 +554,28 @@ def _perform_reimage_and_run(spec, afe, tko, predicate, suite_job_id=None):
         {constants.ARTIFACT_FINISHED_TIME: timestamp})
 
     suite = Suite.create_from_predicates(
-        predicates=[predicate], name=spec.name,
-        builds=spec.builds, board=spec.board, devserver=spec.devserver,
-        afe=afe, tko=tko, pool=spec.pool,
-        results_dir=spec.job.resultdir,
-        max_runtime_mins=spec.max_runtime_mins, timeout_mins=spec.timeout_mins,
-        file_bugs=spec.file_bugs,
-        file_experimental_bugs=spec.file_experimental_bugs,
-        suite_job_id=suite_job_id, extra_deps=spec.suite_dependencies,
-        priority=spec.priority, wait_for_results=spec.wait_for_results,
-        job_retry=spec.job_retry, max_retries=spec.max_retries,
-        offload_failures_only=spec.offload_failures_only,
-        test_source_build=spec.test_source_build,
-        run_prod_code=spec.run_prod_code)
+            predicates=[spec.predicate],
+            name=spec.name,
+            builds=spec.builds,
+            board=spec.board,
+            devserver=spec.devserver,
+            afe=afe,
+            tko=tko,
+            pool=spec.pool,
+            results_dir=spec.job.resultdir,
+            max_runtime_mins=spec.max_runtime_mins,
+            timeout_mins=spec.timeout_mins,
+            file_bugs=spec.file_bugs,
+            file_experimental_bugs=spec.file_experimental_bugs,
+            suite_job_id=suite_job_id,
+            extra_deps=spec.suite_dependencies,
+            priority=spec.priority,
+            wait_for_results=spec.wait_for_results,
+            job_retry=spec.job_retry,
+            max_retries=spec.max_retries,
+            offload_failures_only=spec.offload_failures_only,
+            test_source_build=spec.test_source_build,
+            run_prod_code=spec.run_prod_code)
 
 
     if spec.delay_minutes:
@@ -558,3 +596,17 @@ def _perform_reimage_and_run(spec, afe, tko, predicate, suite_job_id=None):
     else:
         logging.info('wait_for_results is set to False, suite job will exit '
                      'without waiting for test jobs to finish.')
+
+
+def _stage_artifacts(suite_spec):
+    """Stage artifacts for a suite job.
+
+    @param suite_spec: a populated SuiteSpec object.
+    """
+    try:
+        suite_spec.devserver.stage_artifacts(
+                image=suite_spec.test_source_build,
+                artifacts=['control_files', 'test_suites'])
+    except dev_server.DevServerException as e:
+        # If we can't get the control files, there's nothing to run.
+        raise error.AsynchronousBuildFailure(e)

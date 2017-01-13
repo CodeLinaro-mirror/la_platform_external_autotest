@@ -8,6 +8,7 @@ import functools
 import logging
 import os
 import re
+import signal
 import stat
 import sys
 import time
@@ -100,7 +101,8 @@ AUTOTEST_SERVER_PACKAGE_FILE_FMT = (
 ADB_DEVICE_PREFIXES = ['product:', 'model:', 'device:']
 
 # Map of product names to build target name.
-PRODUCT_TARGET_MAP = {'dragon' : 'ryu',
+PRODUCT_TARGET_MAP = {'bat' : 'bat_land',
+                      'dragon' : 'ryu',
                       'flo' : 'razor',
                       'flo_lte' : 'razorg',
                       'gm4g_sprout' : 'seed_l8150',
@@ -389,7 +391,9 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
         if function != ADB_CMD and shell:
             raise error.CmdError('shell option is only applicable to `adb`.')
 
-        cmd = '%s%s ' % ('sudo -n ' if require_sudo else '', function)
+        client_side_cmd = 'timeout --signal=%d %d %s' % (signal.SIGKILL,
+                                                         timeout + 1, function)
+        cmd = '%s%s ' % ('sudo -n ' if require_sudo else '', client_side_cmd)
 
         if serial:
             cmd += '-s %s ' % serial
@@ -1478,7 +1482,10 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
                 # doing it by default.
                 self.disable_package_verification()
             if skip_setup_wizard:
-                self.skip_setup_wizard()
+                try:
+                    self.skip_setup_wizard()
+                except error.GenericHostRunError:
+                    logging.error('Could not skip setup wizard.')
         logging.info('Successfully installed Android build staged at %s.',
                      build_url)
 

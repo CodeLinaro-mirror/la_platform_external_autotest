@@ -156,15 +156,15 @@ class RetryHandler(object):
         @returns: True if we should retry the job.
 
         """
-        if (self.suite_max_reached() or not result.test_executed or
-            not result.is_worse_than(
-                job_status.Status(self._retry_level, '', 'reason'))):
-            return False
-        failed_job_id = result.id
-        return (failed_job_id in self._retry_map and
-                self._retry_map[failed_job_id]['state'] ==
-                        self.States.NOT_ATTEMPTED and
-                self._retry_map[failed_job_id]['retry_max'] > 0)
+        return (
+            not self.suite_max_reached()
+            and result.test_executed
+            and result.is_worse_than(
+                job_status.Status(self._retry_level, '', 'reason'))
+            and result.id in self._retry_map
+            and self._retry_map[result.id]['state'] == self.States.NOT_ATTEMPTED
+            and self._retry_map[result.id]['retry_max'] > 0
+        )
 
 
     def add_retry(self, old_job_id, new_job_id):
@@ -586,15 +586,33 @@ class Suite(object):
                      name, builds, board, cf_getter, **dargs)
 
 
-    def __init__(self, predicates, tag, builds, board, cf_getter,
-                 run_prod_code=False, afe=None, tko=None, pool=None,
-                 results_dir=None, max_runtime_mins=24*60, timeout_mins=24*60,
-                 file_bugs=False, file_experimental_bugs=False,
-                 suite_job_id=None, ignore_deps=False, extra_deps=[],
-                 priority=priorities.Priority.DEFAULT, forgiving_parser=True,
-                 wait_for_results=True, job_retry=False,
-                 max_retries=sys.maxint, offload_failures_only=False,
-                 test_source_build=None):
+    def __init__(
+            self,
+            predicates,
+            tag,
+            builds,
+            board,
+            cf_getter,
+            run_prod_code=False,
+            afe=None,
+            tko=None,
+            pool=None,
+            results_dir=None,
+            max_runtime_mins=24*60,
+            timeout_mins=24*60,
+            file_bugs=False,
+            file_experimental_bugs=False,
+            suite_job_id=None,
+            ignore_deps=False,
+            extra_deps=None,
+            priority=priorities.Priority.DEFAULT,
+            forgiving_parser=True,
+            wait_for_results=True,
+            job_retry=False,
+            max_retries=sys.maxint,
+            offload_failures_only=False,
+            test_source_build=None
+    ):
         """
         Constructor
 
@@ -643,10 +661,8 @@ class Suite(object):
         @param test_source_build: Build that contains the server-side test code.
 
         """
-        def combined_predicate(test):
-            #pylint: disable-msg=C0111
-            return all((f(test) for f in predicates))
-        self._predicate = combined_predicate
+        if extra_deps is None:
+            extra_deps = []
 
         self._tag = tag
         self._builds = builds
@@ -662,10 +678,14 @@ class Suite(object):
         self._pool = pool
         self._jobs = []
         self._jobs_to_tests = {}
-        self._tests = Suite.find_and_parse_tests(self._cf_getter,
-                        self._predicate, self._tag, add_experimental=True,
-                        forgiving_parser=forgiving_parser,
-                        run_prod_code=run_prod_code)
+        self.tests = Suite.find_and_parse_tests(
+                self._cf_getter,
+                lambda control_data: all(f(control_data) for f in predicates),
+                self._tag,
+                add_experimental=True,
+                forgiving_parser=forgiving_parser,
+                run_prod_code=run_prod_code,
+        )
 
         self._max_runtime_mins = max_runtime_mins
         self._timeout_mins = timeout_mins
@@ -685,13 +705,6 @@ class Suite(object):
 
 
     @property
-    def tests(self):
-        """
-        A list of ControlData objects in the suite, with added |text| attr.
-        """
-        return self._tests
-
-
     def stable_tests(self):
         """
         |self.tests|, filtered for non-experimental tests.
@@ -699,11 +712,22 @@ class Suite(object):
         return filter(lambda t: not t.experimental, self.tests)
 
 
+    @property
     def unstable_tests(self):
         """
         |self.tests|, filtered for experimental tests.
         """
         return filter(lambda t: t.experimental, self.tests)
+
+
+    @property
+    def _cros_build(self):
+        """Return the CrOS build or the first build in the builds dict."""
+        # TODO(ayatane): Note that the builds dict isn't ordered.  I'm not
+        # sure what the implications of this are, but it's probably not a
+        # good thing.
+        return self._builds.get(provision.CROS_VERSION_PREFIX,
+                                self._builds.values()[0])
 
 
     def _create_job(self, test, retry_for=None):
@@ -719,66 +743,16 @@ class Suite(object):
                   test_name is used to preserve the higher level TEST_NAME
                   name of the job.
         """
-        if self._ignore_deps:
-            job_deps = []
-        else:
-            job_deps = list(test.dependencies)
-        if self._extra_deps:
-            job_deps.extend(self._extra_deps)
-        if self._pool:
-            job_deps.append(self._pool)
-
-        # TODO(beeps): Comletely remove the concept of a metahost.
-        # Currently we use this to distinguis a job scheduled through
-        # the afe from a suite job, as only the latter will get requeued
-        # when a special task fails.
-        job_deps.append(self._board)
-        # JOB_BUILD_KEY is default to use CrOS image, if it's not available,
-        # take the first build in the builds dictionary.
-        # test_source_build is saved to job_keyvals so scheduler can retrieve
-        # the build name from database when compiling autoserv commandline.
-        # This avoid a database change to add a new field in afe_jobs.
-        build = self._builds.get(provision.CROS_VERSION_PREFIX,
-                                 self._builds.values()[0])
-        keyvals={constants.JOB_BUILD_KEY: build,
-                 constants.JOB_SUITE_KEY: self._tag,
-                 constants.JOB_EXPERIMENTAL_KEY: test.experimental,
-                 constants.JOB_BUILDS_KEY: self._builds}
-        # Only add `test_source_build` to job keyvals if the build is different
-        # from the CrOS build or the job uses more than one build, e.g., both
-        # firmware and CrOS will be updated in the dut.
-        # This is for backwards compatibility, so the update Autotest code can
-        # compile an autoserv command line to run in a SSP container using
-        # previous builds.
-        if (self._test_source_build and
-            (build != self._test_source_build or len(self._builds) > 1)):
-            keyvals[constants.JOB_TEST_SOURCE_BUILD_KEY] = (
-                    self._test_source_build)
-            for prefix, build in self._builds.iteritems():
-                if prefix == provision.FW_RW_VERSION_PREFIX:
-                    keyvals[constants.FWRW_BUILD]= build
-                elif prefix == provision.FW_RO_VERSION_PREFIX:
-                    keyvals[constants.FWRO_BUILD] = build
-        # Add suite job id to keyvals so tko parser can read it from keyval file
-        if self._suite_job_id:
-            keyvals[constants.PARENT_JOB_ID] = self._suite_job_id
-        if retry_for:
-            # We drop the old job's id in the new job's keyval file
-            # so that later our tko parser can figure out the retring
-            # relationship and invalidate the results of the old job
-            # in tko database.
-            keyvals[constants.RETRY_ORIGINAL_JOB_ID] = retry_for
-        if self._offload_failures_only:
-            keyvals[constants.JOB_OFFLOAD_FAILURES_KEY] = True
-
         test_obj = self._afe.create_job(
             control_file=test.text,
-            name=tools.create_job_name(self._test_source_build or build,
-                                       self._tag, test.name),
+            name=tools.create_job_name(
+                    self._test_source_build or self._cros_build,
+                    self._tag,
+                    test.name),
             control_type=test.test_type.capitalize(),
             meta_hosts=[self._board]*test.sync_count,
-            dependencies=job_deps,
-            keyvals=keyvals,
+            dependencies=self._create_job_deps(test),
+            keyvals=self._create_keyvals_for_test_job(test, retry_for),
             max_runtime_mins=self._max_runtime_mins,
             timeout_mins=self._timeout_mins,
             parent_job_id=self._suite_job_id,
@@ -787,20 +761,89 @@ class Suite(object):
             synch_count=test.sync_count,
             require_ssp=test.require_ssp)
 
-        setattr(test_obj, 'test_name', test.name)
-
+        test_obj.test_name = test.name
         return test_obj
+
+
+    def _create_job_deps(self, test):
+        """Create job deps list for a test job.
+
+        @returns: A list of dependency strings.
+        """
+        if self._ignore_deps:
+            job_deps = []
+        else:
+            job_deps = list(test.dependencies)
+        job_deps.extend(self._extra_deps)
+        if self._pool:
+            job_deps.append(self._pool)
+        job_deps.append(self._board)
+        return job_deps
+
+
+    def _create_keyvals_for_test_job(self, test, retry_for=None):
+        """Create keyvals dict for creating a test job.
+
+        @param test: ControlData object for a test to run.
+        @param retry_for: If the to-be-created job is a retry for an
+                          old job, the afe_job_id of the old job will
+                          be passed in as |retry_for|, which will be
+                          recorded in the new job's keyvals.
+        @returns: A keyvals dict for creating the test job.
+        """
+        keyvals = {
+            constants.JOB_BUILD_KEY: self._cros_build,
+            constants.JOB_SUITE_KEY: self._tag,
+            constants.JOB_EXPERIMENTAL_KEY: test.experimental,
+            constants.JOB_BUILDS_KEY: self._builds
+        }
+        # test_source_build is saved to job_keyvals so scheduler can retrieve
+        # the build name from database when compiling autoserv commandline.
+        # This avoid a database change to add a new field in afe_jobs.
+        #
+        # Only add `test_source_build` to job keyvals if the build is different
+        # from the CrOS build or the job uses more than one build, e.g., both
+        # firmware and CrOS will be updated in the dut.
+        # This is for backwards compatibility, so the update Autotest code can
+        # compile an autoserv command line to run in a SSP container using
+        # previous builds.
+        if (self._test_source_build and
+            (self._cros_build != self._test_source_build or
+             len(self._builds) > 1)):
+            keyvals[constants.JOB_TEST_SOURCE_BUILD_KEY] = \
+                    self._test_source_build
+            for prefix, build in self._builds.iteritems():
+                if prefix == provision.FW_RW_VERSION_PREFIX:
+                    keyvals[constants.FWRW_BUILD]= build
+                elif prefix == provision.FW_RO_VERSION_PREFIX:
+                    keyvals[constants.FWRO_BUILD] = build
+        # Add suite job id to keyvals so tko parser can read it from keyval
+        # file.
+        if self._suite_job_id:
+            keyvals[constants.PARENT_JOB_ID] = self._suite_job_id
+        # We drop the old job's id in the new job's keyval file so that
+        # later our tko parser can figure out the retry relationship and
+        # invalidate the results of the old job in tko database.
+        if retry_for:
+            keyvals[constants.RETRY_ORIGINAL_JOB_ID] = retry_for
+        if self._offload_failures_only:
+            keyvals[constants.JOB_OFFLOAD_FAILURES_KEY] = True
+        return keyvals
 
 
     def _schedule_test(self, record, test, retry_for=None, ignore_errors=False):
         """Schedule a single test and return the job.
 
-        Schedule a single test by creating a job.
-        And then update relevant data structures that are used to
-        keep track of all running jobs.
+        Schedule a single test by creating a job, and then update relevant
+        data structures that are used to keep track of all running jobs.
 
-        Emit TEST_NA if it failed to schedule the test due to
-        NoEligibleHostException or a non-existent board label.
+        Emits a TEST_NA status log entry if it failed to schedule the test due
+        to NoEligibleHostException or a non-existent board label.
+
+        Returns a frontend.Job object if the test is successfully scheduled.
+        If scheduling failed due to NoEligibleHostException or a non-existent
+        board label, returns None.  If ignore_errors is True, all unknown
+        errors return None, otherwise the errors are raised as-is.
 
         @param record: A callable to use for logging.
                        prototype: record(base_job.status_log_entry)
@@ -812,12 +855,7 @@ class Suite(object):
                              the error and will return None.
                              If False, rpc errors will be raised.
 
-        @returns: A frontend.Job object if the test is successfully scheduled.
-                  Returns None if scheduling failed due to
-                  NoEligibleHostException or a non-existent board label.
-                  Returns None if it encounters other rpc errors we don't know
-                  how to handle and ignore_errors is False.
-
+        @returns: A frontend.Job object or None
         """
         msg = 'Scheduling %s' % test.name
         if retry_for:
@@ -826,51 +864,30 @@ class Suite(object):
         begin_time_str = datetime.datetime.now().strftime(time_utils.TIME_FMT)
         try:
             job = self._create_job(test, retry_for=retry_for)
-        except error.NoEligibleHostException:
-            logging.debug('%s not applicable for this board/pool. '
-                          'Emitting TEST_NA.', test.name)
-            Status('TEST_NA', test.name,
-                   'Skipping:  test not supported on this board.',
-                   begin_time_str=begin_time_str).record_all(record)
-        except proxy.ValidationError as e:
-            # The goal here is to treat a dependency on a
-            # non-existent board label the same as a
-            # dependency on a board that exists, but for which
-            # there's no hardware.
-            #
-            # As of this writing, the particular case we
-            # want looks like this:
-            #  1) e.problem_keys is a dictionary
-            #  2) e.problem_keys['meta_hosts'] exists as
-            #     the only key in the dictionary.
-            #  3) e.problem_keys['meta_hosts'] matches this
-            #     pattern: "Label "board:.*" not found"
-            #
-            # We check for conditions 1) and 2) on the
-            # theory that they're relatively immutable.
-            # We don't check condition 3) because it seems
-            # likely to be a maintenance burden, and for the
-            # times when we're wrong, being right shouldn't
-            # matter enough (we _hope_).
-            #
-            # If we don't recognize the error, we pass
-            # the buck to the outer try in this function,
-            # which immediately fails the suite.
-            if (not isinstance(e.problem_keys, dict) or
-                    len(e.problem_keys) != 1 or
-                    'meta_hosts' not in e.problem_keys):
+        except (error.NoEligibleHostException, proxy.ValidationError) as e:
+            if (isinstance(e, error.NoEligibleHostException)
+                or (isinstance(e, proxy.ValidationError)
+                    and _is_nonexistent_board_error(e))):
+                # Treat a dependency on a non-existent board label the same as
+                # a dependency on a board that exists, but for which there's no
+                # hardware.
+                logging.debug('%s not applicable for this board/pool. '
+                              'Emitting TEST_NA.', test.name)
+                Status('TEST_NA', test.name,
+                       'Skipping:  test not supported on this board/pool.',
+                       begin_time_str=begin_time_str).record_all(record)
+                return None
+            else:
                 raise e
-            logging.debug('Validation error: %s', str(e))
-            logging.debug('Assuming label not found')
-            Status('TEST_NA', test.name, e.problem_keys.values()[0],
-                   begin_time_str=begin_time_str).record_all(record)
         except (error.RPCException, proxy.JSONRPCException) as e:
             if retry_for:
                 # Mark that we've attempted to retry the old job.
                 self._retry_handler.set_attempted(job_id=retry_for)
+
             if ignore_errors:
                 logging.error('Failed to schedule test: %s, Reason: %s',
                               test.name, e)
+                return None
             else:
                 raise e
         else:
@@ -885,10 +902,8 @@ class Suite(object):
                 logging.debug('Job %d created to retry job %d. '
                               'Have retried for %d time(s)',
                               job.id, retry_for, retry_count)
-            if self._results_dir:
-                self._remember_provided_job_id(job)
+            self._remember_provided_job_id(job)
             return job
-        return None
 
 
     def schedule(self, record, add_experimental=True):
@@ -904,23 +919,31 @@ class Suite(object):
         @param add_experimental: schedule experimental tests as well, or not.
         @returns: The number of tests that were scheduled.
         """
-        logging.debug('Discovered %d stable tests.', len(self.stable_tests()))
+        logging.debug('Discovered %d stable tests.', len(self.stable_tests))
         logging.debug('Discovered %d unstable tests.',
-                      len(self.unstable_tests()))
-        n_scheduled = 0
+                      len(self.unstable_tests))
 
         Status('INFO', 'Start %s' % self._tag).record_result(record)
+        scheduled_test_names = []
         try:
-            tests = self.stable_tests()
+            tests = self.stable_tests
             if add_experimental:
-                for test in self.unstable_tests():
+                for test in self.unstable_tests:
                     if not test.name.startswith(constants.EXPERIMENTAL_PREFIX):
                         test.name = constants.EXPERIMENTAL_PREFIX + test.name
                     tests.append(test)
 
             for test in tests:
-                if self._schedule_test(record, test):
-                    n_scheduled += 1
+                scheduled_job = self._schedule_test(record, test)
+                if scheduled_job is not None:
+                    scheduled_test_names.append(test.name)
+
+            # Write the num of scheduled tests and name of them to keyval file.
+            logging.debug('Scheduled %d tests, writing the total to keyval.',
+                          len(scheduled_test_names))
+            utils.write_keyval(
+                self._results_dir,
+                self._make_scheduled_tests_keyvals(scheduled_test_names))
         except Exception:  # pylint: disable=W0703
             logging.error(traceback.format_exc())
             Status('FAIL', self._tag,
@@ -930,7 +953,20 @@ class Suite(object):
             self._retry_handler = RetryHandler(
                     initial_jobs_to_tests=self._jobs_to_tests,
                     max_retries=self._max_retries)
-        return n_scheduled
+        return len(scheduled_test_names)
+
+
+    def _make_scheduled_tests_keyvals(self, scheduled_test_names):
+        """Make a keyvals dict to write for scheduled test names.
+
+        @param scheduled_test_names: A list of scheduled test name strings.
+
+        @returns: A keyvals dict.
+        """
+        return {
+            constants.SCHEDULED_TEST_COUNT_KEY: len(scheduled_test_names),
+            constants.SCHEDULED_TEST_NAMES_KEY: repr(scheduled_test_names),
+        }
 
 
     def should_report(self, result):
@@ -988,10 +1024,9 @@ class Suite(object):
             template = reporting_utils.BugTemplate(bug_template)
             for result in results_generator:
                 result.record_all(record)
-                if (self._results_dir and
-                    job_status.is_for_infrastructure_fail(result)):
+                if job_status.is_for_infrastructure_fail(result):
                     self._remember_provided_job_id(result)
-                elif (self._results_dir and isinstance(result, Status)):
+                elif isinstance(result, Status):
                     self._remember_test_status_job_id(result)
 
                 if self._job_retry and self._retry_handler.should_retry(result):
@@ -1007,11 +1042,7 @@ class Suite(object):
                 if self.should_report(result):
                     job_views = self._tko.run('get_detailed_test_views',
                                               afe_job_id=result.id)
-                    # Use the CrOS build for bug filing. If CrOS build is not
-                    # specified, use the first build in the builds dictionary.
-                    build = self._builds.get(provision.CROS_VERSION_PREFIX,
-                                             self._builds.values()[0])
-                    failure = reporting.TestBug(build,
+                    failure = reporting.TestBug(self._cros_build,
                             site_utils.get_chrome_version(job_views),
                             self._tag,
                             result)
@@ -1066,6 +1097,10 @@ class Suite(object):
             self._afe.run('abort_host_queue_entries', job__id__in=job_ids)
 
 
+    # TODO(ayatane): This is identical to _remember_test_status_job_id.  It
+    # suggests that we can factor out a job-like interface that both jobs and
+    # statuses support so we can merge the two methods to work on job-like
+    # objects.  This deduplication can probably be applied to other places.
     def _remember_provided_job_id(self, job):
         """
         Record provided job as a suite job keyval, for later referencing.
@@ -1073,7 +1108,7 @@ class Suite(object):
         @param job: some representation of a job, including id, test_name
                     and owner
         """
-        if job.id and job.owner and job.test_name:
+        if self._results_dir and job.id and job.owner and job.test_name:
             job_id_owner = '%s-%s' % (job.id, job.owner)
             logging.debug('Adding job keyval for %s=%s',
                           job.test_name, job_id_owner)
@@ -1081,7 +1116,8 @@ class Suite(object):
                 self._results_dir,
                 {hashlib.md5(job.test_name).hexdigest(): job_id_owner})
 
-
+    # TODO(ayatane): This is identical to _remember_provided_job_id.  See that
+    # method for details.
     def _remember_test_status_job_id(self, status):
         """
         Record provided status as a test status keyval, for later referencing.
@@ -1089,7 +1125,8 @@ class Suite(object):
         @param status: Test status, including properties such as id, test_name
                        and owner.
         """
-        if status.id and status.owner and status.test_name:
+        if (self._results_dir
+                and status.id and status.owner and status.test_name):
             test_id_owner = '%s-%s' % (status.id, status.owner)
             logging.debug('Adding status keyval for %s=%s',
                           status.test_name, test_id_owner)
@@ -1106,8 +1143,7 @@ class Suite(object):
 
         When this method is called with a file system ControlFileGetter, or
         enable_controls_in_batch is set as false, this function will looks at
-        control files returned by cf_getter.get_control_file_list() for tests
-        that pass self._predicate().
+        control files returned by cf_getter.get_control_file_list() for tests.
 
         If cf_getter is a File system ControlFileGetter, it performs a full
         parse of the root directory associated with the getter. This is the
@@ -1265,3 +1301,29 @@ class Suite(object):
         return [s[0] for s in
                 sorted(similarities.items(), key=operator.itemgetter(1),
                        reverse=True)][:count]
+
+
+def _is_nonexistent_board_error(e):
+    """Return True if error is caused by nonexistent board label.
+
+    As of this writing, the particular case we want looks like this:
+
+     1) e.problem_keys is a dictionary
+     2) e.problem_keys['meta_hosts'] exists as the only key
+        in the dictionary.
+     3) e.problem_keys['meta_hosts'] matches this pattern:
+        "Label "board:.*" not found"
+
+    We check for conditions 1) and 2) on the
+    theory that they're relatively immutable.
+    We don't check condition 3) because it seems
+    likely to be a maintenance burden, and for the
+    times when we're wrong, being right shouldn't
+    matter enough (we _hope_).
+
+    @param e: proxy.ValidationError instance
+    @returns: boolean
+    """
+    return (isinstance(e.problem_keys, dict)
+            and len(e.problem_keys) == 1
+            and 'meta_hosts' in e.problem_keys)

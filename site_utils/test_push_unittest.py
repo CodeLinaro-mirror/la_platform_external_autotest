@@ -8,29 +8,16 @@ import mox
 import unittest
 import urllib2
 
+import mock
+
 import common
 from autotest_lib.client.common_lib.cros import retry
 from autotest_lib.server import site_utils
 from autotest_lib.server.cros.dynamic_suite import reporting
-# Mock the retry.retry used in the test_push before import it.
-def mock_retry(ExceptionToCheck, timeout_min, exception_to_raise=None):
-    """A mock retry decorator to use in place of the actual one for testing.
 
-    @param ExceptionToCheck: the exception to check.
-    @param timeout_mins: Amount of time in mins to wait before timing out.
-    @param exception_to_raise: Ignored
 
-    """
-    def inner_retry(func):
-        """The actual decorator.
-
-        @param func: Function to be called in decorator.
-
-        """
-        return func
-
-    return inner_retry
-retry.retry = mock_retry
+# Mock retry.retry used in test_push before importing test_push.
+retry.retry = mock.create_autospec(retry.retry, return_value=lambda func: func)
 from autotest_lib.site_utils import test_push
 
 AUTOFILED_COUNT_2 = '%s2' % reporting.Reporter.AUTOFILED_COUNT
@@ -62,9 +49,9 @@ class TestPushUnittests(mox.MoxTestBase):
         urllib2.urlopen(mox.IgnoreArg()).AndReturn(response)
 
         self.mox.StubOutWithMock(test_push, 'get_default_build')
-        test_push.get_default_build(mox.IgnoreArg()).AndReturn(
+        test_push.get_default_build(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(
                 'stumpy-release/R36-5881-0.0')
-        test_push.get_default_build(mox.IgnoreArg()).AndReturn(
+        test_push.get_default_build(mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(
                 'quawks-release/R36-5881-0.0')
 
         self.mox.StubOutWithMock(test_push, 'check_dut_image')

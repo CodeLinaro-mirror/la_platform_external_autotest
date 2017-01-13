@@ -67,7 +67,7 @@ goofy:!:248:goofy
 easy-unlock:!:249:
 trunks:!:251:trunks
 tpm_manager:!:252:tpm_manager
-authpolicyd:!:254:
+authpolicyd:!:254:authpolicyd,authpolicyd-exec
 scanner:!:255:saned
 volume:!:257:
 uinput:!:258:bluetooth,volume
@@ -79,11 +79,12 @@ webservd:!:266:buffet,webservd
 dnsmasq:!:268:dnsmasq
 lpadmin:!:269:cups,lpadmin
 cups:!:277:
+biod:!:282:
 arc-camera:!:603:
 ntfs-3g:!:300:
 avfs:!:301:
 fuse-exfat:!:302:
-daemon-store:!:400:chaps
+daemon-store:!:400:chaps,biod
 logs-access:!:401:debugd-logs
 serial:!:402:uucp
 devbroker-access:!:403:chronos
@@ -93,3 +94,5 @@ android-root:!:655360:android-root
 arc-sensor:!:604:
 user-containers:!:10000:user-containers
 imageloaderd:!:220:
+arc-networkd:!:284:
+authpolicyd-exec:!:607:

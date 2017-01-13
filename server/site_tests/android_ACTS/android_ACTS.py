@@ -43,7 +43,8 @@ class android_ACTS(test.test):
                  override_acts_zip=None,
                  override_internal_acts_dir=None,
                  override_python_bin='python',
-                 acts_timeout=7200):
+                 acts_timeout=7200,
+                 perma_path=None):
         """Runs an acts test case.
 
         @param testbed: The testbed to test on.
@@ -53,7 +54,8 @@ class android_ACTS(test.test):
                           is given.
         @param test_file: The campaign file to run. Should be None when
                           test_case is given. This should be relative to the
-                          autotest_campaign folder.
+                          autotest_campaign folder. If multiple are given,
+                          multiple test cases will be run.
         @param additional_configs: Any additional config files to use.
                                    These should be relative to the
                                    autotest_config folder.
@@ -83,7 +85,12 @@ class android_ACTS(test.test):
         job_repo_url = afe_utils.get_host_attribute(
                 host, host.job_repo_url_attribute)
         test_station = testbed.teststation
-        ts_tempfolder = test_station.get_tmp_dir()
+        if not perma_path:
+            ts_tempfolder = test_station.get_tmp_dir()
+        else:
+            test_station.run('rm -fr "%s"' % perma_path)
+            test_station.run('mkdir "%s"' % perma_path)
+            ts_tempfolder = perma_path
         target_zip = os.path.join(ts_tempfolder, 'acts.zip')
 
         if override_acts_zip and override_build_url:
@@ -110,32 +117,32 @@ class android_ACTS(test.test):
             package = acts_lib.create_acts_package_from_current_artifact(
                     test_station, job_repo_url, target_zip)
 
-        container = package.create_container(ts_tempfolder,
-                                             override_internal_acts_dir)
+        test_env = package.create_enviroment(testbed=testbed,
+                container_directory=ts_tempfolder,
+                testbed_name=testbed_name,
+                internal_acts_directory=override_internal_acts_dir)
 
-        container.install_sl4a_apk(testbed)
+        test_env.install_sl4a_apk()
 
         for apk in additional_apks:
-            container.install_apk(apk)
+            test_env.install_apk(apk)
 
-        container.setup_enviroment(python_bin=override_python_bin)
+        test_env.setup_enviroment(python_bin=override_python_bin)
 
-        container.upload_config(config_file)
+        test_env.upload_config(config_file)
 
         if additional_configs:
             for additional_config in additional_configs:
-                container.upload_config(additional_config)
+                test_env.upload_config(additional_config)
 
         if test_file:
-            container.upload_campaign(test_file)
+            test_env.upload_campaign(test_file)
 
-        results = container.run_test(testbed,
-                                     config_file,
-                                     campaign=test_file,
-                                     test_case=test_case,
-                                     python_bin=override_python_bin,
-                                     testbed_name=testbed_name,
-                                     timeout=acts_timeout)
+        results = test_env.run_test(config_file,
+                                    campaign=test_file,
+                                    test_case=test_case,
+                                    python_bin=override_python_bin,
+                                    timeout=acts_timeout)
 
         results.log_output()
         results.upload_to_sponge(self)

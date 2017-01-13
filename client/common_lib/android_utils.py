@@ -119,21 +119,20 @@ class AndroidArtifacts(object):
     DTB = 'dtb'
     RADIO_IMAGE = 'radio_image'
     TARGET_FILES = 'target_files'
-    TEST_ZIP = 'test_zip'
     VENDOR_PARTITIONS = 'vendor_partitions'
     ZIP_IMAGE = 'zip_images'
 
     # (os, board) = 'artifacts'
     DEFAULT_ARTIFACTS_MAP = {
-        ('android', 'default'): [BOOTLOADER_IMAGE, RADIO_IMAGE, ZIP_IMAGE,
-                                 TEST_ZIP],
+        ('android', 'default'): [BOOTLOADER_IMAGE, RADIO_IMAGE, ZIP_IMAGE],
+        ('android', 'bat_land'): [ZIP_IMAGE],
         ('brillo', 'default'):  [ZIP_IMAGE, VENDOR_PARTITIONS],
         ('emulated_brillo', 'default'): [TARGET_FILES, DTB],
     }
 
     # Default artifacts for Android provision
     DEFAULT_ARTIFACTS_TO_BE_STAGED_FOR_IMAGE = (
-            ','.join([BOOTLOADER_IMAGE, RADIO_IMAGE, ZIP_IMAGE, TEST_ZIP]))
+            ','.join([BOOTLOADER_IMAGE, RADIO_IMAGE, ZIP_IMAGE]))
 
     # regex pattern for CLIENT/android_artifacts_[board]. For example, global
     # config can have following config in CLIENT section to indicate that
@@ -154,6 +153,7 @@ class AndroidArtifacts(object):
 
         @return: A string of artifacts to be staged.
         """
+        logging.debug('artifacts for %s %s', os, board)
         if board in cls.artifacts_map:
             logging.debug('Found override of artifacts for board %s: %s', board,
                           cls.artifacts_map[board])
@@ -162,5 +162,5 @@ class AndroidArtifacts(object):
             artifacts = cls.DEFAULT_ARTIFACTS_MAP[(os, board)]
         else:
             artifacts = cls.DEFAULT_ARTIFACTS_MAP[(os, 'default')]
+        logging.debug('found %s', ','.join(artifacts))
         return ','.join(artifacts)
-

@@ -124,7 +124,7 @@ class ActsPackage(object):
                          internal_acts_directory=None):
         """Unpacks this package into a container.
 
-        Unpacks this acts package into a container to run acts tests in.
+        Unpacks this acts package into a container to interact with acts.
 
         @param container_directory: The directory on the teststation to hold
                                     the container.
@@ -140,12 +140,94 @@ class ActsPackage(object):
                              container_directory,
                              acts_directory=internal_acts_directory)
 
+    def create_enviroment(self,
+                          container_directory,
+                          testbed,
+                          testbed_name=None,
+                          internal_acts_directory=None):
+        """Unpacks this package into an acts testing enviroment.
+
+        Unpacks this acts package into a test enviroment to test with acts.
+
+        @param container_directory: The directory on the teststation to hold
+                                    the test enviroment.
+        @param testbed: The testbed that the test enviroment
+                        will be testing on.
+        @param testbed_name: An overriding name for the testbed.
+        @param internal_acts_directory: The directory inside of the package
+                                        that holds acts.
+
+        @returns: An ActsTestingEnviroment with info on the unpacked
+                  acts testing enviroment.
+        """
+        if testbed.teststation != self.test_station:
+            raise error.TestError('Creating a contianer for a testbed on a '
+                                   'different teststation is not allowed.')
+
+        self.test_station.run('unzip "%s" -x -d "%s"' %
+                              (self.zip_file, container_directory))
+
+        return ActsTestingEnviroment(testbed=testbed,
+                container_directory=container_directory,
+                testbed_name=testbed_name,
+                acts_directory=internal_acts_directory)
+
+
+class AndroidTestingEnviroment(object):
+    """A container for testing android devices on a test station."""
+    def __init__(self, testbed, testbed_name=None):
+        """Creates a new android testing enviroment.
+
+        @param testbed: The testbed to test on.
+        @param testbed_name: An overriding name for the testbed.
+        """
+        self.testbed = testbed
+
+        if not testbed_name:
+            # If no override is given get the name from the hostname.
+            hostname = testbed.hostname
+            if dnsname_mangler.is_ip_address(hostname):
+                testbed_name = hostname
+            else:
+                testbed_name = hostname.split('.')[0]
+
+        self.testbed_name = testbed_name
+
+    def install_sl4a_apk(self):
+        """Install sl4a to a test bed."""
+        for serial, adb_host in self.testbed.get_adb_devices().iteritems():
+            adb_utils.install_apk_from_build(
+                    adb_host,
+                    constants.SL4A_APK,
+                    constants.SL4A_ARTIFACT,
+                    package_name=constants.SL4A_PACKAGE)
+
+    def install_apk(self, apk_info):
+        """Installs an additional apk on all adb devices.
+
+        @param apk_info: A dictionary contianing the apk info. This dictionary
+                         should contain the keys:
+                            apk="Name of the apk",
+                            package="Name of the package".
+                            artifact="Name of the artifact", if missing
+                                      the package name is used."
+        """
+        for serial, adb_host in self.testbed.get_adb_devices().iteritems():
+            adb_utils.install_apk_from_build(
+                    adb_host,
+                    apk_info['apk'],
+                    apk_info.get('artifact') or constants.SL4A_ARTIFACT,
+                    package_name=apk_info['package'])
+
 
 class ActsContainer(object):
-    """A container for running acts tests with a contained version of acts."""
-    def __init__(self, test_station, container_directory, acts_directory=None):
+    """A container for working with acts."""
+    def __init__(self,
+                 test_station,
+                 container_directory,
+                 acts_directory=None):
         """
-        @param test_station: The test staiton this container is on.
+        @param test_station: The test station that the container is on.
         @param container_directory: The directory on the teststation this
                                     container operates out of.
         @param acts_directory: The directory within the container that holds
@@ -153,6 +235,7 @@ class ActsContainer(object):
                                DEFAULT_ACTS_INTERNAL_DIRECTORY.
         """
         self.test_station = test_station
+        self.container_directory = container_directory
 
         if not acts_directory:
             acts_directory = DEFAULT_ACTS_INTERNAL_DIRECTORY
@@ -163,57 +246,15 @@ class ActsContainer(object):
         else:
             self.acts_directory = acts_directory
 
-        self.container_directory = container_directory
-
         self.tests_directory = os.path.join(self.acts_directory, TEST_DIR_NAME)
         self.framework_directory = os.path.join(self.acts_directory,
                                                 FRAMEWORK_DIR_NAME)
-        self.config_location = os.path.join(self.container_directory,
-                                            CONFIG_DIR_NAME)
-
-        self.log_directory = os.path.join(self.container_directory,
-                                          LOG_DIR_NAME)
-
-        self.working_directory = os.path.join(self.container_directory,
-                                              CONFIG_DIR_NAME)
 
         self.acts_file = os.path.join(self.framework_directory,
                                       ACTS_EXECUTABLE_IN_FRAMEWORK)
 
         self.setup_file = os.path.join(self.framework_directory,
                                        SETUP_FILE_NAME)
-
-        self.configs = {}
-        self.campaigns = {}
-
-    def install_sl4a_apk(self, testbed):
-        """Install sl4a to a test bed.
-
-        @param testbed: The testbed of phones to install to.
-        """
-        for serial, adb_host in testbed.get_adb_devices().iteritems():
-            adb_utils.install_apk_from_build(
-                    adb_host,
-                    constants.SL4A_APK,
-                    constants.SL4A_PACKAGE,
-                    package_name=constants.SL4A_PACKAGE)
-
-    def install_apk(self, apk_info, testbed):
-        """Installs an additional apk on all adb devices.
-
-        @param testbed: The testbed of phones to install to.
-        @param apk_info: A dictionary contianing the apk info. This dicitonary
-                         should contain the keys apk="Name of the apk",
-                         package="Name of the package". Additionally it can
-                         contain artifact="Name of the artifact", if missing
-                         the package name is used.
-        """
-        for serial, adb_host in testbed.get_adb_devices().iteritems():
-            adb_utils.install_apk_from_build(
-                    adb_host,
-                    apk_info['apk'],
-                    apk_info.get('artifact') or apk_info['package'],
-                    package_name=apk_info['package'])
 
     def get_test_paths(self):
         """Get all test paths within this container.
@@ -268,17 +309,74 @@ class ActsContainer(object):
         if not os.path.isabs(dst):
             dst = os.path.join(self.container_directory, dst)
 
-        path = dst
-        while len(path) > 1:
-            path = os.path.dirname(path)
-            result = self.test_station.run('mkdir "%s"' % path,
-                                           ignore_status=True)
-            if result.exit_status:
-                break
+        path = os.path.dirname(dst)
+        result = self.test_station.run('mkdir "%s"' % path,
+                                       ignore_status=True)
+
+        original_dst = dst
+        if os.path.basename(src) == os.path.basename(dst):
+            dst = os.path.dirname(dst)
 
         self.test_station.send_file(src, dst)
 
-        return dst
+        return original_dst
+
+    def setup_enviroment(self, python_bin='python'):
+        """Sets up the teststation system enviroment so the container can run.
+
+        Prepares the remote system so that the container can run. This involves
+        uninstalling all versions of acts for the version of python being
+        used and installing all needed dependencies.
+
+        @param python_bin: The python binary to use.
+        """
+        uninstall_command = '%s %s uninstall' % (python_bin, self.setup_file)
+        install_deps_command = '%s %s install_deps' % (python_bin,
+                                                       self.setup_file)
+
+        self.test_station.run(uninstall_command)
+        self.test_station.run(install_deps_command)
+
+
+class ActsTestingEnviroment(ActsContainer, AndroidTestingEnviroment):
+    """A container for running acts tests with a contained version of acts."""
+    def __init__(self,
+                 container_directory,
+                 testbed,
+                 testbed_name=None,
+                 acts_directory=None):
+        """
+        @param testbed: The testbed to test on.
+        @param container_directory: The directory on the teststation this
+                                    container operates out of.
+        @param testbed_name: An overriding name for the testbed.
+        @param acts_directory: The directory within the container that holds
+                               acts. If none then it defaults to
+                               DEFAULT_ACTS_INTERNAL_DIRECTORY.
+        """
+        AndroidTestingEnviroment.__init__(self, testbed,
+                                          testbed_name=testbed_name)
+
+        ActsContainer.__init__(self, testbed.teststation,
+                               container_directory=container_directory,
+                               acts_directory=acts_directory)
+
+        self.config_location = os.path.join(self.container_directory,
+                                            CONFIG_DIR_NAME)
+
+        self.log_directory = os.path.join(self.container_directory,
+                                          LOG_DIR_NAME)
+
+        self.acts_file = os.path.join(self.framework_directory,
+                                      ACTS_EXECUTABLE_IN_FRAMEWORK)
+
+        self.working_directory = os.path.join(container_directory,
+                                              CONFIG_DIR_NAME)
+        self.test_station.run('mkdir %s' % self.working_directory,
+                ignore_status=True)
+
+        self.configs = {}
+        self.campaigns = {}
 
     def upload_config(self, config_file):
         """Uploads a config file to the container.
@@ -316,36 +414,17 @@ class ActsContainer(object):
 
         return full_path
 
-    def setup_enviroment(self, python_bin='python'):
-        """Sets up the teststation system enviroment so the container can run.
-
-        Prepares the remote system so that the container can run. This involves
-        uninstalling all versions of acts for the version of python being
-        used and installing all needed dependencies.
-
-        @param python_bin: The python binary to use.
-        """
-        uninstall_command = '%s %s uninstall' % (python_bin, self.setup_file)
-        install_deps_command = '%s %s install_deps' % (python_bin,
-                                                       self.setup_file)
-
-        self.test_station.run(uninstall_command)
-        self.test_station.run(install_deps_command)
-
     def run_test(self,
-                 testbed,
                  config,
                  campaign=None,
                  test_case=None,
                  extra_env={},
                  python_bin='python',
-                 testbed_name=None,
                  timeout=7200):
         """Runs a test within the container.
 
         Runs a test within a container using the given settings.
 
-        @param testbed: The testbed to use for testing.
         @param config: The name of the config file to use as the main config.
                        This should have already been uploaded with
                        upload_config. The string passed into upload_config
@@ -355,23 +434,14 @@ class ActsContainer(object):
                          been uploaded with upload_campaign. The string passed
                          into upload_campaign should be used here.
         @param test_case: The test case to run the test with. If none then the
-                          campaign will be used.
+                          campaign will be used. If multiple are given,
+                          multiple will be run.
         @param extra_env: Extra enviroment variables to run the test with.
         @param python_bin: The python binary to execute the test with.
-        @param testbed_name: The name of the test bed, if none then the name
-                             of the actual test bed is used.
         @param timeout: How many seconds to wait before timing out.
 
         @returns: The results of the test run.
         """
-        if not testbed_name:
-            # If no override is given get the name from the hostname.
-            hostname = testbed.hostname
-            if dnsname_mangler.is_ip_address(hostname):
-                testbed_name = hostname
-            else:
-                testbed_name = hostname.split('.')[0]
-
         if not config in self.configs:
             # Check if the config has been uploaded and upload if it hasn't
             self.upload_config(config)
@@ -402,14 +472,24 @@ class ActsContainer(object):
         command_setup = 'cd %s' % self.working_directory
 
         act_base_cmd = '%s %s -c %s -tb %s ' % (python_bin, self.acts_file,
-                                                full_config, testbed_name)
+                                                full_config, self.testbed_name)
 
         # Format the acts command based on what type of test is being run.
         if test_case and campaign:
             raise error.TestError(
                     'campaign and test_file cannot both have a value.')
         elif test_case:
-            act_cmd = '%s -tc %s' % (act_base_cmd, test_case)
+            if isinstance(test_case, str):
+                test_case = [test_case]
+            if len(test_case) < 1:
+                raise error.TestError('At least one test case must be given.')
+
+            tc_str = ''
+            for tc in test_case:
+                tc_str = '%s %s' % (tc_str, tc)
+            tc_str = tc_str.strip()
+
+            act_cmd = '%s -tc %s' % (act_base_cmd, tc_str)
         elif campaign:
             act_cmd = '%s -tf %s' % (act_base_cmd, full_campaign)
         else:
@@ -428,9 +508,9 @@ class ActsContainer(object):
             act_result = None
             excep = e
 
-        return ActsTestResults(test_case or campaign,
-                               testbed,
-                               testbed_name=testbed_name,
+        return ActsTestResults(str(test_case) or campaign,
+                               self.testbed,
+                               testbed_name=self.testbed_name,
                                run_result=act_result,
                                log_directory=self.log_directory,
                                exception=excep)

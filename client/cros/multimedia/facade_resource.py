@@ -46,7 +46,7 @@ class FacadeResource(object):
     ARC_DISABLED = 'disabled'
     ARC_ENABLED = 'enabled'
     ARC_VERSION = 'CHROMEOS_ARC_VERSION'
-    EXTRA_BROWSER_ARGS = ['--enable-gpu-benchmarking']
+    EXTRA_BROWSER_ARGS = ['--enable-gpu-benchmarking', '--use-fake-ui-for-media-stream']
 
     def __init__(self, chrome_object=None, restart=False):
         """Initializes a FacadeResource.
@@ -115,10 +115,13 @@ class FacadeResource(object):
         return True
 
 
-    def start_default_chrome(self, restart=False):
+    def start_default_chrome(self, restart=False, extra_browser_args=None):
         """Start the default Chrome.
 
         @param restart: True to start Chrome without clearing previous state.
+        @param extra_browser_args: A list containing extra browser args passed
+                                   to Chrome. This list will be appened to
+                                   default EXTRA_BROWSER_ARGS.
 
         @return: True on success, False otherwise.
 
@@ -136,6 +139,8 @@ class FacadeResource(object):
             'arc_mode': arc_mode,
             'autotest_ext': True
         }
+        if extra_browser_args:
+            kwargs['extra_browser_args'] += extra_browser_args
         return self.start_custom_chrome(kwargs)
 
 
@@ -220,6 +225,7 @@ class FacadeResource(object):
         tab = self._browser.tabs.New()
         tab.Navigate(url)
         tab.Activate()
+        tab.WaitForDocumentReadyStateToBeComplete()
         tab_descriptor = self._generate_tab_descriptor(tab)
         self._tabs[tab_descriptor] = tab
         self.clean_unexpected_tabs()
