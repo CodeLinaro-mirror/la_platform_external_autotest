@@ -1,4 +1,5 @@
-# pylint: disable=missing-docstring
+# pylint: disable-msg=C0111
+
 """\
 Functions to expose over the RPC interface.
 
@@ -39,10 +40,12 @@ from django.db.models import Count
 import common
 from autotest_lib.client.common_lib import control_data
 from autotest_lib.client.common_lib import priorities
+from autotest_lib.client.common_lib.cros import dev_server
 # TODO(akeshet): Replace with monarch stats once we know how to instrument rpc
 # server with ts_mon.
 from autotest_lib.client.common_lib.cros.graphite import autotest_stats
-from autotest_lib.frontend.afe import control_file, rpc_utils
+from autotest_lib.frontend.afe import control_file as control_file_lib
+from autotest_lib.frontend.afe import rpc_utils
 from autotest_lib.frontend.afe import models, model_logic, model_attributes
 from autotest_lib.frontend.afe import site_rpc_interface
 from autotest_lib.frontend.tko import models as tko_models
@@ -799,7 +802,7 @@ def generate_control_file(tests=(), profilers=(),
     cf_info, test_objects, profiler_objects = (
         rpc_utils.prepare_generate_control_file(tests, profilers,
                                                 db_tests))
-    cf_info['control_file'] = control_file.generate_control(
+    cf_info['control_file'] = control_file_lib.generate_control(
         tests=test_objects, profilers=profiler_objects,
         is_server=cf_info['is_server'],
         client_control_file=client_control_file, profile_only=profile_only,
@@ -807,19 +810,38 @@ def generate_control_file(tests=(), profilers=(),
     return cf_info
 
 
-def create_parameterized_job(name, priority, test, parameters, kernel=None,
-                             label=None, profilers=(), profiler_parameters=None,
-                             use_container=False, profile_only=None,
-                             upload_kernel_config=False, hosts=(),
-                             meta_hosts=(), one_time_hosts=(),
-                             atomic_group_name=None, synch_count=None,
-                             is_template=False, timeout=None,
-                             timeout_mins=None, max_runtime_mins=None,
-                             run_verify=False, email_list='', dependencies=(),
-                             reboot_before=None, reboot_after=None,
-                             parse_failed_repair=None, hostless=False,
-                             keyvals=None, drone_set=None, run_reset=True,
-                             require_ssp=None):
+def create_parameterized_job(
+        name,
+        priority,
+        test,
+        parameters,
+        kernel=None,
+        label=None,
+        profilers=(),
+        profiler_parameters=None,
+        use_container=False,
+        profile_only=None,
+        upload_kernel_config=False,
+        hosts=(),
+        meta_hosts=(),
+        one_time_hosts=(),
+        atomic_group_name=None,
+        synch_count=None,
+        is_template=False,
+        timeout=None,
+        timeout_mins=None,
+        max_runtime_mins=None,
+        run_verify=False,
+        email_list='',
+        dependencies=(),
+        reboot_before=None,
+        reboot_after=None,
+        parse_failed_repair=None,
+        hostless=False,
+        keyvals=None,
+        drone_set=None,
+        run_reset=True,
+        require_ssp=None):
     """
     Creates and enqueues a parameterized job.
 
@@ -835,12 +857,6 @@ def create_parameterized_job(name, priority, test, parameters, kernel=None,
                                                                 (param value,
                                                                  param type)
     """
-    # Save the values of the passed arguments here. What we're going to do with
-    # them is pass them all to rpc_utils.get_create_job_common_args(), which
-    # will extract the subset of these arguments that apply for
-    # rpc_utils.create_job_common(), which we then pass in to that function.
-    args = locals()
-
     # Set up the parameterized job configs
     test_obj = models.Test.smart_get(test)
     control_type = test_obj.test_type
@@ -884,9 +900,31 @@ def create_parameterized_job(name, priority, test, parameters, kernel=None,
             raise Exception('Extra parameters remain: %r' % parameters)
 
         return rpc_utils.create_job_common(
-                parameterized_job=parameterized_job.id,
-                control_type=control_type,
-                **rpc_utils.get_create_job_common_args(args))
+                **rpc_utils.get_create_job_common_args(dict(
+                    name=name,
+                    priority=priority,
+                    control_type=control_type,
+                    hosts=hosts,
+                    meta_hosts=meta_hosts,
+                    one_time_hosts=one_time_hosts,
+                    atomic_group_name=atomic_group_name,
+                    synch_count=synch_count,
+                    is_template=is_template,
+                    timeout=timeout,
+                    timeout_mins=timeout_mins,
+                    max_runtime_mins=max_runtime_mins,
+                    run_verify=run_verify,
+                    email_list=email_list,
+                    dependencies=dependencies,
+                    reboot_before=reboot_before,
+                    reboot_after=reboot_after,
+                    parse_failed_repair=parse_failed_repair,
+                    hostless=hostless,
+                    keyvals=keyvals,
+                    drone_set=drone_set,
+                    parameterized_job=parameterized_job.id,
+                    run_reset=run_reset,
+                    require_ssp=require_ssp)))
     except:
         parameterized_job.delete()
         raise
@@ -942,7 +980,7 @@ def create_job_page_handler(name, priority, control_file, control_type,
                 builds=builds, test_source_build=test_source_build,
                 is_cloning=is_cloning, **kwargs)
     return create_job(name, priority, control_file, control_type, image=image,
-                      hostless=hostless, is_cloning=is_cloning, **kwargs)
+                      hostless=hostless, **kwargs)
 
 
 @rpc_utils.route_rpc_to_master
@@ -975,7 +1013,6 @@ def create_job(
         run_reset=True,
         require_ssp=None,
         args=(),
-        is_cloning=False,
         **kwargs):
     """\
     Create and enqueue a job.
@@ -1019,7 +1056,6 @@ def create_job(
                        image is not set, drone will run the test without server-
                        side packaging. Default is None.
     @param args A list of args to be injected into control file.
-    @param is_cloning: True if creating a cloning job.
     @param kwargs extra keyword args. NOT USED.
 
     @returns The created Job id number.
@@ -1027,11 +1063,95 @@ def create_job(
     if args:
         control_file = tools.inject_vars({'args': args}, control_file)
 
-    if image:
-        version_label = provision.cros_version_to_label(image)
-        dependencies += (version_label,)
+    if image is None:
+        return rpc_utils.create_job_common(
+                **rpc_utils.get_create_job_common_args(dict(
+                    name=name,
+                    priority=priority,
+                    control_type=control_type,
+                    control_file=control_file,
+                    hosts=hosts,
+                    meta_hosts=meta_hosts,
+                    one_time_hosts=one_time_hosts,
+                    atomic_group_name=atomic_group_name,
+                    synch_count=synch_count,
+                    is_template=is_template,
+                    timeout=timeout,
+                    timeout_mins=timeout_mins,
+                    max_runtime_mins=max_runtime_mins,
+                    run_verify=run_verify,
+                    email_list=email_list,
+                    dependencies=dependencies,
+                    reboot_before=reboot_before,
+                    reboot_after=reboot_after,
+                    parse_failed_repair=parse_failed_repair,
+                    hostless=hostless,
+                    keyvals=keyvals,
+                    drone_set=drone_set,
+                    parent_job_id=parent_job_id,
+                    test_retry=test_retry,
+                    run_reset=run_reset,
+                    require_ssp=require_ssp)))
+
+    # Translate the image name, in case its a relative build name.
+    ds = dev_server.ImageServer.resolve(image)
+    image = ds.translate(image)
+
+    # When image is supplied use a known parameterized test already in the
+    # database to pass the OS image path from the front end, through the
+    # scheduler, and finally to autoserv as the --image parameter.
+
+    # The test autoupdate_ParameterizedJob is in afe_autotests and used to
+    # instantiate a Test object and from there a ParameterizedJob.
+    known_test_obj = models.Test.smart_get('autoupdate_ParameterizedJob')
+    known_parameterized_job = models.ParameterizedJob.objects.create(
+            test=known_test_obj)
+
+    # autoupdate_ParameterizedJob has a single parameter, the image parameter,
+    # stored in the table afe_test_parameters.  We retrieve and set this
+    # instance of the parameter to the OS image path.
+    image_parameter = known_test_obj.testparameter_set.get(test=known_test_obj,
+                                                           name='image')
+    known_parameterized_job.parameterizedjobparameter_set.create(
+            test_parameter=image_parameter, parameter_value=image,
+            parameter_type='string')
+
+    # TODO(crbug.com/502638): save firmware build etc to parameterized_job.
+
+    # By passing a parameterized_job to create_job_common the job entry in
+    # the afe_jobs table will have the field parameterized_job_id set.
+    # The scheduler uses this id in the afe_parameterized_jobs table to
+    # match this job to our known test, and then with the
+    # afe_parameterized_job_parameters table to get the actual image path.
     return rpc_utils.create_job_common(
-            **rpc_utils.get_create_job_common_args(locals()))
+            **rpc_utils.get_create_job_common_args(dict(
+                    name=name,
+                    priority=priority,
+                    control_type=control_type,
+                    control_file=control_file,
+                    hosts=hosts,
+                    meta_hosts=meta_hosts,
+                    one_time_hosts=one_time_hosts,
+                    atomic_group_name=atomic_group_name,
+                    synch_count=synch_count,
+                    is_template=is_template,
+                    timeout=timeout,
+                    timeout_mins=timeout_mins,
+                    max_runtime_mins=max_runtime_mins,
+                    run_verify=run_verify,
+                    email_list=email_list,
+                    dependencies=dependencies,
+                    reboot_before=reboot_before,
+                    reboot_after=reboot_after,
+                    parse_failed_repair=parse_failed_repair,
+                    hostless=hostless,
+                    keyvals=keyvals,
+                    drone_set=drone_set,
+                    parameterized_job=known_parameterized_job.id,
+                    parent_job_id=parent_job_id,
+                    test_retry=test_retry,
+                    run_reset=run_reset,
+                    require_ssp=require_ssp)))
 
 
 def abort_host_queue_entries(**filter_data):

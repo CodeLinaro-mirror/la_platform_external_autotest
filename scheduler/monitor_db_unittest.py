@@ -96,6 +96,9 @@ class BaseSchedulerTest(unittest.TestCase,
 
 
     def _set_monitor_stubs(self):
+        self.mock_config = global_config.FakeGlobalConfig()
+        self.god.stub_with(global_config, 'global_config', self.mock_config)
+
         # Clear the instance cache as this is a brand new database.
         scheduler_models.DBObject._clear_instance_cache()
 
@@ -110,9 +113,6 @@ class BaseSchedulerTest(unittest.TestCase,
         self.god.stub_with(monitor_db, '_db_manager', connection_manager)
         self.god.stub_with(monitor_db, '_db', self._database)
 
-        # These tests only make sense if hosts are acquired inline with the
-        # rest of the tick.
-        self.god.stub_with(monitor_db, '_inline_host_acquisition', True)
         self.god.stub_with(monitor_db.BaseDispatcher,
                            '_get_pending_queue_entries',
                            self._get_pending_hqes)
@@ -133,12 +133,19 @@ class BaseSchedulerTest(unittest.TestCase,
     def setUp(self):
         self._frontend_common_setup()
         self._set_monitor_stubs()
+        self._set_global_config_values()
         self._dispatcher = monitor_db.Dispatcher()
 
 
     def tearDown(self):
         self._database.disconnect()
         self._frontend_common_teardown()
+
+
+    def _set_global_config_values(self):
+        """Set global_config values to suit unittest needs."""
+        self.mock_config.set_config_value(
+                'SCHEDULER', 'inline_host_acquisition', True)
 
 
     def _update_hqe(self, set, where=''):
@@ -419,8 +426,7 @@ class DispatcherSchedulingTest(BaseSchedulerTest):
     def test_no_execution_subdir_not_found(self):
         """Reproduce bug crosbug.com/334353 and recover from it."""
 
-        global_config.global_config.override_config_value(
-                'SCHEDULER', 'drones', 'localhost')
+        self.mock_config.set_config_value('SCHEDULER', 'drones', 'localhost')
 
         job = self._create_job(hostless=True)
 

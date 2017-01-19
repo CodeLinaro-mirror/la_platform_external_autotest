@@ -334,23 +334,6 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                 self._get_board_from_afe())
 
 
-    def lookup_job_repo_url(self):
-        """Looks up the job_repo_url for the host.
-
-        This is kept for backwards compatibility as AU test code in older
-        branch does not use server-side packaging and calls this method through
-        the host object.
-
-        TODO(dshi): Once R50 falls off the stable branch, we should remove this
-        method.
-
-        @returns job_repo_url from AFE or None if not found.
-
-        @raises KeyError if the host does not have a job_repo_url
-        """
-        return afe_utils.get_host_attribute(self, ds_constants.JOB_REPO_URL)
-
-
     def verify_job_repo_url(self, tag=''):
         """
         Make sure job_repo_url of this host is valid.
@@ -693,7 +676,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         else:
             build = update_url
         devserver = dev_server.resolve(build, self.hostname)
-        server_name = dev_server.ImageServer.get_server_name(devserver.url())
+        server_name = devserver.hostname
 
         try:
             board, build_type, milestone, _ = server_utils.ParseBuildName(build)
@@ -819,7 +802,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         logging.debug('Update URL is %s', update_url)
 
         # Report provision stats.
-        server_name = dev_server.ImageServer.get_server_name(update_url)
+        server_name = dev_server.get_hostname(update_url)
         (metrics.Counter('chromeos/autotest/provision/install')
          .increment(fields={'devserver': server_name}))
 
@@ -1046,23 +1029,6 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         return board
 
 
-    def get_build(self):
-        """Retrieve the current build for this Host from the AFE.
-
-        Looks through this host's labels in the AFE to determine its build.
-        This method is replaced by afe_utils.get_build. It's kept here to
-        maintain backwards compatibility for test control files in older CrOS
-        builds (R48, R49 etc.) still call host.get_build, e.g.,
-        `provision_AutoUpdate.double`.
-        TODO(sbasi): Once R50 falls into release branch, this method can be
-        removed.
-
-        @returns The current build or None if it could not find it or if there
-                 were multiple build labels assigned to this host.
-        """
-        return afe_utils.get_build(self)
-
-
     def servo_install(self, image_url=None, usb_boot_timeout=USB_BOOT_TIMEOUT,
                       install_timeout=INSTALL_TIMEOUT):
         """
@@ -1160,6 +1126,11 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
     def close(self):
         super(CrosHost, self).close()
+        if self._chameleon_host:
+            self._chameleon_host.close()
+
+        if self._servo_host:
+            self._servo_host.close()
 
 
     def get_power_supply_info(self):
