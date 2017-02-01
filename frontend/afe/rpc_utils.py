@@ -6,6 +6,7 @@ only RPC interface functions go into that file.
 
 __author__ = 'showard@google.com (Steve Howard)'
 
+import collections
 import datetime
 from functools import wraps
 import inspect
@@ -405,6 +406,13 @@ def check_atomic_group_create_job(synch_count, host_objects, metahost_objects,
 
     @raises model_logic.ValidationError - When an issue is found.
     """
+    if synch_count and synch_count > atomic_group.max_number_of_machines:
+        raise model_logic.ValidationError(
+            {'atomic_group_name' :
+             'You have requested a synch_count (%d) greater than the '
+             'maximum machines in the requested Atomic Group (%d).' %
+             (synch_count, atomic_group.max_number_of_machines)})
+
     # If specific host objects were supplied with an atomic group, verify
     # that there are enough to satisfy the synch_count.
     minimum_required = synch_count or 1
@@ -864,24 +872,13 @@ def bucket_hosts_by_shard(host_objs, rpc_hostnames=False):
 
     @return: A map of shard hostname: list of hosts on the shard.
     """
-    shard_host_map = {}
+    shard_host_map = collections.defaultdict(list)
     for host in host_objs:
         if host.shard:
             shard_name = (host.shard.rpc_hostname() if rpc_hostnames
                           else host.shard.hostname)
-            shard_host_map.setdefault(shard_name, []).append(host.hostname)
+            shard_host_map[shard_name].append(host.hostname)
     return shard_host_map
-
-
-def get_create_job_common_args(local_args):
-    """
-    Returns a dict containing only the args that apply for create_job_common
-
-    Returns a subset of local_args, which contains only the arguments that can
-    be passed in to create_job_common().
-    """
-    arg_names, _, _, _ = inspect.getargspec(create_job_common)
-    return dict(item for item in local_args.iteritems() if item[0] in arg_names)
 
 
 def create_job_common(
@@ -916,58 +913,44 @@ def create_job_common(
     """
     Common code between creating "standard" jobs and creating parameterized jobs
     """
-    user = models.User.current_user()
-    owner = user.login
-
     # input validation
-    if not (hosts or meta_hosts or one_time_hosts or atomic_group_name
-            or hostless):
-        raise model_logic.ValidationError({
-            'arguments' : "You must pass at least one of 'hosts', "
-                          "'meta_hosts', 'one_time_hosts', "
-                          "'atomic_group_name', or 'hostless'"
-            })
-
+    host_args_passed = any((
+            hosts, meta_hosts, one_time_hosts, atomic_group_name))
     if hostless:
-        if hosts or meta_hosts or one_time_hosts or atomic_group_name:
+        if host_args_passed:
             raise model_logic.ValidationError({
                     'hostless': 'Hostless jobs cannot include any hosts!'})
-        server_type = control_data.CONTROL_TYPE_NAMES.SERVER
-        if control_type != server_type:
+        if control_type != control_data.CONTROL_TYPE_NAMES.SERVER:
             raise model_logic.ValidationError({
                     'control_type': 'Hostless jobs cannot use client-side '
                                     'control files'})
+    elif not host_args_passed:
+        raise model_logic.ValidationError({
+            'arguments' : "For host jobs, you must pass at least one of"
+                          " 'hosts', 'meta_hosts', 'one_time_hosts',"
+                          " 'atomic_group_name'."
+            })
 
-    atomic_groups_by_name = dict((ag.name, ag)
-                                 for ag in models.AtomicGroup.objects.all())
+    atomic_groups_by_name = {
+            group.name: group for group in models.AtomicGroup.objects.all()
+    }
     label_objects = list(models.Label.objects.filter(name__in=meta_hosts))
 
     # Schedule on an atomic group automagically if one of the labels given
     # is an atomic group label and no explicit atomic_group_name was supplied.
     if not atomic_group_name:
-        for label in label_objects:
-            if label and label.atomic_group:
-                atomic_group_name = label.atomic_group.name
-                break
+        atomic_group_name = _get_atomic_group_name_from_labels(label_objects)
+
     # convert hostnames & meta hosts to host/label objects
     host_objects = models.Host.smart_get_bulk(hosts)
-    if not server_utils.is_shard():
-        shard_host_map = bucket_hosts_by_shard(host_objects)
-        num_shards = len(shard_host_map)
-        if (num_shards > 1 or (num_shards == 1 and
-                len(shard_host_map.values()[0]) != len(host_objects))):
-            # We disallow the following jobs on master:
-            #   num_shards > 1: this is a job spanning across multiple shards.
-            #   num_shards == 1 but number of hosts on shard is less
-            #   than total number of hosts: this is a job that spans across
-            #   one shard and the master.
-            raise ValueError(
-                    'The following hosts are on shard(s), please create '
-                    'seperate jobs for hosts on each shard: %s ' %
-                    shard_host_map)
+    _validate_host_job_sharding(host_objects)
+    for host in one_time_hosts:
+        this_host = models.Host.create_one_time_host(host)
+        host_objects.append(this_host)
+
     metahost_objects = []
     meta_host_labels_by_name = {label.name: label for label in label_objects}
-    for label_name in meta_hosts or []:
+    for label_name in meta_hosts:
         if label_name in meta_host_labels_by_name:
             metahost_objects.append(meta_host_labels_by_name[label_name])
         elif label_name in atomic_groups_by_name:
@@ -993,18 +976,8 @@ def create_job_common(
                     {'one_time_hosts':
                      'One time hosts cannot be used with an Atomic Group.'})
         atomic_group = models.AtomicGroup.smart_get(atomic_group_name)
-        if synch_count and synch_count > atomic_group.max_number_of_machines:
-            raise model_logic.ValidationError(
-                    {'atomic_group_name' :
-                     'You have requested a synch_count (%d) greater than the '
-                     'maximum machines in the requested Atomic Group (%d).' %
-                     (synch_count, atomic_group.max_number_of_machines)})
     else:
         atomic_group = None
-
-    for host in one_time_hosts or []:
-        this_host = models.Host.create_one_time_host(host)
-        host_objects.append(this_host)
 
     options = dict(name=name,
                    priority=priority,
@@ -1028,11 +1001,52 @@ def create_job_common(
                    test_retry=test_retry,
                    run_reset=run_reset,
                    require_ssp=require_ssp)
-    return create_new_job(owner=owner,
+
+    return create_new_job(owner=models.User.current_user().login,
                           options=options,
                           host_objects=host_objects,
                           metahost_objects=metahost_objects,
                           atomic_group=atomic_group)
+
+
+def _get_atomic_group_name_from_labels(label_objects):
+    """Get atomic group name from label objects.
+
+    @returns: atomic group name string or None
+    """
+    for label in label_objects:
+        if label and label.atomic_group:
+            return label.atomic_group.name
+
+
+def _validate_host_job_sharding(host_objects):
+    """Check that the hosts obey job sharding rules."""
+    if not (server_utils.is_shard()
+            or _allowed_hosts_for_master_job(host_objects)):
+        shard_host_map = bucket_hosts_by_shard(host_objects)
+        raise ValueError(
+                'The following hosts are on shard(s), please create '
+                'seperate jobs for hosts on each shard: %s ' %
+                shard_host_map)
+
+
+def _allowed_hosts_for_master_job(host_objects):
+    """Check that the hosts are allowed for a job on master."""
+    # We disallow the following jobs on master:
+    #   num_shards > 1: this is a job spanning across multiple shards.
+    #   num_shards == 1 but number of hosts on shard is less
+    #   than total number of hosts: this is a job that spans across
+    #   one shard and the master.
+    shard_host_map = bucket_hosts_by_shard(host_objects)
+    num_shards = len(shard_host_map)
+    if num_shards > 1:
+        return False
+    if num_shards == 1:
+        hosts_on_shard = shard_host_map.values()[0]
+        assert len(hosts_on_shard) <= len(host_objects)
+        return len(hosts_on_shard) == len(host_objects)
+    else:
+        return True
 
 
 def encode_ascii(control_file):

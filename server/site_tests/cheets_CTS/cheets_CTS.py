@@ -20,6 +20,10 @@ import shutil
 from autotest_lib.client.common_lib import error
 from autotest_lib.server import utils
 from autotest_lib.server.cros import tradefed_test
+try:
+    from chromite.lib import metrics
+except:
+    metrics = None
 
 # Notice if there are only a few failures each RETRY step currently (08/01/2016)
 # takes a bit more than 6 minutes (mostly for reboot, login, starting ARC).
@@ -37,7 +41,7 @@ _DL_CTS = 'https://dl.google.com/dl/android/cts/'
 _CTS_URI = {
     'arm' : _DL_CTS + 'android-cts-6.0_r12-linux_x86-arm.zip',
     'x86' : _DL_CTS + 'android-cts-6.0_r12-linux_x86-x86.zip',
-    'media' : _DL_CTS + 'android-cts-media-1.1.zip'
+    'media' : _DL_CTS + 'android-cts-media-1.2.zip'
 }
 
 
@@ -76,7 +80,6 @@ class cheets_CTS(tradefed_test.TradefedTest):
                 'tools',
                 'cts-tradefed')
         logging.info('CTS-tradefed path: %s', self._cts_tradefed)
-        self._needs_push_media = False
 
         # Load waivers and manual tests so TF doesn't re-run them.
         self.waivers_and_manual_tests = self._get_expected_failures(
@@ -105,20 +108,45 @@ class cheets_CTS(tradefed_test.TradefedTest):
         src_plan_file = os.path.join(self.bindir, 'plans', '%s.xml' % plan)
         shutil.copy(src_plan_file, plans_dir)
 
-    def _push_media(self):
-        """Downloads, caches and pushed media files to DUT."""
-        media = self._install_bundle(_CTS_URI['media'])
+    def _copy_media(self, media):
+        """Calls copy_media to push media files to DUT via adb."""
         base = os.path.splitext(os.path.basename(_CTS_URI['media']))[0]
         cts_media = os.path.join(media, base)
         copy_media = os.path.join(cts_media, 'copy_media.sh')
         with pushd(cts_media):
+            try:
+                self._run('file', args=('/bin/sh',), verbose=True,
+                          ignore_status=True, timeout=60,
+                          stdout_tee=utils.TEE_TO_LOGS,
+                          stderr_tee=utils.TEE_TO_LOGS)
+                self._run('sh', args=('--version',), verbose=True,
+                          ignore_status=True, timeout=60,
+                          stdout_tee=utils.TEE_TO_LOGS,
+                          stderr_tee=utils.TEE_TO_LOGS)
+            except:
+                logging.warning('Could not obtain sh version.')
             self._run(
-                'source',
-                args=(copy_media, 'all'),
+                'sh',
+                args=('-e', copy_media, 'all'),
                 timeout=7200,  # Wait at most 2h for download of media files.
                 verbose=True,
+                ignore_status=False,
                 stdout_tee=utils.TEE_TO_LOGS,
                 stderr_tee=utils.TEE_TO_LOGS)
+
+    def _push_media(self):
+        """Downloads, caches and pushed media files to DUT."""
+        media = self._install_bundle(_CTS_URI['media'])
+        # TODO(ihf): this really should measure throughput in Bytes/s.
+        m = 'chromeos/autotest/infra_benchmark/cheets/push_media/duration'
+        fields = {'success': False,
+                  'dut_host_name': self._host.hostname}
+        if metrics:
+            with metrics.SecondsTimer(m, fields=fields) as c:
+                self._copy_media(media)
+                c['success'] = True
+        else:
+            self._copy_media(media)
 
     def _tradefed_run_command(self,
                               package=None,
@@ -149,13 +177,14 @@ class cheets_CTS(tradefed_test.TradefedTest):
         @return: list of command tokens for the 'run' command.
         """
         if package is not None:
-            cmd = ['run', 'cts', '--package', package]
+            cmd = ['run', 'commandAndExit', 'cts', '--package', package]
         elif plan is not None:
-            cmd = ['run', 'cts', '--plan', plan]
+            cmd = ['run', 'commandAndExit', 'cts', '--plan', plan]
         elif session_id is not None:
-            cmd = ['run', 'cts', '--continue-session', '%d' % session_id]
+            cmd = ['run', 'commandAndExit', 'cts', '--continue-session',
+                   '%d' % session_id]
         elif test_class is not None:
-            cmd = ['run', 'cts', '-c', test_class]
+            cmd = ['run', 'commandAndExit', 'cts', '-c', test_class]
             if test_method is not None:
                 cmd += ['-m', test_method]
         else:
@@ -203,6 +232,7 @@ class cheets_CTS(tradefed_test.TradefedTest):
                 args=tuple(command),
                 timeout=self._timeout,
                 verbose=True,
+                ignore_status=False,
                 # Make sure to tee tradefed stdout/stderr to autotest logs
                 # continuously during the test run.
                 stdout_tee=utils.TEE_TO_LOGS,
@@ -302,6 +332,12 @@ class cheets_CTS(tradefed_test.TradefedTest):
         @param max_retry: number of retry steps before reporting results.
         @param timeout: time after which tradefed can be interrupted.
         """
+        # Don't download media for tests that don't need it. b/29371037
+        # TODO(ihf): This can be removed once the control file generator is
+        # aware of this constraint.
+        if target_package.startswith('android.mediastress'):
+            needs_push_media = True
+
         # On dev and beta channels timeouts are sharp, lenient on stable.
         self._timeout = timeout
         if self._get_release_channel == 'stable':

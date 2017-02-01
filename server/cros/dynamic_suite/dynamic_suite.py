@@ -260,8 +260,8 @@ class SuiteSpec(object):
             max_runtime_mins=24*60,
             timeout=24,
             timeout_mins=None,
-            suite_dependencies=[],
-            bug_template={},
+            suite_dependencies=None,
+            bug_template=None,
             devserver_url=None,
             priority=priorities.Priority.DEFAULT,
             predicate=None,
@@ -365,7 +365,7 @@ class SuiteSpec(object):
         self.max_runtime_mins = max_runtime_mins
         self.timeout = timeout
         self.timeout_mins = timeout_mins or timeout * 60
-        self.bug_template = bug_template
+        self.bug_template = {} if bug_template is None else bug_template
         self.priority = priority
         self.wait_for_results = wait_for_results
         self.job_retry = job_retry
@@ -404,7 +404,9 @@ class SuiteSpec(object):
 
     def _init_suite_dependencies(self, suite_dependencies):
         """Initialize suite dependencies attribute."""
-        if isinstance(suite_dependencies, str):
+        if suite_dependencies is None:
+            self.suite_dependencies = []
+        elif isinstance(suite_dependencies, str):
             self.suite_dependencies = [dep.strip(' ') for dep
                                        in suite_dependencies.split(',')]
         else:
@@ -576,7 +578,6 @@ def _perform_reimage_and_run(spec, afe, tko, suite_job_id=None):
             offload_failures_only=spec.offload_failures_only,
             test_source_build=spec.test_source_build,
             run_prod_code=spec.run_prod_code)
-
 
     if spec.delay_minutes:
         logging.debug('delay_minutes is set. Sleeping %d minutes before '

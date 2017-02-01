@@ -41,7 +41,9 @@ from autotest_lib.server import test
 from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros.dynamic_suite import frontend_wrappers
 from autotest_lib.server.hosts import abstract_ssh
+from autotest_lib.server.hosts import afe_store
 from autotest_lib.server.hosts import factory as host_factory
+from autotest_lib.server.hosts import host_info
 from autotest_lib.tko import db as tko_db
 from autotest_lib.tko import models as tko_models
 from autotest_lib.tko import status_lib
@@ -89,17 +91,20 @@ def get_machine_dicts(machine_names, in_lab, host_attributes=None):
             'hostname': Name of the machine originally in machine_names (str).
             'afe_host': A frontend.Host object for the machine, or a stub if
                     in_lab is false.
+            'host_info_store': A host_info.CachingHostInfoStore object to obtain
+                    host information. A stub if in_lab is False.
     """
+    if host_attributes is None:
+        host_attributes = dict()
     machine_dict_list = []
-    afe = frontend_wrappers.RetryingAFE(timeout_min=5, delay_sec=10)
     for machine in machine_names:
-        afe_host_in_lab = None
-        if in_lab:
-            afe_host_in_lab = afe.get_hosts(hostname=machine)[0]
-        afe_host = afe_host_in_lab or server_utils.EmptyAFEHost()
-        if host_attributes:
-            afe_host.attributes.update(host_attributes)
-        machine_dict_list.append({'hostname' : machine, 'afe_host' : afe_host})
+        afe_host = _create_afe_host(machine, in_lab)
+        afe_host.attributes.update(host_attributes)
+        machine_dict_list.append({
+                'hostname' : machine,
+                'afe_host' : afe_host,
+                'host_info_store': _create_host_info_store(machine, in_lab),
+        })
     return machine_dict_list
 
 
@@ -1418,6 +1423,43 @@ def _is_current_server_job(test):
     @param test: test instance from tko parser.
     """
     return test.testname == 'SERVER_JOB'
+
+
+def _create_afe_host(hostname, in_lab):
+    """Create a real or stub frontend.Host object.
+
+    @param hostname: Name of the host for which we want the Host object.
+    @param in_lab: (bool) whether we have access to the AFE.
+    @returns: An object of type frontend.AFE
+    """
+    if not in_lab:
+        return server_utils.EmptyAFEHost()
+
+    afe = frontend_wrappers.RetryingAFE(timeout_min=5, delay_sec=10)
+    hosts = afe.get_hosts(hostname=hostname)
+    if not hosts:
+        raise error.AutoservError('No hosts named %s found' % hostname)
+
+    return hosts[0]
+
+
+def _create_host_info_store(hostname, in_lab):
+    """Create a real or stub afe_store.AfeStore object.
+
+    @param hostname: Name of the host for which we want the store.
+    @param in_lab: (bool) whether we have access to the AFE.
+    @returns: An object of type afe_store.AfeStore
+    """
+    if not in_lab:
+        return host_info.InMemoryHostInfoStore()
+
+    host_info_store = afe_store.AfeStore(hostname)
+    try:
+        host_info_store.get(force_refresh=True)
+    except host_info.StoreError:
+        raise error.AutoservError('Could not obtain HostInfo for hostname %s' %
+                                  hostname)
+    return host_info_store
 
 
 # load up site-specific code for generating site-specific job data

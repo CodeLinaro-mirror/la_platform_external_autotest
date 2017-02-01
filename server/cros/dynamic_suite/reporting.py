@@ -454,7 +454,7 @@ class Reporter(object):
 
 
     @classmethod
-    def get_creds_abspath(cls):
+    def _get_creds_abspath(cls):
         """Returns the abspath of the bug filer credentials file.
 
         @return: A path to the oauth2 credentials file.
@@ -468,7 +468,7 @@ class Reporter(object):
             return
         try:
             self._phapi_client = phapi_lib.ProjectHostingApiClient(
-                    self.get_creds_abspath(), self._project_name,
+                    self._get_creds_abspath(), self._project_name,
                     self._monorail_server)
         except phapi_lib.ProjectHostingApiException as e:
             logging.error('Unable to create project hosting api client: %s', e)
@@ -490,7 +490,7 @@ class Reporter(object):
             return self._phapi_client
         raise phapi_lib.ProjectHostingApiException('Project hosting client not '
                 'initialized for project:%s, using auth file: %s' %
-                (self._project_name, self.get_creds_abspath()))
+                (self._project_name, self._get_creds_abspath()))
 
 
     def _get_lab_error_template(self):
@@ -616,7 +616,7 @@ class Reporter(object):
                          issue_id, comment, label_update, status)
 
 
-    def find_issue_by_marker(self, marker):
+    def _find_issue_by_marker(self, marker):
         """
         Queries the tracker to find if there is a bug filed for this issue.
 
@@ -720,7 +720,7 @@ class Reporter(object):
         @return An Issue instance, representing an open issue that is a
                 duplicate of the one being searched for.
         """
-        issue = self.find_issue_by_marker(marker)
+        issue = self._find_issue_by_marker(marker)
         if not issue or issue.state == constants.ISSUE_OPEN:
             return issue
 
@@ -843,7 +843,7 @@ class Reporter(object):
             return ''
 
 
-    def report(self, bug, bug_template={}, ignore_duplicate=False):
+    def report(self, bug, bug_template=None, ignore_duplicate=False):
         """Report an issue to the bug tracker.
 
         If this issue has happened before, post a comment on the
@@ -865,6 +865,9 @@ class Reporter(object):
                     bug, the count is 1.  If we could not file a bug for some
                     reason, the count is 0.
         """
+        if bug_template is None:
+            bug_template = {}
+
         if not self._check_tracker():
             logging.error("Can't file %s", bug.title())
             return ReportResult(None, 0)
@@ -918,6 +921,34 @@ class Reporter(object):
         bug_id = self._create_bug_report(bug, bug_template, sheriffs)
         bug_count = 1 if bug_id else 0
         return ReportResult(bug_id, bug_count)
+
+
+class NullReporter(object):
+    """Null object for bug reporter."""
+
+    def report(self, bug, bug_template=None, ignore_duplicate=False):
+        """Report an issue to the bug tracker.
+
+        If this issue has happened before, post a comment on the
+        existing bug about it occurring again, and update the
+        'autofiled-count' label.  If this is a new issue, create a
+        new bug for it.
+
+        @param bug          A Bug instance about the issue.
+        @param bug_template A template dictionary specifying the
+                            default bug filing options for an issue
+                            with this suite.
+        @param ignore_duplicate  If True, when a duplicate is found,
+                                 simply ignore the new one rather than
+                                 posting an update.
+        @return   A ReportResult namedtuple containing:
+
+                  - the issue id as a string or None
+                  - the number of times the bug has been updated.  For a new
+                    bug, the count is 1.  If we could not file a bug for some
+                    reason, the count is 0.
+        """
+        return ReportResult(None, 0)
 
 
 # TODO(beeps): Move this to server/site_utils after crbug.com/281906 is fixed.
