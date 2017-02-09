@@ -109,7 +109,7 @@ class job_list_unittest(job_unittest):
     def test_job_list_jobs(self):
         self.god.stub_function(getpass, 'getuser')
         getpass.getuser.expect_call().and_return('user0')
-        self.run_cmd(argv=['atest', 'job', 'list', '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'list'],
                      rpcs=[('get_jobs_summary', {'owner': 'user0',
                                                  'running': None},
                             True, self.values)],
@@ -119,8 +119,7 @@ class job_list_unittest(job_unittest):
 
     def test_job_list_jobs_only_user(self):
         values = [item for item in self.values if item['owner'] == 'Cringer']
-        self.run_cmd(argv=['atest', 'job', 'list', '-u', 'Cringer',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'list', '-u', 'Cringer'],
                      rpcs=[('get_jobs_summary', {'owner': 'Cringer',
                                                  'running': None},
                             True, values)],
@@ -130,8 +129,7 @@ class job_list_unittest(job_unittest):
 
 
     def test_job_list_jobs_all(self):
-        self.run_cmd(argv=['atest', 'job', 'list', '--all',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'list', '--all'],
                      rpcs=[('get_jobs_summary', {'running': None},
                             True, self.values)],
                      out_words_ok=['Fisto', 'Roboto', 'Panthor',
@@ -140,8 +138,7 @@ class job_list_unittest(job_unittest):
 
 
     def test_job_list_jobs_id(self):
-        self.run_cmd(argv=['atest', 'job', 'list', '5964',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'list', '5964'],
                      rpcs=[('get_jobs_summary', {'id__in': ['5964'],
                                                  'running': None},
                             True,
@@ -161,8 +158,7 @@ class job_list_unittest(job_unittest):
 
 
     def test_job_list_jobs_id_verbose(self):
-        self.run_cmd(argv=['atest', 'job', 'list', '5964', '-v',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'list', '5964', '-v'],
                      rpcs=[('get_jobs_summary', {'id__in': ['5964'],
                                                  'running': None},
                             True,
@@ -183,8 +179,7 @@ class job_list_unittest(job_unittest):
 
 
     def test_job_list_jobs_name(self):
-        self.run_cmd(argv=['atest', 'job', 'list', 'myt*',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'list', 'myt*'],
                      rpcs=[('get_jobs_summary', {'name__startswith': 'myt',
                                                  'running': None},
                             True,
@@ -204,8 +199,7 @@ class job_list_unittest(job_unittest):
 
 
     def test_job_list_jobs_all_verbose(self):
-        self.run_cmd(argv=['atest', 'job', 'list', '--all', '--verbose',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'list', '--all', '--verbose'],
                      rpcs=[('get_jobs_summary', {'running': None},
                             True, self.values)],
                      out_words_ok=['Fisto', 'Spikor', 'Cringer', 'Priority',
@@ -215,8 +209,7 @@ class job_list_unittest(job_unittest):
 class job_list_jobs_all_and_user_unittest(cli_mock.cli_unittest):
     def test_job_list_jobs_all_and_user(self):
         testjob = job.job_list()
-        sys.argv = ['atest', 'job', 'list', '-a', '-u', 'user0',
-                    '--ignore_site_file']
+        sys.argv = ['atest', 'job', 'list', '-a', '-u', 'user0']
         self.god.mock_io()
         (sys.exit.expect_call(mock.anything_comparator())
          .and_raises(cli_mock.ExitException))
@@ -228,8 +221,7 @@ class job_list_jobs_all_and_user_unittest(cli_mock.cli_unittest):
 class job_stat_unittest(job_unittest):
     def test_job_stat_job(self):
         results = copy.deepcopy(self.results)
-        self.run_cmd(argv=['atest', 'job', 'stat', '180',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'stat', '180'],
                      rpcs=[('get_jobs_summary', {'id__in': ['180']}, True,
                             [results[0]]),
                            ('get_host_queue_entries', {'job__in': ['180']},
@@ -262,7 +254,7 @@ class job_stat_unittest(job_unittest):
 
     def test_job_stat_list_unassigned_host(self):
         self.run_cmd(argv=['atest', 'job', 'stat', '6761',
-                           '--list-hosts', '--ignore_site_file'],
+                           '--list-hosts'],
                      rpcs=[('get_jobs_summary', {'id__in': ['6761']}, True,
                             [{u'status_counts': {u'Queued': 1},
                               u'control_file': u'def step_init():\n    job.next_step(\'step0\')\n\ndef step0():\n    AUTHOR = "mbligh@google.com (Martin Bligh)"\n    NAME = "Kernbench"\n    TIME = "SHORT"\n    TEST_CLASS = "Kernel"\n    TEST_CATEGORY = "Benchmark"\n    TEST_TYPE = "client"\n    \n    DOC = """\n    A standard CPU benchmark. Runs a kernel compile and measures the performance.\n    """\n    \n    job.run_test(\'kernbench\')',
@@ -301,7 +293,7 @@ class job_stat_unittest(job_unittest):
 
     def test_job_stat_list_hosts(self):
         self.run_cmd(argv=['atest', 'job', 'stat', '6761',
-                           '--list-hosts', '--ignore_site_file'],
+                           '--list-hosts'],
                      rpcs=[('get_jobs_summary', {'id__in': ['6761']}, True,
                             [{u'status_counts': {u'Queued': 1},
                               u'control_file': u'def step_init():\n    job.next_step(\'step0\')\n\ndef step0():\n    AUTHOR = "mbligh@google.com (Martin Bligh)"\n    NAME = "Kernbench"\n    TIME = "SHORT"\n    TEST_CLASS = "Kernel"\n    TEST_CATEGORY = "Benchmark"\n    TEST_TYPE = "client"\n    \n    DOC = """\n    A standard CPU benchmark. Runs a kernel compile and measures the performance.\n    """\n    \n    job.run_test(\'kernbench\')',
@@ -375,8 +367,7 @@ class job_stat_unittest(job_unittest):
 
     def test_job_stat_list_hosts_status(self):
         self.run_cmd(argv=['atest', 'job', 'stat', '6761',
-                           '--list-hosts-status', 'Running,Queued',
-                           '--ignore_site_file'],
+                           '--list-hosts-status', 'Running,Queued'],
                      rpcs=[('get_jobs_summary', {'id__in': ['6761']}, True,
                             [{u'status_counts': {u'Queued': 1, u'Running': 1},
                               u'control_file': u'def step_init():\n    job.next_step(\'step0\')\n\ndef step0():\n    AUTHOR = "mbligh@google.com (Martin Bligh)"\n    NAME = "Kernbench"\n    TIME = "SHORT"\n    TEST_CLASS = "Kernel"\n    TEST_CATEGORY = "Benchmark"\n    TEST_TYPE = "client"\n    \n    DOC = """\n    A standard CPU benchmark. Runs a kernel compile and measures the performance.\n    """\n    \n    job.run_test(\'kernbench\')',
@@ -449,8 +440,7 @@ class job_stat_unittest(job_unittest):
 
 
     def test_job_stat_job_multiple_hosts(self):
-        self.run_cmd(argv=['atest', 'job', 'stat', '6761',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'stat', '6761'],
                      rpcs=[('get_jobs_summary', {'id__in': ['6761']}, True,
                             [{u'status_counts': {u'Running': 1,
                                                  u'Queued': 4},
@@ -571,8 +561,7 @@ class job_stat_unittest(job_unittest):
 
     def test_job_stat_job_no_host_in_qes(self):
         results = copy.deepcopy(self.results)
-        self.run_cmd(argv=['atest', 'job', 'stat', '180',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'stat', '180'],
                      rpcs=[('get_jobs_summary', {'id__in': ['180']}, True,
                             [results[0]]),
                            ('get_host_queue_entries', {'job__in': ['180']},
@@ -597,8 +586,7 @@ class job_stat_unittest(job_unittest):
 
     def test_job_stat_multi_jobs(self):
         results = copy.deepcopy(self.results)
-        self.run_cmd(argv=['atest', 'job', 'stat', '180', '338',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'stat', '180', '338'],
                      rpcs=[('get_jobs_summary', {'id__in': ['180', '338']},
                             True, results),
                            ('get_host_queue_entries',
@@ -648,8 +636,7 @@ class job_stat_unittest(job_unittest):
 
 
     def test_job_stat_multi_jobs_name_id(self):
-        self.run_cmd(argv=['atest', 'job', 'stat', 'mytest', '180',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'stat', 'mytest', '180'],
                      rpcs=[('get_jobs_summary', {'id__in': ['180']},
                             True,
                             [{u'status_counts': {u'Aborted': 1},
@@ -745,7 +732,7 @@ class job_create_unittest(cli_mock.cli_unittest):
 
     def test_execute_create_job(self):
         self.run_cmd(argv=['atest', 'job', 'create', '-t', 'sleeptest',
-                           'test_job0', '-m', 'host0', '--ignore_site_file'],
+                           'test_job0', '-m', 'host0'],
                      rpcs=[('generate_control_file',
                             {'tests': ['sleeptest']},
                             True,
@@ -758,33 +745,10 @@ class job_create_unittest(cli_mock.cli_unittest):
                      out_words_no=['Uploading', 'Done'])
 
 
-    def test_execute_create_job_with_atomic_group(self):
-        data = dict(self.data)
-        data['atomic_group_name'] = 'my-atomic-group'
-        data['control_type'] = SERVER
-        mock_ctrl_file = 'mock control file'
-        data['control_file'] = mock_ctrl_file
-        data['synch_count'] = 2
-        data['hosts'] = []
-        self.run_cmd(argv=['atest', 'job', 'create', '-t', 'mocktest',
-                           'test_job0', '--ignore_site_file',
-                           '-G', 'my-atomic-group'],
-                     rpcs=[('generate_control_file',
-                            {'tests': ['mocktest']},
-                            True,
-                            {'control_file' : mock_ctrl_file,
-                             'synch_count' : 2,
-                             'is_server' : True,
-                             'dependencies' : []}),
-                           ('create_job', data, True, 180)],
-                     out_words_ok=['test_job0', 'Created'],
-                     out_words_no=['Uploading', 'Done'])
-
-
     def test_execute_create_job_with_control(self):
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
-                           'test_job0', '-m', 'host0', '--ignore_site_file'],
+                           'test_job0', '-m', 'host0'],
                      rpcs=[('create_job', self.data, True, 42)],
                      out_words_ok=['test_job0', 'Created'],
                      out_words_no=['Uploading', 'Done'])
@@ -796,8 +760,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         data['email_list'] = 'em'
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
-                           'test_job0', '-m', 'host0', '-e', 'em',
-                           '--ignore_site_file'],
+                           'test_job0', '-m', 'host0', '-e', 'em'],
                      rpcs=[('create_job', data, True, 42)],
                      out_words_ok=['test_job0', 'Created'],
                      out_words_no=['Uploading', 'Done'])
@@ -809,8 +772,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         data['dependencies'] = ['dep1', 'dep2']
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
-                           'test_job0', '-m', 'host0', '-d', 'dep1, dep2 ',
-                           '--ignore_site_file'],
+                           'test_job0', '-m', 'host0', '-d', 'dep1, dep2 '],
                      rpcs=[('create_job', data, True, 42)],
                      out_words_ok=['test_job0', 'Created'],
                      out_words_no=['Uploading', 'Done'])
@@ -823,7 +785,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
                            'test_job0', '-m', 'host0', '-d',
-                           'dep1\,True, dep2\,False ', '--ignore_site_file'],
+                           'dep1\,True, dep2\,False '],
                      rpcs=[('create_job', data, True, 42)],
                      out_words_ok=['test_job0', 'Created'],
                      out_words_no=['Uploading', 'Done'])
@@ -835,8 +797,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         data['synch_count'] = 2
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
-                           'test_job0', '-m', 'host0', '-y', '2',
-                           '--ignore_site_file'],
+                           'test_job0', '-m', 'host0', '-y', '2'],
                      rpcs=[('create_job', data, True, 42)],
                      out_words_ok=['test_job0', 'Created'],
                      out_words_no=['Uploading', 'Done'])
@@ -847,8 +808,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         data = self.data.copy()
         data['dependencies'] = ['dep1', 'dep2', 'dep3']
         self.run_cmd(argv=['atest', 'job', 'create', '-t', 'sleeptest',
-                           'test_job0', '-m', 'host0', '-d', 'dep1, dep2 ',
-                           '--ignore_site_file'],
+                           'test_job0', '-m', 'host0', '-d', 'dep1, dep2 '],
                      rpcs=[('generate_control_file',
                             {'tests': ['sleeptest']},
                             True,
@@ -866,7 +826,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         data['dependencies'] = ['dep1,True', 'dep2,False', 'dep3,123']
         self.run_cmd(argv=['atest', 'job', 'create', '-t', 'sleeptest',
                            'test_job0', '-m', 'host0', '-d',
-                           'dep1\,True dep2\,False ', '--ignore_site_file'],
+                           'dep1\,True dep2\,False '],
                      rpcs=[('generate_control_file',
                             {'tests': ['sleeptest']},
                             True,
@@ -881,7 +841,7 @@ class job_create_unittest(cli_mock.cli_unittest):
 
     def test_execute_create_job_no_args(self):
         testjob = job.job_create()
-        sys.argv = ['atest', 'job', 'create', '--ignore_site_file']
+        sys.argv = ['atest', 'job', 'create']
         self.god.mock_io()
         (sys.exit.expect_call(mock.anything_comparator())
          .and_raises(cli_mock.ExitException))
@@ -893,8 +853,7 @@ class job_create_unittest(cli_mock.cli_unittest):
     def test_execute_create_job_no_hosts(self):
         testjob = job.job_create()
         file_temp = cli_mock.create_file(self.ctrl_file)
-        sys.argv = ['atest', '-f', file_temp.name, 'test_job0',
-                    '--ignore_site_file']
+        sys.argv = ['atest', '-f', file_temp.name, 'test_job0']
         self.god.mock_io()
         (sys.exit.expect_call(mock.anything_comparator())
          .and_raises(cli_mock.ExitException))
@@ -907,8 +866,7 @@ class job_create_unittest(cli_mock.cli_unittest):
     def test_execute_create_job_cfile_and_tests(self):
         testjob = job.job_create()
         sys.argv = ['atest', 'job', 'create', '-t', 'sleeptest', '-f',
-                    'control_file', 'test_job0', '-m', 'host0',
-                    '--ignore_site_file']
+                    'control_file', 'test_job0', '-m', 'host0']
         self.god.mock_io()
         (sys.exit.expect_call(mock.anything_comparator())
          .and_raises(cli_mock.ExitException))
@@ -920,7 +878,7 @@ class job_create_unittest(cli_mock.cli_unittest):
     def test_execute_create_job_bad_cfile(self):
         testjob = job.job_create()
         sys.argv = ['atest', 'job', 'create', '-f', 'control_file',
-                    'test_job0', '-m', 'host0', '--ignore_site_file']
+                    'test_job0', '-m', 'host0']
         self.god.mock_io()
         (sys.exit.expect_call(mock.anything_comparator())
          .and_raises(IOError))
@@ -931,7 +889,7 @@ class job_create_unittest(cli_mock.cli_unittest):
     def test_execute_create_job_bad_priority(self):
         testjob = job.job_create()
         sys.argv = ['atest', 'job', 'create', '-t', 'sleeptest', '-p', 'Uber',
-                    '-m', 'host0', 'test_job0', '--ignore_site_file']
+                    '-m', 'host0', 'test_job0']
         self.god.mock_io()
         (sys.exit.expect_call(mock.anything_comparator())
          .and_raises(cli_mock.ExitException))
@@ -946,7 +904,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         ctemp = cli_mock.create_file(self.ctrl_file)
         file_temp = cli_mock.create_file('host0\nhost1\nhost2\nhost3')
         self.run_cmd(argv=['atest', 'job', 'create', '--mlist', file_temp.name,
-                           '-f', ctemp.name, 'test_job0', '--ignore_site_file'],
+                           '-f', ctemp.name, 'test_job0'],
                      rpcs=[('create_job', data, True, 42)],
                      out_words_ok=['test_job0', 'Created'])
         ctemp.clean()
@@ -958,8 +916,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         data['timeout_mins'] = '13320'
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
-                           'test_job0', '-m', 'host0', '-o', '13320',
-                           '--ignore_site_file'],
+                           'test_job0', '-m', 'host0', '-o', '13320'],
                      rpcs=[('create_job', data, True, 42)],
                      out_words_ok=['test_job0', 'Created'],)
         file_temp.clean()
@@ -971,7 +928,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
                            'test_job0', '-m', 'host0', '--max_runtime',
-                           '13320', '--ignore_site_file'],
+                           '13320'],
                      rpcs=[('create_job', data, True, 42)],
                      out_words_ok=['test_job0', 'Created'],)
         file_temp.clean()
@@ -983,8 +940,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         data['run_verify'] = False
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
-                           'test_job0', '-m', 'host0', '-n',
-                           '--ignore_site_file'],
+                           'test_job0', '-m', 'host0', '-n'],
                      rpcs=[('create_job', data, True, 42)],
                      out_words_ok=['test_job0', 'Created'],)
         file_temp.clean()
@@ -1053,8 +1009,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         data['hosts'] = ['host0', 'host1', 'host2']
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
-                           'test_job0', '-m', 'host0', '-b', 'label1,label2',
-                           '--ignore_site_file'],
+                           'test_job0', '-m', 'host0', '-b', 'label1,label2'],
                      rpcs=[('get_hosts', {'multiple_labels': ['label1',
                             'label2']}, True,
                             [{u'status': u'Running', u'lock_time': None,
@@ -1082,8 +1037,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         data['hosts'] = ['host1', 'host0']
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
-                           'test_job0', '-m', 'host0,host1', '-b', 'label1',
-                           '--ignore_site_file'],
+                           'test_job0', '-m', 'host0,host1', '-b', 'label1'],
                      rpcs=[('get_hosts', {'multiple_labels': ['label1']}, True,
                             [{u'status': u'Running', u'lock_time': None,
                               u'hostname': u'host1', u'locked': False,
@@ -1104,7 +1058,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
                            'test_job0', '-m', 'host0,host1', '-b',
-                           'label1,label\\,2', '--ignore_site_file'],
+                           'label1,label\\,2'],
                      rpcs=[('get_hosts', {'multiple_labels': ['label1',
                             'label,2']}, True,
                             [{u'status': u'Running', u'lock_time': None,
@@ -1126,7 +1080,7 @@ class job_create_unittest(cli_mock.cli_unittest):
         file_temp = cli_mock.create_file(self.ctrl_file)
         self.run_cmd(argv=['atest', 'job', 'create', '-f', file_temp.name,
                            'test_job0', '-m', 'host0,host1', '-b',
-                           'label1,label\\,2\\\\,label3', '--ignore_site_file'],
+                           'label1,label\\,2\\\\,label3'],
                      rpcs=[('get_hosts', {'multiple_labels': ['label,2\\',
                             'label1', 'label3']}, True,
                             [{u'status': u'Running', u'lock_time': None,
@@ -1191,7 +1145,6 @@ class job_clone_unittest(cli_mock.cli_unittest):
                     'timeout_mins': 480}
 
     local_hosts = [{u'acls': [u'acl0'],
-                    u'atomic_group': None,
                     u'attributes': {},
                     u'dirty': False,
                     u'hostname': u'host0',
@@ -1207,7 +1160,6 @@ class job_clone_unittest(cli_mock.cli_unittest):
                     u'status': u'Ready',
                     u'synch_id': None},
                    {u'acls': [u'acl0'],
-                    u'atomic_group': None,
                     u'attributes': {},
                     u'dirty': False,
                     u'hostname': u'host1',
@@ -1244,9 +1196,7 @@ class job_clone_unittest(cli_mock.cli_unittest):
                      rpcs=[('get_info_for_clone', {'id': '42',
                                                    'preserve_metahosts': True},
                             True,
-                            {u'atomic_group_name': None,
-                             u'hosts': [{u'acls': [u'acl0'],
-                                         u'atomic_group': None,
+                            {u'hosts': [{u'acls': [u'acl0'],
                                          u'attributes': {},
                                          u'dirty': False,
                                          u'hostname': u'host0',
@@ -1274,8 +1224,7 @@ class job_clone_unittest(cli_mock.cli_unittest):
                      rpcs=[('get_info_for_clone', {'id': '42',
                                                    'preserve_metahosts': True},
                             True,
-                            {u'atomic_group_name': None,
-                             u'hosts': self.local_hosts,
+                            {u'hosts': self.local_hosts,
                              u'job': self.job_data_clone_info,
                              u'meta_host_counts': {}}),
                            ('create_job', self.job_data_cloned, True, 43)],
@@ -1290,8 +1239,7 @@ class job_clone_unittest(cli_mock.cli_unittest):
                      rpcs=[('get_info_for_clone', {'id': '42',
                                                    'preserve_metahosts': True},
                             True,
-                            {u'atomic_group_name': None,
-                             u'hosts': [],
+                            {u'hosts': [],
                              u'job': self.job_data_clone_info,
                              u'meta_host_counts': {u'type0': 1,
                                                    u'type1': 4}}),
@@ -1307,7 +1255,7 @@ class job_clone_unittest(cli_mock.cli_unittest):
                      rpcs=[('get_info_for_clone', {'id': '42',
                                                    'preserve_metahosts': True},
                             True,
-                            {u'atomic_group_name': None,
+                            {
                              u'hosts': self.local_hosts,
                              u'job': self.job_data_clone_info,
                              u'meta_host_counts': {u'type0': 1,
@@ -1338,8 +1286,7 @@ class job_clone_unittest(cli_mock.cli_unittest):
                      rpcs=[('get_info_for_clone', {'id': '42',
                                                    'preserve_metahosts': False},
                             True,
-                            {u'atomic_group_name': None,
-                             u'hosts': self.local_hosts,
+                            {u'hosts': self.local_hosts,
                              u'job': self.job_data_clone_info,
                              u'meta_host_counts': {}}),
                            ('create_job', self.job_data_cloned, True, 43)],
@@ -1354,8 +1301,7 @@ class job_clone_unittest(cli_mock.cli_unittest):
                      rpcs=[('get_info_for_clone', {'id': '42',
                                                    'preserve_metahosts': False},
                             True,
-                            {u'atomic_group_name': None,
-                             u'hosts': self.local_hosts,
+                            {u'hosts': self.local_hosts,
                              u'job': self.job_data_clone_info,
                              u'meta_host_counts': {}}),
                            ('create_job', self.job_data_cloned, True, 43)],
@@ -1370,8 +1316,7 @@ class job_abort_unittest(cli_mock.cli_unittest):
                 u'2008-07-08 17:45:44', u'synch_count': 2, u'id': 180}]
 
     def test_execute_job_abort(self):
-        self.run_cmd(argv=['atest', 'job', 'abort', '180',
-                           '--ignore_site_file'],
+        self.run_cmd(argv=['atest', 'job', 'abort', '180'],
                      rpcs=[('abort_host_queue_entries',
                             {'job__id__in': ['180']}, True, None)],
                      out_words_ok=['Aborting', '180'])

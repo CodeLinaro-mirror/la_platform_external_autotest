@@ -216,9 +216,8 @@ def is_android_process_running(process_name):
 
     @param process_name: Process name.
     """
-    output = adb_shell('ps %s' % pipes.quote(process_name))
-    # ps always prints the header.
-    return len(output.splitlines()) == 2
+    output = adb_shell('ps | grep %s' % pipes.quote(' %s$' % process_name))
+    return bool(output)
 
 
 def check_android_file_exists(filename):
@@ -372,6 +371,19 @@ def send_keycode(keycode):
     adb_shell('input keyevent {}'.format(keycode))
 
 
+def get_android_sdk_version():
+    """Returns the Android SDK version.
+
+    This function can be called before Android container boots.
+    """
+    with open('/etc/lsb-release') as f:
+        values = dict(line.split('=', 1) for line in f.read().splitlines())
+    try:
+        return int(values['CHROMEOS_ARC_ANDROID_SDK_VERSION'])
+    except (KeyError, ValueError):
+        raise error.TestError('Could not determine Android SDK version')
+
+
 class ArcTest(test.test):
     """ Base class of ARC Test.
 
@@ -519,9 +531,6 @@ class ArcTest(test.test):
         # verification on the server side through Play Store.  This suppress a
         # consent dialog from the system.
         adb_shell('settings put secure package_verifier_user_consent -1')
-        # TODO(30310952): Remove the workaround below to a Phonesky bug.
-        adb_shell('am broadcast -a com.google.gservices.intent.action.GSERVICES_OVERRIDE '
-                  '-e finsky.platform_anti_malware_enabled false')
         adb_shell('settings put global package_verifier_enable 0')
         adb_shell('settings put secure install_non_market_apps 1')
 
@@ -588,9 +597,6 @@ class ArcTest(test.test):
             adb_uninstall(self._FULL_PKG_NAME_UIAUTOMATOR)
         adb_shell('settings put secure install_non_market_apps 0')
         adb_shell('settings put global package_verifier_enable 1')
-        # TODO(30310952): Remove the workaround below to a Phonesky bug.
-        adb_shell('am broadcast -a com.google.gservices.intent.action.GSERVICES_OVERRIDE '
-                  '--esn finsky.platform_anti_malware_enabled')
         adb_shell('settings put secure package_verifier_user_consent 0')
 
         remove_android_file(_ANDROID_ADB_KEYS_PATH)

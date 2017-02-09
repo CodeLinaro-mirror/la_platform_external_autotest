@@ -23,6 +23,12 @@ _AMD_PCI_IDS_FILE_PATH = '/usr/local/autotest/bin/amd_pci_ids.json'
 _INTEL_PCI_IDS_FILE_PATH = '/usr/local/autotest/bin/intel_pci_ids.json'
 _UI_USE_FLAGS_FILE_PATH = '/etc/ui_use_flags.txt'
 
+# Command to check if a package is installed. If the package is not installed
+# the command shall fail.
+_CHECK_PACKAGE_INSTALLED_COMMAND =(
+        "dpkg-query -W -f='${Status}\n' %s | head -n1 | awk '{print $3;}' | "
+        "grep -q '^installed$'")
+
 pciid_to_amd_architecture = {}
 pciid_to_intel_architecture = {}
 
@@ -1157,3 +1163,48 @@ def is_vm():
         logging.warn('Package virt-what is not installed, default to assume '
                      'it is not a virtual machine.')
         return False
+
+
+def is_package_installed(package):
+    """Check if a package is installed already.
+
+    @return: True if the package is already installed, otherwise return False.
+    """
+    try:
+        utils.run(_CHECK_PACKAGE_INSTALLED_COMMAND % package)
+        return True
+    except error.CmdError:
+        logging.warn('Package %s is not installed.', package)
+        return False
+
+
+def is_python_package_installed(package):
+    """Check if a Python package is installed already.
+
+    @return: True if the package is already installed, otherwise return False.
+    """
+    try:
+        __import__(package)
+        return True
+    except ImportError:
+        logging.warn('Python package %s is not installed.', package)
+        return False
+
+
+def run_sql_cmd(server, user, password, command, database=''):
+    """Run the given sql command against the specified database.
+
+    @param server: Hostname or IP address of the MySQL server.
+    @param user: User name to log in the MySQL server.
+    @param password: Password to log in the MySQL server.
+    @param command: SQL command to run.
+    @param database: Name of the database to run the command. Default to empty
+                     for command that does not require specifying database.
+
+    @return: The stdout of the command line.
+    """
+    cmd = ('mysql -u%s -p%s --host %s %s -e "%s"' %
+           (user, password, server, database, command))
+    # Set verbose to False so the command line won't be logged, as it includes
+    # database credential.
+    return utils.run(cmd, verbose=False).stdout

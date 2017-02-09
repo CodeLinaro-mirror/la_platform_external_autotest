@@ -7,17 +7,38 @@ Copyright Andy Whitcroft, Martin J. Bligh 2006
 
 # pylint: disable=missing-docstring
 
-import copy, os, re, shutil, sys, time, traceback, types, glob
-import logging, getpass, weakref
+import copy
+from datetime import datetime
+import getpass
+import glob
+import logging
+import os
+import re
+import shutil
+import sys
+import time
+import traceback
+import types
+import weakref
+
+import common
 from autotest_lib.client.bin import client_logging_config
-from autotest_lib.client.bin import utils, parallel
-from autotest_lib.client.bin import profilers, harness
-from autotest_lib.client.bin import sysinfo, test, local_host
+from autotest_lib.client.bin import harness
+from autotest_lib.client.bin import local_host
+from autotest_lib.client.bin import parallel
 from autotest_lib.client.bin import partition as partition_lib
+from autotest_lib.client.bin import profilers
+from autotest_lib.client.bin import sysinfo
+from autotest_lib.client.bin import test
+from autotest_lib.client.bin import utils
+from autotest_lib.client.common_lib import barrier
 from autotest_lib.client.common_lib import base_job
-from autotest_lib.client.common_lib import error, barrier, logging_manager
-from autotest_lib.client.common_lib import base_packages, packages
+from autotest_lib.client.common_lib import base_packages
+from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
+from autotest_lib.client.common_lib import logging_manager
+from autotest_lib.client.common_lib import packages
+from autotest_lib.client.cros import cros_logging
 from autotest_lib.client.tools import html_report
 
 GLOBAL_CONFIG = global_config.global_config
@@ -56,21 +77,21 @@ def _run_test_complete_on_exit(f):
 
 class status_indenter(base_job.status_indenter):
     """Provide a status indenter that is backed by job._record_prefix."""
-    def __init__(self, job):
-        self.job = weakref.proxy(job)  # avoid a circular reference
+    def __init__(self, job_):
+        self._job = weakref.proxy(job_)  # avoid a circular reference
 
 
     @property
     def indent(self):
-        return self.job._record_indent
+        return self._job._record_indent
 
 
     def increment(self):
-        self.job._record_indent += 1
+        self._job._record_indent += 1
 
 
     def decrement(self):
-        self.job._record_indent -= 1
+        self._job._record_indent -= 1
 
 
 class base_client_job(base_job.base_job):
@@ -429,7 +450,7 @@ class base_client_job(base_job.base_job):
         # check if gcc is installed on the system.
         try:
             utils.system('which gcc')
-        except error.CmdError, e:
+        except error.CmdError:
             raise NotAvailableError('gcc is required by this job and is '
                                     'not available on the system')
 
@@ -497,9 +518,9 @@ class base_client_job(base_job.base_job):
                 group_func: Actual test run function
                 timeout: Test timeout
         """
-        group, testname = self.pkgmgr.get_package_name(url, 'test')
+        _group, testname = self.pkgmgr.get_package_name(url, 'test')
         testname, subdir, tag = self._build_tagged_test_name(testname, dargs)
-        outputdir = self._make_test_outputdir(subdir)
+        self._make_test_outputdir(subdir)
 
         timeout = dargs.pop('timeout', None)
         if timeout:
@@ -1203,8 +1224,41 @@ def runjob(control, drop_caches, options):
     myjob.complete(0)
 
 
-site_job = utils.import_site_class(
-    __file__, "autotest_lib.client.bin.site_job", "site_job", base_client_job)
+class job(base_client_job):
 
-class job(site_job):
-    pass
+    def __init__(self, *args, **kwargs):
+        base_client_job.__init__(self, *args, **kwargs)
+
+
+    def run_test(self, url, *args, **dargs):
+        log_pauser = cros_logging.LogRotationPauser()
+        passed = False
+        try:
+            log_pauser.begin()
+            passed = base_client_job.run_test(self, url, *args, **dargs)
+            if not passed:
+                # Save the VM state immediately after the test failure.
+                # This is a NOOP if the the test isn't running in a VM or
+                # if the VM is not properly configured to save state.
+                _group, testname = self.pkgmgr.get_package_name(url, 'test')
+                now = datetime.now().strftime('%I:%M:%S.%f')
+                checkpoint_name = '%s-%s' % (testname, now)
+                utils.save_vm_state(checkpoint_name)
+        finally:
+            log_pauser.end()
+        return passed
+
+
+    def reboot(self):
+        self.reboot_setup()
+        self.harness.run_reboot()
+
+        # sync first, so that a sync during shutdown doesn't time out
+        utils.system('sync; sync', ignore_status=True)
+
+        utils.system('reboot </dev/null >/dev/null 2>&1 &')
+        self.quit()
+
+
+    def require_gcc(self):
+        return False

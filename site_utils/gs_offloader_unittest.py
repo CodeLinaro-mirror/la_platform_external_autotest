@@ -18,13 +18,11 @@ import unittest
 import mox
 
 import common
-import gs_offloader
-import job_directories
-
 from autotest_lib.client.common_lib import global_config, site_utils
 from autotest_lib.client.common_lib import time_utils
 from autotest_lib.client.common_lib import utils
-from autotest_lib.scheduler import email_manager
+from autotest_lib.site_utils import gs_offloader
+from autotest_lib.site_utils import job_directories
 from autotest_lib.tko import models
 
 # Test value to use for `days_old`, if nothing else is required.
@@ -431,72 +429,6 @@ class CommandListTests(unittest.TestCase):
         self._command_list_assertions(job, multi=True)
 
 
-# Below is partial sample of e-mail notification text.  This text is
-# deliberately hard-coded and then parsed to create the test data;
-# the idea is to make sure the actual text format will be reviewed
-# by a human being.
-#
-# first offload      count  directory
-# --+----1----+----  ----+  ----+----1----+----2----+----3
-_SAMPLE_DIRECTORIES_REPORT = '''\
-=================== ======  ==============================
-2014-03-14 15:09:26      1  118-fubar
-2014-03-14 15:19:23      2  117-fubar
-2014-03-14 15:29:20      6  116-fubar
-2014-03-14 15:39:17     24  115-fubar
-2014-03-14 15:49:14    120  114-fubar
-2014-03-14 15:59:11    720  113-fubar
-2014-03-14 16:09:08   5040  112-fubar
-2014-03-14 16:19:05  40320  111-fubar
-'''
-
-
-class EmailTemplateTests(mox.MoxTestBase):
-    """Test the formatting of e-mail notifications."""
-
-    def setUp(self):
-        super(EmailTemplateTests, self).setUp()
-        self.mox.StubOutWithMock(email_manager.manager,
-                                 'send_email')
-        self._joblist = []
-        for line in _SAMPLE_DIRECTORIES_REPORT.split('\n')[1 : -1]:
-            date_, time_, count, dir_ = line.split()
-            job = _MockJobDirectory(dir_)
-            job._offload_count = int(count)
-            timestruct = time.strptime("%s %s" % (date_, time_),
-                                       gs_offloader.ERROR_EMAIL_TIME_FORMAT)
-            job._first_offload_start = time.mktime(timestruct)
-            # enter the jobs in reverse order, to make sure we
-            # test that the output will be sorted.
-            self._joblist.insert(0, job)
-
-
-    def test_email_template(self):
-        """Trigger an e-mail report and check its contents."""
-        # The last line of the report is a separator that we
-        # repeat in the first line of our expected result data.
-        # So, we remove that separator from the end of the of
-        # the e-mail report message.
-        #
-        # The last element in the list returned by split('\n')
-        # will be an empty string, so to remove the separator,
-        # we remove the next-to-last entry in the list.
-        report_lines = gs_offloader.ERROR_EMAIL_REPORT_FORMAT.split('\n')
-        expected_message = ('\n'.join(report_lines[: -2] +
-                                      report_lines[-1 :]) +
-                            _SAMPLE_DIRECTORIES_REPORT)
-        email_manager.manager.send_email(
-            mox.IgnoreArg(), mox.IgnoreArg(), expected_message)
-        self.mox.ReplayAll()
-        gs_offloader.report_offload_failures(self._joblist)
-
-
-    def test_email_url(self):
-        """Check that the expected helper url is in the email header."""
-        self.assertIn(gs_offloader.ERROR_EMAIL_HELPER_URL,
-                      gs_offloader.ERROR_EMAIL_REPORT_FORMAT)
-
-
 class PubSubTest(mox.MoxTestBase):
     """Test the test result notifcation data structure."""
 
@@ -778,6 +710,75 @@ class _TempResultsDirTestBase(mox.MoxTestBase):
             os.mkdir(os.path.join(hostsdir, host))
         for d in self.SPECIAL_JOBLIST:
             os.mkdir(d)
+
+
+class FailedOffloadsLogTest(_TempResultsDirTestBase):
+    """Test the formatting of failed offloads log file."""
+    # Below is partial sample of a failed offload log file.  This text is
+    # deliberately hard-coded and then parsed to create the test data; the idea
+    # is to make sure the actual text format will be reviewed by a human being.
+    #
+    # first offload      count  directory
+    # --+----1----+----  ----+ ----+----1----+----2----+----3
+    _SAMPLE_DIRECTORIES_REPORT = '''\
+    =================== ======  ==============================
+    2014-03-14 15:09:26      1  118-fubar
+    2014-03-14 15:19:23      2  117-fubar
+    2014-03-14 15:29:20      6  116-fubar
+    2014-03-14 15:39:17     24  115-fubar
+    2014-03-14 15:49:14    120  114-fubar
+    2014-03-14 15:59:11    720  113-fubar
+    2014-03-14 16:09:08   5040  112-fubar
+    2014-03-14 16:19:05  40320  111-fubar
+    '''
+
+    def setUp(self):
+        super(FailedOffloadsLogTest, self).setUp()
+        self._offloader = gs_offloader.Offloader(_get_options([]))
+        self._joblist = []
+        for line in self._SAMPLE_DIRECTORIES_REPORT.split('\n')[1 : -1]:
+            date_, time_, count, dir_ = line.split()
+            job = _MockJobDirectory(dir_)
+            job._offload_count = int(count)
+            timestruct = time.strptime("%s %s" % (date_, time_),
+                                       gs_offloader.FAILED_OFFLOADS_TIME_FORMAT)
+            job._first_offload_start = time.mktime(timestruct)
+            # enter the jobs in reverse order, to make sure we
+            # test that the output will be sorted.
+            self._joblist.insert(0, job)
+
+
+    def assert_report_well_formatted(self, report_file):
+        with open(report_file, 'r') as f:
+            report_lines = f.read().split()
+
+        for end_of_header_index in range(len(report_lines)):
+            if report_lines[end_of_header_index].startswith('=='):
+                break
+        self.assertLess(end_of_header_index, len(report_lines),
+                        'Failed to find end-of-header marker in the report')
+
+        relevant_lines = report_lines[end_of_header_index:]
+        expected_lines = self._SAMPLE_DIRECTORIES_REPORT.split()
+        self.assertListEqual(relevant_lines, expected_lines)
+
+
+    def test_failed_offload_log_format(self):
+        """Trigger an e-mail report and check its contents."""
+        log_file = os.path.join(self._resultsroot, 'failed_log')
+        report = self._offloader._log_failed_jobs_locally(self._joblist,
+                                                          log_file=log_file)
+        self.assert_report_well_formatted(log_file)
+
+
+    def test_failed_offload_file_overwrite(self):
+        """Verify that we can saefly overwrite the log file."""
+        log_file = os.path.join(self._resultsroot, 'failed_log')
+        with open(log_file, 'w') as f:
+            f.write('boohoohoo')
+        report = self._offloader._log_failed_jobs_locally(self._joblist,
+                                                          log_file=log_file)
+        self.assert_report_well_formatted(log_file)
 
 
 class OffloadDirectoryTests(_TempResultsDirTestBase):
@@ -1154,7 +1155,6 @@ class JobDirectoryOffloadTests(_TempResultsDirTestBase):
         self.assertTrue(self._queue.empty())
         self.assertEqual(self._job.get_failure_count(), 0)
         self.assertEqual(self._job.get_failure_time(), 0)
-        self.assertFalse(self._job.is_reportable())
 
 
     def _offload_expired_once(self, days_old, count):
@@ -1181,15 +1181,12 @@ class JobDirectoryOffloadTests(_TempResultsDirTestBase):
         """
         t0 = time.time()
         self._offload_expired_once(days_old, 1)
-        self.assertFalse(self._job.is_reportable())
         t1 = self._job.get_failure_time()
         self.assertLessEqual(t1, time.time())
         self.assertGreaterEqual(t1, t0)
         self._offload_expired_once(days_old, 2)
-        self.assertTrue(self._job.is_reportable())
         self.assertEqual(self._job.get_failure_time(), t1)
         self._offload_expired_once(days_old, 3)
-        self.assertTrue(self._job.is_reportable())
         self.assertEqual(self._job.get_failure_time(), t1)
 
 
@@ -1373,8 +1370,7 @@ class JobStateTests(_TempResultsDirTestBase):
     """Tests for job state predicates.
 
     This tests for the expected results from the
-    `is_offloaded()` and `is_reportable()` predicate
-    methods.
+    `is_offloaded()` predicate method.
 
     """
 
@@ -1388,7 +1384,6 @@ class JobStateTests(_TempResultsDirTestBase):
         """
         job = self.make_job(self.REGULAR_JOBLIST[0])
         self.assertFalse(job.is_offloaded())
-        self.assertFalse(job.is_reportable())
 
 
     def test_incomplete_job(self):
@@ -1402,7 +1397,6 @@ class JobStateTests(_TempResultsDirTestBase):
         job = self.make_job(self.REGULAR_JOBLIST[0])
         job.set_incomplete()
         self.assertFalse(job.is_offloaded())
-        self.assertFalse(job.is_reportable())
 
 
     def test_reportable_job(self):
@@ -1416,7 +1410,6 @@ class JobStateTests(_TempResultsDirTestBase):
         job = self.make_job(self.REGULAR_JOBLIST[0])
         job.set_reportable()
         self.assertFalse(job.is_offloaded())
-        self.assertTrue(job.is_reportable())
 
 
     def test_completed_job(self):
@@ -1430,7 +1423,6 @@ class JobStateTests(_TempResultsDirTestBase):
         job = self.make_job(self.REGULAR_JOBLIST[0])
         job.set_complete()
         self.assertTrue(job.is_offloaded())
-        self.assertFalse(job.is_reportable())
 
 
 class ReportingTests(_TempResultsDirTestBase):
@@ -1439,8 +1431,7 @@ class ReportingTests(_TempResultsDirTestBase):
     def setUp(self):
         super(ReportingTests, self).setUp()
         self._offloader = gs_offloader.Offloader(_get_options([]))
-        self.mox.StubOutWithMock(email_manager.manager,
-                                 'send_email')
+        self.mox.StubOutWithMock(self._offloader, '_log_failed_jobs_locally')
         self.mox.StubOutWithMock(logging, 'debug')
 
 
@@ -1477,173 +1468,79 @@ class ReportingTests(_TempResultsDirTestBase):
             logging.debug(mox.IgnoreArg(), len(new_open_jobs))
 
 
-    def _run_update_no_report(self, new_open_jobs):
-        """Call `_update_offload_results()` expecting no report.
+    def _run_update(self, new_open_jobs):
+        """Call `_update_offload_results()`.
 
         Initial conditions are set up by the caller.  This calls
         `_update_offload_results()` once, and then checks these
         assertions:
-          * The offloader's `_next_report_time` field is unchanged.
           * The offloader's new `_open_jobs` field contains only
             the entries in `new_open_jobs`.
-          * The email_manager's `send_email` stub wasn't called.
 
         @param new_open_jobs A dictionary representing the expected
                              new value of the offloader's
                              `_open_jobs` field.
         """
         self.mox.ReplayAll()
-        next_report_time = self._offloader._next_report_time
         self._offloader._update_offload_results()
-        self.assertEqual(next_report_time,
-                         self._offloader._next_report_time)
         self.assertEqual(self._offloader._open_jobs, new_open_jobs)
         self.mox.VerifyAll()
         self.mox.ResetAll()
 
 
-    def _run_update_with_report(self, new_open_jobs):
-        """Call `_update_offload_results()` expecting an e-mail report.
+    def _expect_failed_jobs(self, failed_jobs):
+        """Mock expected call to log the failed jobs on local disk.
 
-        Initial conditions are set up by the caller.  This calls
-        `_update_offload_results()` once, and then checks these
-        assertions:
-          * The offloader's `_next_report_time` field is updated
-            to an appropriate new time.
-          * The offloader's new `_open_jobs` field contains only
-            the entries in `new_open_jobs`.
-          * The email_manager's `send_email` stub was called.
+        TODO(crbug.com/686904): The fact that we have to mock an internal
+        function for this test is evidence that we need to pull out the local
+        file formatter in its own object in a future CL.
 
-        @param new_open_jobs A dictionary representing the expected
-                             new value of the offloader's
-                             `_open_jobs` field.
+        @param failed_jobs: The list of jobs being logged as failed.
         """
-        logging.debug(mox.IgnoreArg())
-        email_manager.manager.send_email(
-            mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg())
-        self.mox.ReplayAll()
-        t0 = time.time() + gs_offloader.REPORT_INTERVAL_SECS
-        self._offloader._update_offload_results()
-        t1 = time.time() + gs_offloader.REPORT_INTERVAL_SECS
-        next_report_time = self._offloader._next_report_time
-        self.assertGreaterEqual(next_report_time, t0)
-        self.assertLessEqual(next_report_time, t1)
-        self.assertEqual(self._offloader._open_jobs, new_open_jobs)
-        self.mox.VerifyAll()
-        self.mox.ResetAll()
+        self._offloader._log_failed_jobs_locally(failed_jobs)
 
 
     def test_no_jobs(self):
         """Test `_update_offload_results()` with no open jobs.
 
-        Initial conditions are an empty `_open_jobs` list and
-        `_next_report_time` in the past.  Expected result is no
-        e-mail report, and an empty `_open_jobs` list.
+        Initial conditions are an empty `_open_jobs` list.
+        Expected result is an empty `_open_jobs` list.
 
         """
         self._expect_log_message({}, False)
-        self._run_update_no_report({})
+        self._expect_failed_jobs([])
+        self._run_update({})
 
 
     def test_all_completed(self):
         """Test `_update_offload_results()` with only complete jobs.
 
-        Initial conditions are an `_open_jobs` list consisting of
-        only completed jobs and `_next_report_time` in the past.
-        Expected result is no e-mail report, and an empty
-        `_open_jobs` list.
+        Initial conditions are an `_open_jobs` list consisting of only completed
+        jobs.
+        Expected result is an empty `_open_jobs` list.
 
         """
         for d in self.REGULAR_JOBLIST:
             self._add_job(d).set_complete()
         self._expect_log_message({}, False)
-        self._run_update_no_report({})
+        self._expect_failed_jobs([])
+        self._run_update({})
 
 
     def test_none_finished(self):
         """Test `_update_offload_results()` with only unfinished jobs.
 
-        Initial conditions are an `_open_jobs` list consisting of
-        only unfinished jobs and `_next_report_time` in the past.
-        Expected result is no e-mail report, and no change to the
-        `_open_jobs` list.
+        Initial conditions are an `_open_jobs` list consisting of only
+        unfinished jobs.
+        Expected result is no change to the `_open_jobs` list.
 
         """
         for d in self.REGULAR_JOBLIST:
             self._add_job(d)
         new_jobs = self._offloader._open_jobs.copy()
         self._expect_log_message(new_jobs, False)
-        self._run_update_no_report(new_jobs)
-
-
-    def test_none_reportable(self):
-        """Test `_update_offload_results()` with only incomplete jobs.
-
-        Initial conditions are an `_open_jobs` list consisting of
-        only incomplete jobs and `_next_report_time` in the past.
-        Expected result is no e-mail report, and no change to the
-        `_open_jobs` list.
-
-        """
-        for d in self.REGULAR_JOBLIST:
-            self._add_job(d).set_incomplete()
-        new_jobs = self._offloader._open_jobs.copy()
-        self._expect_log_message(new_jobs, False)
-        self._run_update_no_report(new_jobs)
-
-
-    def test_report_not_ready(self):
-        """Test `_update_offload_results()` e-mail throttling.
-
-        Initial conditions are an `_open_jobs` list consisting of
-        only reportable jobs but with `_next_report_time` in
-        the future.  Expected result is no e-mail report, and no
-        change to the `_open_jobs` list.
-
-        """
-        # N.B.  This test may fail if its run time exceeds more than
-        # about _MARGIN_SECS seconds.
-        for d in self.REGULAR_JOBLIST:
-            self._add_job(d).set_reportable()
-        self._offloader._next_report_time += _MARGIN_SECS
-        new_jobs = self._offloader._open_jobs.copy()
-        self._expect_log_message(new_jobs, True)
-        self._run_update_no_report(new_jobs)
-
-
-    def test_reportable(self):
-        """Test `_update_offload_results()` with reportable jobs.
-
-        Initial conditions are an `_open_jobs` list consisting of
-        only reportable jobs and with `_next_report_time` in
-        the past.  Expected result is an e-mail report, and no
-        change to the `_open_jobs` list.
-
-        """
-        for d in self.REGULAR_JOBLIST:
-            self._add_job(d).set_reportable()
-        new_jobs = self._offloader._open_jobs.copy()
-        self._expect_log_message(new_jobs, True)
-        self._run_update_with_report(new_jobs)
-
-
-    def test_reportable_mixed(self):
-        """Test `_update_offload_results()` with a mixture of jobs.
-
-        Initial conditions are an `_open_jobs` list consisting of
-        one reportable jobs and the remainder of the jobs
-        incomplete.  The value of `_next_report_time` is in the
-        past.  Expected result is an e-mail report that includes
-        both the reportable and the incomplete jobs, and no change
-        to the `_open_jobs` list.
-
-        """
-        self._add_job(self.REGULAR_JOBLIST[0]).set_reportable()
-        for d in self.REGULAR_JOBLIST[1:]:
-            self._add_job(d).set_incomplete()
-        new_jobs = self._offloader._open_jobs.copy()
-        self._expect_log_message(new_jobs, True)
-        self._run_update_with_report(new_jobs)
+        self._expect_failed_jobs([])
+        self._run_update(new_jobs)
 
 
 if __name__ == '__main__':

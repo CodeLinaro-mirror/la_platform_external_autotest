@@ -39,7 +39,7 @@ def prepare_for_serialization(objects):
     """
     if (isinstance(objects, list) and len(objects) and
         isinstance(objects[0], dict) and 'id' in objects[0]):
-        objects = gather_unique_dicts(objects)
+        objects = _gather_unique_dicts(objects)
     return _prepare_data(objects)
 
 
@@ -106,17 +106,14 @@ def raw_http_response(response_data, content_type=None):
     return response
 
 
-def gather_unique_dicts(dict_iterable):
+def _gather_unique_dicts(dict_iterable):
     """\
     Pick out unique objects (by ID) from an iterable of object dicts.
     """
-    id_set = set()
-    result = []
+    objects = collections.OrderedDict()
     for obj in dict_iterable:
-        if obj['id'] not in id_set:
-            id_set.add(obj['id'])
-            result.append(obj)
-    return result
+        objects.setdefault(obj['id'], obj)
+    return objects.values()
 
 
 def extra_job_status_filters(not_yet_run=False, running=False, finished=False):
@@ -237,7 +234,7 @@ def get_host_query(multiple_labels, exclude_only_if_needed_labels,
         assert 'extra_args' not in filter_data
         filter_data['extra_args'] = extra_host_filters(multiple_labels)
         return models.Host.query_objects(filter_data, initial_query=query)
-    except models.Label.DoesNotExist as e:
+    except models.Label.DoesNotExist:
         return models.Host.objects.none()
 
 
@@ -578,13 +575,10 @@ def get_job_info(job, preserve_metahosts=False, queue_entry_filter_data=None):
 
 
 def check_for_duplicate_hosts(host_objects):
-    host_ids = set()
-    duplicate_hostnames = set()
-    for host in host_objects:
-        if host.id in host_ids:
-            duplicate_hostnames.add(host.hostname)
-        host_ids.add(host.id)
-
+    host_counts = collections.Counter(host_objects)
+    duplicate_hostnames = {host.hostname
+                           for host, count in host_counts.iteritems()
+                           if count > 1}
     if duplicate_hostnames:
         raise model_logic.ValidationError(
                 {'hosts' : 'Duplicate hosts: %s'

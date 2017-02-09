@@ -276,7 +276,7 @@ class Suite(object):
 
 
     @staticmethod
-    def create_ds_getter(build, devserver):
+    def _create_ds_getter(build, devserver):
         """
         @param build: the build on which we're running this suite.
         @param devserver: the devserver which contains the build.
@@ -341,21 +341,6 @@ class Suite(object):
                           [(suite,
                             difflib.SequenceMatcher(a=suite, b=name).ratio())
                            for suite in Suite.parse_tag(t.suite)])
-
-
-    @staticmethod
-    def not_in_blacklist_predicate(blacklist):
-        """Returns predicate that takes a control file and looks for its
-        path to not be in given blacklist.
-
-        @param blacklist: A list of strings both paths on control_files that
-                          should be blacklisted.
-
-        @return a callable that takes a ControlData and looks for it to be
-                absent from blacklist.
-        """
-        return lambda t: hasattr(t, 'path') and \
-                         not any(b.endswith(t.path) for b in blacklist)
 
 
     @staticmethod
@@ -461,8 +446,8 @@ class Suite(object):
                                                  b=test_file_pattern).ratio()))
 
 
-    @staticmethod
-    def list_all_suites(build, devserver, cf_getter=None):
+    @classmethod
+    def list_all_suites(cls, build, devserver, cf_getter=None):
         """
         Parses all ControlData objects with a SUITE tag and extracts all
         defined suite names.
@@ -475,7 +460,7 @@ class Suite(object):
         @return list of suites
         """
         if cf_getter is None:
-            cf_getter = Suite.create_ds_getter(build, devserver)
+            cf_getter = cls._create_ds_getter(build, devserver)
 
         suites = set()
         predicate = lambda t: hasattr(t, 'suite')
@@ -514,8 +499,8 @@ class Suite(object):
         return test_source_build
 
 
-    @staticmethod
-    def create_from_predicates(predicates, builds, board, devserver,
+    @classmethod
+    def create_from_predicates(cls, predicates, builds, board, devserver,
                                cf_getter=None, name='ad_hoc_suite',
                                run_prod_code=False, **dargs):
         """
@@ -546,17 +531,17 @@ class Suite(object):
         """
         if cf_getter is None:
             if run_prod_code:
-                cf_getter = Suite.create_fs_getter(_AUTOTEST_DIR)
+                cf_getter = cls.create_fs_getter(_AUTOTEST_DIR)
             else:
                 build = Suite.get_test_source_build(builds, **dargs)
-                cf_getter = Suite.create_ds_getter(build, devserver)
+                cf_getter = cls._create_ds_getter(build, devserver)
 
         return Suite(predicates,
                      name, builds, board, cf_getter, run_prod_code, **dargs)
 
 
-    @staticmethod
-    def create_from_name(name, builds, board, devserver, cf_getter=None,
+    @classmethod
+    def create_from_name(cls, name, builds, board, devserver, cf_getter=None,
                          **dargs):
         """
         Create a Suite using a predicate based on the SUITE control file var.
@@ -578,8 +563,8 @@ class Suite(object):
         @return a Suite instance.
         """
         if cf_getter is None:
-            build = Suite.get_test_source_build(builds, **dargs)
-            cf_getter = Suite.create_ds_getter(build, devserver)
+            build = cls.get_test_source_build(builds, **dargs)
+            cf_getter = cls._create_ds_getter(build, devserver)
 
         return Suite([Suite.name_in_tag_predicate(name)],
                      name, builds, board, cf_getter, **dargs)
@@ -677,7 +662,7 @@ class Suite(object):
         self._pool = pool
         self._jobs = []
         self._jobs_to_tests = {}
-        self.tests = Suite.find_and_parse_tests(
+        self.tests = self.find_and_parse_tests(
                 self._cf_getter,
                 lambda control_data: all(f(control_data) for f in predicates),
                 self._tag,
@@ -707,6 +692,8 @@ class Suite(object):
     def stable_tests(self):
         """
         |self.tests|, filtered for non-experimental tests.
+
+        @returns: list
         """
         return filter(lambda t: not t.experimental, self.tests)
 
@@ -715,6 +702,8 @@ class Suite(object):
     def unstable_tests(self):
         """
         |self.tests|, filtered for experimental tests.
+
+        @returns: list
         """
         return filter(lambda t: t.experimental, self.tests)
 
@@ -901,7 +890,7 @@ class Suite(object):
                 logging.debug('Job %d created to retry job %d. '
                               'Have retried for %d time(s)',
                               job.id, retry_for, retry_count)
-            self._remember_provided_job_id(job)
+            self._remember_job_keyval(job)
             return job
 
 
@@ -925,14 +914,7 @@ class Suite(object):
         Status('INFO', 'Start %s' % self._tag).record_result(record)
         scheduled_test_names = []
         try:
-            tests = self.stable_tests
-            if add_experimental:
-                for test in self.unstable_tests:
-                    if not test.name.startswith(constants.EXPERIMENTAL_PREFIX):
-                        test.name = constants.EXPERIMENTAL_PREFIX + test.name
-                    tests.append(test)
-
-            for test in tests:
+            for test in self._get_tests_to_schedule(add_experimental):
                 scheduled_job = self._schedule_test(record, test)
                 if scheduled_job is not None:
                     scheduled_test_names.append(test.name)
@@ -953,6 +935,21 @@ class Suite(object):
                     initial_jobs_to_tests=self._jobs_to_tests,
                     max_retries=self._max_retries)
         return len(scheduled_test_names)
+
+
+    def _get_tests_to_schedule(self, add_experimental=True):
+        """Return a list of tests to be scheduled for this suite.
+
+        @param add_experimental: schedule experimental tests as well, or not.
+        @returns: list of tests (ControlData objects)
+        """
+        tests = self.stable_tests
+        if add_experimental:
+            for test in self.unstable_tests:
+                if not test.name.startswith(constants.EXPERIMENTAL_PREFIX):
+                    test.name = constants.EXPERIMENTAL_PREFIX + test.name
+                tests.append(test)
+        return tests
 
 
     def _make_scheduled_tests_keyvals(self, scheduled_test_names):
@@ -1053,10 +1050,7 @@ class Suite(object):
                              filing options for failures in this suite.
         """
         result.record_all(record)
-        if job_status.is_for_infrastructure_fail(result):
-            self._remember_provided_job_id(result)
-        elif isinstance(result, Status):
-            self._remember_test_status_job_id(result)
+        self._remember_job_keyval(result)
 
         if self._job_retry and self._retry_handler.should_retry(result):
             new_job = self._schedule_test(
@@ -1069,27 +1063,8 @@ class Suite(object):
         # finish, we would lose the chance to file a bug for the
         # original job.
         if self._should_report(result):
-            merged_template = self._get_bug_template(result, bug_template)
-
-            # File bug when failure is one of the _FILE_BUG_SUITES,
-            # otherwise send an email to the owner anc cc.
-            if self._tag in _FILE_BUG_SUITES:
-                bug_id, bug_count = bug_reporter.report(
-                        self._get_test_bug(result),
-                        merged_template)
-
-                # We use keyvals to communicate bugs filed with
-                # run_suite.
-                if bug_id is not None:
-                    bug_keyvals = tools.create_bug_keyvals(
-                            result.id, result.test_name,
-                            (bug_id, bug_count))
-                    try:
-                        utils.write_keyval(self._results_dir,
-                                           bug_keyvals)
-                    except ValueError:
-                        logging.error('Unable to log bug keyval for:%s',
-                                      result.test_name)
+            if self._should_file_bugs:
+                self._file_bug(result, bug_reporter, bug_template)
             else:
                 # reporting modules have dependency on external
                 # packages, e.g., httplib2 Such dependency can cause
@@ -1100,8 +1075,9 @@ class Suite(object):
                 # packages to use other functions in this module.
                 from autotest_lib.server.cros.dynamic_suite import reporting
 
-                reporting.send_email(self._get_test_bug(result),
-                                     merged_template)
+                reporting.send_email(
+                        self._get_test_bug(result),
+                        self._get_bug_template(result, bug_template))
 
 
     def _get_bug_template(self, result, bug_template):
@@ -1158,6 +1134,42 @@ class Suite(object):
                 result)
 
 
+    @property
+    def _should_file_bugs(self):
+        """Return whether bugs should be filed.
+
+        @returns: bool
+        """
+        # File bug when failure is one of the _FILE_BUG_SUITES,
+        # otherwise send an email to the owner anc cc.
+        return self._tag in _FILE_BUG_SUITES
+
+
+    def _file_bug(self, result, bug_reporter, bug_template):
+        """File a bug for a test job result.
+
+        @param result: Status instance for job.
+        @param bug_reporter: Reporter instance for reporting bugs.
+        @param bug_template: A template dictionary specifying the default bug
+                             filing options for failures in this suite.
+        """
+        bug_id, bug_count = bug_reporter.report(
+                self._get_test_bug(result),
+                self._get_bug_template(result, bug_template))
+
+        # We use keyvals to communicate bugs filed with run_suite.
+        if bug_id is not None:
+            bug_keyvals = tools.create_bug_keyvals(
+                    result.id, result.test_name,
+                    (bug_id, bug_count))
+            try:
+                utils.write_keyval(self._results_dir,
+                                   bug_keyvals)
+            except ValueError:
+                logging.error('Unable to log bug keyval for:%s',
+                              result.test_name)
+
+
     def abort(self):
         """
         Abort all scheduled test jobs.
@@ -1167,16 +1179,12 @@ class Suite(object):
             self._afe.run('abort_host_queue_entries', job__id__in=job_ids)
 
 
-    # TODO(ayatane): This is identical to _remember_test_status_job_id.  It
-    # suggests that we can factor out a job-like interface that both jobs and
-    # statuses support so we can merge the two methods to work on job-like
-    # objects.  This deduplication can probably be applied to other places.
-    def _remember_provided_job_id(self, job):
+    def _remember_job_keyval(self, job):
         """
         Record provided job as a suite job keyval, for later referencing.
 
-        @param job: some representation of a job, including id, test_name
-                    and owner
+        @param job: some representation of a job that has the attributes:
+                    id, test_name, and owner
         """
         if self._results_dir and job.id and job.owner and job.test_name:
             job_id_owner = '%s-%s' % (job.id, job.owner)
@@ -1186,27 +1194,9 @@ class Suite(object):
                 self._results_dir,
                 {hashlib.md5(job.test_name).hexdigest(): job_id_owner})
 
-    # TODO(ayatane): This is identical to _remember_provided_job_id.  See that
-    # method for details.
-    def _remember_test_status_job_id(self, status):
-        """
-        Record provided status as a test status keyval, for later referencing.
-
-        @param status: Test status, including properties such as id, test_name
-                       and owner.
-        """
-        if (self._results_dir
-                and status.id and status.owner and status.test_name):
-            test_id_owner = '%s-%s' % (status.id, status.owner)
-            logging.debug('Adding status keyval for %s=%s',
-                          status.test_name, test_id_owner)
-            utils.write_keyval(
-                self._results_dir,
-                {hashlib.md5(status.test_name).hexdigest(): test_id_owner})
-
 
     @staticmethod
-    def find_all_tests(cf_getter, suite_name='', add_experimental=False,
+    def _find_all_tests(cf_getter, suite_name='', add_experimental=False,
                        forgiving_parser=True, run_prod_code=False):
         """
         Function to scan through all tests and find all tests.
@@ -1285,8 +1275,8 @@ class Suite(object):
         return tests
 
 
-    @staticmethod
-    def find_and_parse_tests(cf_getter, predicate, suite_name='',
+    @classmethod
+    def find_and_parse_tests(cls, cf_getter, predicate, suite_name='',
                              add_experimental=False, forgiving_parser=True,
                              run_prod_code=False):
         """
@@ -1321,9 +1311,9 @@ class Suite(object):
                 file text added in |text| attribute. Results are sorted based
                 on the TIME setting in control file, slowest test comes first.
         """
-        tests = Suite.find_all_tests(cf_getter, suite_name, add_experimental,
-                                     forgiving_parser,
-                                     run_prod_code=run_prod_code)
+        tests = cls._find_all_tests(cf_getter, suite_name, add_experimental,
+                                    forgiving_parser,
+                                    run_prod_code=run_prod_code)
         logging.debug('Parsed %s control files.', len(tests))
         tests = [test for test in tests.itervalues() if predicate(test)]
         tests.sort(key=lambda t:
@@ -1332,8 +1322,8 @@ class Suite(object):
         return tests
 
 
-    @staticmethod
-    def find_possible_tests(cf_getter, predicate, suite_name='', count=10):
+    @classmethod
+    def find_possible_tests(cls, cf_getter, predicate, suite_name='', count=10):
         """
         Function to scan through all tests and find possible tests.
 
@@ -1355,9 +1345,9 @@ class Suite(object):
         @return list of top names that similar to the given test, sorted by
                 match ratio.
         """
-        tests = Suite.find_all_tests(cf_getter, suite_name,
-                                     add_experimental=True,
-                                     forgiving_parser=True)
+        tests = cls._find_all_tests(cf_getter, suite_name,
+                                    add_experimental=True,
+                                    forgiving_parser=True)
         logging.debug('Parsed %s control files.', len(tests))
         similarities = {}
         for test in tests.itervalues():

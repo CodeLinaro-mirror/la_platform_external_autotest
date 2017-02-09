@@ -105,20 +105,12 @@ class _JobDirectory(object):
       call to `offload()` makes the first attempt to offload the
       directory to GS.  Offload is attempted, but fails to complete
       (e.g. because of a GS problem).
-   4. After the first failed offload `is_offloaded()` is false,
-      but `is_reportable()` is also false, so the failure is not
-      reported.
-   5. Another call to `offload()` again tries to offload the
-      directory, and again fails.
-   6. After a second failure, `is_offloaded()` is false and
-      `is_reportable()` is true, so the failure generates an e-mail
-      notification.
-   7. Finally, a call to `offload()` succeeds, and the directory no
+   4. Finally, a call to `offload()` succeeds, and the directory no
       longer exists.  Now `is_offloaded()` is true, so the job
       instance is deleted, and future failures will not mention this
       directory any more.
 
-  Only steps 1. and 7. are guaranteed to occur.  The others depend
+  Only steps 1. and 4. are guaranteed to occur.  The others depend
   on the timing of calls to `offload()`, and on the reliability of
   the actual offload process.
 
@@ -187,10 +179,6 @@ class _JobDirectory(object):
     """Return whether this job has been successfully offloaded."""
     return not os.path.exists(self._dirname)
 
-  def is_reportable(self):
-    """Return whether this job has a reportable failure."""
-    return self._offload_count > 1
-
   def get_failure_time(self):
     """Return the time of the first offload failure."""
     return self._first_offload_start
@@ -212,6 +200,10 @@ class _JobDirectory(object):
     return True
 
 
+NO_OFFLOAD_README = """These results have been deleted rather than offloaded.
+This is the expected behavior for passing jobs from the Commit Queue."""
+
+
 class RegularJobDirectory(_JobDirectory):
   """Subclass of _JobDirectory for regular test jobs."""
 
@@ -228,7 +220,12 @@ class RegularJobDirectory(_JobDirectory):
       with open(path, 'r') as f:
         gs_off_instructions = json.load(f)
       if gs_off_instructions.get(constants.GS_OFFLOADER_NO_OFFLOAD):
-        shutil.rmtree(os.path.dirname(path))
+        dirname = os.path.dirname(path)
+        shutil.rmtree(dirname)
+        os.mkdir(dirname)
+        breadcrumb_name = os.path.join(dirname, 'logs-removed-readme.txt')
+        with open(breadcrumb_name, 'w') as f:
+          f.write(NO_OFFLOAD_README)
 
     # Finally check if there's anything left to offload.
     if not os.listdir(self._dirname):
