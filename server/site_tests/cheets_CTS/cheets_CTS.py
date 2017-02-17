@@ -16,6 +16,7 @@ import contextlib
 import logging
 import os
 import shutil
+import subprocess
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.server import utils
@@ -39,8 +40,8 @@ _CTS_TIMEOUT_SECONDS = (4 * 3600)
 # Public download locations for android cts bundles.
 _DL_CTS = 'https://dl.google.com/dl/android/cts/'
 _CTS_URI = {
-    'arm' : _DL_CTS + 'android-cts-6.0_r12-linux_x86-arm.zip',
-    'x86' : _DL_CTS + 'android-cts-6.0_r12-linux_x86-x86.zip',
+    'arm' : _DL_CTS + 'android-cts-6.0_r15-linux_x86-arm.zip',
+    'x86' : _DL_CTS + 'android-cts-6.0_r15-linux_x86-x86.zip',
     'media' : _DL_CTS + 'android-cts-media-1.2.zip'
 }
 
@@ -134,6 +135,29 @@ class cheets_CTS(tradefed_test.TradefedTest):
                 stdout_tee=utils.TEE_TO_LOGS,
                 stderr_tee=utils.TEE_TO_LOGS)
 
+    def _verify_media(self, media):
+        """Verify that the local media directory matches the DUT.
+        Used for debugging b/32978387 where we may see file corruption."""
+        # TODO(ihf): Remove function once b/32978387 is resolved.
+        # Find all files in the bbb_short and bbb_full directories, md5sum these
+        # files and sort by filename. The result for local and DUT hierarchies
+        # is piped through the diff command.
+        cmd = ('diff '
+               '<(adb shell "cd /sdcard/test; '
+                   'find ./bbb_short ./bbb_full -type f -print0 | '
+                   'xargs -0 md5sum | grep -v "\.DS_Store" | sort -k 2")'
+               '<(cd %s; '
+                   'find ./bbb_short ./bbb_full -type f -print0 | '
+                   'xargs -0 md5sum | grep -v "\.DS_Store" | sort -k 2)'
+                   % media)
+        output = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE).stdout.read()
+        if output:
+            logging.error('Some media files differ on DUT /sdcard/test vs. local.')
+            logging.error(output)
+            return False
+        logging.info('Media files identical on DUT /sdcard/test vs. local.')
+        return True
+
     def _push_media(self):
         """Downloads, caches and pushed media files to DUT."""
         media = self._install_bundle(_CTS_URI['media'])
@@ -147,6 +171,8 @@ class cheets_CTS(tradefed_test.TradefedTest):
                 c['success'] = True
         else:
             self._copy_media(media)
+        if not self._verify_media(media):
+            raise error.TestFail('Error: saw corruption pushing media files.')
 
     def _tradefed_run_command(self,
                               package=None,
@@ -238,14 +264,17 @@ class cheets_CTS(tradefed_test.TradefedTest):
                 stdout_tee=utils.TEE_TO_LOGS,
                 stderr_tee=utils.TEE_TO_LOGS)
             logging.info('END: ./cts-tradefed %s\n', ' '.join(command))
+        result_destination = os.path.join(self.resultsdir, 'android-cts')
+        # Gather the global log first. Datetime parsing below can abort the test
+        # if tradefed startup had failed. Even then the global log is useful.
+        self._collect_tradefed_global_log(output, result_destination)
         if not datetime_id:
             # Parse stdout to obtain datetime of the session. This is needed to
             # locate result xml files and logs.
             datetime_id = self._parse_tradefed_datetime(output, self.summary)
         # Collect tradefed logs for autotest.
         tradefed = os.path.join(self._android_cts, 'android-cts', 'repository')
-        autotest = os.path.join(self.resultsdir, 'android-cts')
-        self._collect_logs(tradefed, datetime_id, autotest)
+        self._collect_logs(tradefed, datetime_id, result_destination)
         return self._parse_result(output, self.waivers_and_manual_tests)
 
     def _tradefed_continue(self, session_id, datetime_id=None):

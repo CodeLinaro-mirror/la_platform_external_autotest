@@ -37,7 +37,6 @@ from autotest_lib.client.bin import utils as client_utils
 from autotest_lib.client.common_lib import base_utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import dev_server
-from autotest_lib.server import afe_utils
 from autotest_lib.server import autotest
 from autotest_lib.server import test
 from autotest_lib.server import utils
@@ -470,9 +469,10 @@ class TradefedTest(test.test):
         # First, request the devserver to download files into the lab network.
         # TODO(ihf): Switch stage_artifacts to honor rsync. Then we don't have
         # to shuffle files inside of tarballs.
-        build = afe_utils.get_build(self._host)
-        ds = dev_server.ImageServer.resolve(build)
-        ds.stage_artifacts(build, files=[filename], archive_url=archive_url)
+        info = self._host.host_info_store.get()
+        ds = dev_server.ImageServer.resolve(info.build)
+        ds.stage_artifacts(info.build, files=[filename],
+                           archive_url=archive_url)
 
         # Then download files from the dev server.
         # TODO(ihf): use rsync instead of wget. Are there 3 machines involved?
@@ -539,6 +539,23 @@ class TradefedTest(test.test):
         kwargs['extra_paths'] = (
                 kwargs.get('extra_paths', []) + self._install_paths)
         return utils.run(*args, **kwargs)
+
+    def _collect_tradefed_global_log(self, result, destination):
+        """Collects the tradefed global log.
+
+        @param result: The result object from utils.run.
+        @param destination: Autotest result directory (destination of logs).
+        """
+        match = re.search(r'Saved log to /tmp/(tradefed_global_log_.*\.txt)',
+                          result.stdout)
+        if not match:
+            logging.error('no tradefed_global_log file is found')
+            return
+
+        name = match.group(1)
+        dest = os.path.join(destination, 'logs', 'tmp')
+        self._safe_makedirs(dest)
+        shutil.copy(os.path.join('/tmp', name), os.path.join(dest, name))
 
     def _parse_tradefed_datetime(self, result, summary=None):
         """Get the tradefed provided result ID consisting of a datetime stamp.

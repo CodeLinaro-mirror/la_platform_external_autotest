@@ -106,11 +106,11 @@ class RetryHandler(object):
                              if max_retries is not None else sys.maxint)
         for job_id, test in initial_jobs_to_tests.items():
             if test.job_retries > 0:
-                self.add_job(new_job_id=job_id,
-                             retry_max=test.job_retries)
+                self._add_job(new_job_id=job_id,
+                              retry_max=test.job_retries)
 
 
-    def add_job(self, new_job_id, retry_max):
+    def _add_job(self, new_job_id, retry_max):
         """Add a newly-created job to the retry map.
 
         @param new_job_id: The afe_job_id of a newly created job.
@@ -128,42 +128,9 @@ class RetryHandler(object):
                 'retry_max': retry_max}
 
 
-    def suite_max_reached(self):
+    def _suite_max_reached(self):
         """Return whether maximum retry limit for a suite has been reached."""
         return self._max_retries <= 0
-
-
-    def should_retry(self, result):
-        """Check whether we should retry a job based on its result.
-
-        We will retry the job that corresponds to the result
-        when all of the following are true.
-        a) The test was actually executed, meaning that if
-           a job was aborted before it could ever reach the state
-           of 'Running', the job will not be retried.
-        b) The result is worse than |self._retry_level| which
-           defaults to 'WARN'.
-        c) The test requires retry, i.e. the job has an entry in the retry map.
-        d) We haven't made any retry attempt yet, i.e. state == NOT_ATTEMPTED
-           Note that if a test has JOB_RETRIES=5, and the second time
-           it was retried it hit an rpc error, we will give up on
-           all following retries.
-        e) The job has not reached its retry max, i.e. retry_max > 0
-
-        @param result: A result, encapsulating the status of the job.
-
-        @returns: True if we should retry the job.
-
-        """
-        return (
-            not self.suite_max_reached()
-            and result.test_executed
-            and result.is_worse_than(
-                job_status.Status(self._retry_level, '', 'reason'))
-            and result.id in self._retry_map
-            and self._retry_map[result.id]['state'] == self.States.NOT_ATTEMPTED
-            and self._retry_map[result.id]['retry_max'] > 0
-        )
 
 
     def add_retry(self, old_job_id, new_job_id):
@@ -185,8 +152,8 @@ class RetryHandler(object):
                     'We have already retried or attempted to retry job %d' %
                     old_job_id)
         old_record['state'] = self.States.RETRIED
-        self.add_job(new_job_id=new_job_id,
-                     retry_max=old_record['retry_max'] - 1)
+        self._add_job(new_job_id=new_job_id,
+                      retry_max=old_record['retry_max'] - 1)
         self._max_retries -= 1
 
 
@@ -231,9 +198,45 @@ class RetryHandler(object):
                   False otherwise.
 
         """
-        return (result.test_executed and result.id in self._retry_map and (
-                self._retry_map[result.id]['state'] == self.States.RETRIED or
-                self.should_retry(result)))
+        return (result.test_executed
+                and result.id in self._retry_map
+                and (self._retry_map[result.id]['state'] == self.States.RETRIED
+                     or self._should_retry(result)))
+
+
+    def _should_retry(self, result):
+        """Check whether we should retry a job based on its result.
+
+        This method only makes sense when called by has_following_retry().
+
+        We will retry the job that corresponds to the result
+        when all of the following are true.
+        a) The test was actually executed, meaning that if
+           a job was aborted before it could ever reach the state
+           of 'Running', the job will not be retried.
+        b) The result is worse than |self._retry_level| which
+           defaults to 'WARN'.
+        c) The test requires retry, i.e. the job has an entry in the retry map.
+        d) We haven't made any retry attempt yet, i.e. state == NOT_ATTEMPTED
+           Note that if a test has JOB_RETRIES=5, and the second time
+           it was retried it hit an rpc error, we will give up on
+           all following retries.
+        e) The job has not reached its retry max, i.e. retry_max > 0
+
+        @param result: A result, encapsulating the status of the job.
+
+        @returns: True if we should retry the job.
+
+        """
+        assert result.test_executed
+        assert result.id in self._retry_map
+        return (
+            not self._suite_max_reached()
+            and result.is_worse_than(
+                job_status.Status(self._retry_level, '', 'reason'))
+            and self._retry_map[result.id]['state'] == self.States.NOT_ATTEMPTED
+            and self._retry_map[result.id]['retry_max'] > 0
+        )
 
 
     def get_retry_max(self, job_id):
@@ -972,7 +975,7 @@ class Suite(object):
         @param result: A result, encapsulating the status of the failed job.
         @return: True if we should report this failure.
         """
-        if self._job_retry and self._retry_handler.has_following_retry(result):
+        if self._has_retry(result):
             return False
 
         is_not_experimental = (
@@ -983,6 +986,17 @@ class Suite(object):
                 (is_not_experimental or self._file_experimental_bugs) and
                 not result.is_testna() and
                 result.is_worse_than(job_status.Status('GOOD', '', 'reason')))
+
+
+    def _has_retry(self, result):
+        """
+        Return True if this result gets to retry.
+
+        @param result: A result, encapsulating the status of the failed job.
+        @return: bool
+        """
+        return (self._job_retry
+                and self._retry_handler.has_following_retry(result))
 
 
     def wait(self, record, bug_template=None):
@@ -1052,7 +1066,7 @@ class Suite(object):
         result.record_all(record)
         self._remember_job_keyval(result)
 
-        if self._job_retry and self._retry_handler.should_retry(result):
+        if self._has_retry(result):
             new_job = self._schedule_test(
                     record=record, test=self._jobs_to_tests[result.id],
                     retry_for=result.id, ignore_errors=True)
