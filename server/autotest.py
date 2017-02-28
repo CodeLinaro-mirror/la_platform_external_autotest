@@ -4,14 +4,18 @@
 import re, os, sys, traceback, time, glob, tempfile
 import logging
 
-from chromite.lib import metrics
-
 import common
 from autotest_lib.server import installable_object, prebuild, utils
 from autotest_lib.client.common_lib import base_job, error, autotemp
 from autotest_lib.client.common_lib import packages
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import utils as client_utils
+
+try:
+    from chromite.lib import metrics
+except ImportError:
+    metrics = client_utils.metrics_mock
+
 
 AUTOTEST_SVN = 'svn://test.kernel.org/autotest/trunk/client'
 AUTOTEST_HTTP = 'http://test.kernel.org/svn/autotest/trunk/client'
@@ -362,6 +366,8 @@ class BaseAutotest(installable_object.InstallableObject):
                 the control file.
         """
         host = self._get_host_and_setup(host, use_packaging=use_packaging)
+        logging.debug('Autotest job starts on remote host: %s',
+                      host.hostname)
         results_dir = os.path.abspath(results_dir)
 
         if client_disconnect_timeout is None:
@@ -937,6 +943,8 @@ class _BaseRun(object):
                            "client on %s: %s\n") % (self.host.hostname, last)
                     raise error.AutotestRunError(msg)
         finally:
+            logging.debug('Autotest job finishes running. Below is the '
+                          'post-processing operations.')
             logger.close()
             if not self.background:
                 collector.collect_client_job_results()
@@ -948,6 +956,8 @@ class _BaseRun(object):
                 self.host.job.remove_client_log(hostname, remote_results,
                                                 local_results)
                 job_record_context.restore()
+
+            logging.debug('Autotest job finishes.')
 
         # should only get here if we timed out
         assert timeout

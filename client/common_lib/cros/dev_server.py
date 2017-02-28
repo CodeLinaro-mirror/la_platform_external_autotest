@@ -27,8 +27,9 @@ from autotest_lib.server import utils as server_utils
 
 try:
     from chromite.lib import metrics
-except:
-    metrics = None
+except ImportError:
+    metrics = utils.metrics_mock
+
 
 CONFIG = global_config.global_config
 # This file is generated at build time and specifies, per suite and per test,
@@ -99,15 +100,13 @@ _EXCEPTION_PATTERNS = [
         (r".*Devserver portfile does not exist!.*$",
          '(1) Devserver portfile does not exist on host'),
         # Raised when devserver cannot copy packages to host.
-        (r".*CrOS auto-update failed .* Could not copy .* to device.*$",
+        (r".*Could not copy .* to device.*$",
          '(2) Cannot copy packages to host'),
         # Raised when devserver fails to run specific commands on host.
-        (r".*CrOS auto-update failed .* cwd=None, "
-         "extra env=\{'LC_MESSAGES': 'C'\}.*$",
+        (r".*cwd=None, extra env=\{'LC_MESSAGES': 'C'\}.*$",
          '(3) Fail to run specific command on host'),
         # Raised when new build fails to boot on the host.
-        (r'.*CrOS auto-update failed for host .* RootfsUpdateError: '
-         'Build .* failed to boot on.*$',
+        (r'.*RootfsUpdateError: Build .* failed to boot on.*$',
          '(4) Build failed to boot on host'),
         # Raised when the auto-update process is timed out.
         (r'.*The CrOS auto-update process is timed out, '
@@ -125,12 +124,10 @@ _EXCEPTION_PATTERNS = [
         (r'.*No JSON object could be decoded.*$',
          '(8) Devserver returned non-json object'),
         # Raised when devserver loses host's ssh connection
-        (r'.*CrOS auto-update failed for host .* SSHConnectionError\: .* '
-         'port 22\: Connection timed out.*$',
+        (r'.*SSHConnectionError\: .* port 22\: Connection timed out.*$',
          "(9) Devserver lost host's ssh connection"),
         # Raised when error happens in writing files to host
-        (r'.*CrOS auto-update failed for host .* '
-         'Write failed\: Broken pipe.*$',
+        (r'.*Write failed\: Broken pipe.*$',
          "(10) Broken pipe while writing or connecting to host")]
 
 PREFER_LOCAL_DEVSERVER = CONFIG.get_config_value(
@@ -1972,41 +1969,39 @@ class ImageServer(ImageServerBase):
                             'AU failed, trying IP instead of hostname: %s',
                             host_name_ip)
 
-        if metrics:
-            try:
-                board, build_type, milestone, _ = server_utils.ParseBuildName(
-                    build_name)
-            except server_utils.ParseBuildNameException:
-                logging.warning('Unable to parse build name %s for metrics. '
-                                'Continuing anyway.', build_name)
-                board, build_type, milestone = ('', '', '')
+        # Upload data to metrics
+        try:
+            board, build_type, milestone, _ = server_utils.ParseBuildName(
+                build_name)
+        except server_utils.ParseBuildNameException:
+            logging.warning('Unable to parse build name %s for metrics. '
+                            'Continuing anyway.', build_name)
+            board, build_type, milestone = ('', '', '')
 
-            # Note: To avoid reaching or exceeding the monarch field cardinality
-            # limit, we avoid a metric that includes both dut hostname and other
-            # high cardinality fields.
-            # Per-devserver cros_update metric.
-            c = metrics.Counter(
-                    'chromeos/autotest/provision/cros_update_by_devserver')
-            # Add a field |error| here. Current error's pattern is manually
-            # specified in _EXCEPTION_PATTERNS.
-            raised_error = self._classify_exceptions(error_list)
-            f = {'dev_server': self.resolved_hostname,
-                 'success': is_au_success,
-                 'board': board,
-                 'build_type': build_type,
-                 'milestone': milestone,
-                 'error': raised_error}
-            c.increment(fields=f)
+        # Note: To avoid reaching or exceeding the monarch field cardinality
+        # limit, we avoid a metric that includes both dut hostname and other
+        # high cardinality fields.
+        # Per-devserver cros_update metric.
+        c = metrics.Counter(
+                'chromeos/autotest/provision/cros_update_by_devserver')
+        # Add a field |error| here. Current error's pattern is manually
+        # specified in _EXCEPTION_PATTERNS.
+        raised_error = self._classify_exceptions(error_list)
+        f = {'dev_server': self.resolved_hostname,
+             'success': is_au_success,
+             'board': board,
+             'build_type': build_type,
+             'milestone': milestone,
+             'error': raised_error}
+        c.increment(fields=f)
 
-            # Per-DUT cros_update metric.
-            c = metrics.Counter(
-                    'chromeos/autotest/provision/cros_update_per_dut')
-            f = {'success': is_au_success,
-                 'board': board,
-                 'error': raised_error,
-                 'dut_host_name': host_name}
-            c.increment(fields=f)
-
+        # Per-DUT cros_update metric.
+        c = metrics.Counter('chromeos/autotest/provision/cros_update_per_dut')
+        f = {'success': is_au_success,
+             'board': board,
+             'error': raised_error,
+             'dut_host_name': host_name}
+        c.increment(fields=f)
 
         if not is_au_success:
             # If errors happen in the CrOS AU process, report the first error
