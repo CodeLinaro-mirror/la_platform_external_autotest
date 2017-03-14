@@ -10,6 +10,7 @@ import logging
 import os
 import shutil
 import signal
+import stat
 import sys
 import tempfile
 import time
@@ -42,6 +43,11 @@ def _get_options(argv):
     """
     sys.argv = ['bogus.py'] + argv
     return gs_offloader.parse_options()
+
+
+def is_fifo(path):
+  """Determines whether a path is a fifo."""
+  return stat.S_ISFIFO(os.lstat(path).st_mode)
 
 
 class OffloaderOptionsTests(mox.MoxTestBase):
@@ -911,9 +917,10 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
         results_folder = tempfile.mkdtemp()
         invalid_chars = '_'.join(gs_offloader.INVALID_GS_CHARS)
         invalid_files = []
+        invalid_folder_name = 'invalid_name_folder_%s' % invalid_chars
         invalid_folder = os.path.join(
                 results_folder,
-                'invalid_name_folder_%s' % invalid_chars)
+                invalid_folder_name)
         invalid_files.append(os.path.join(
                 invalid_folder,
                 'invalid_name_file_%s' % invalid_chars))
@@ -931,6 +938,19 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
         for f in invalid_files + [good_file]:
             with open(f, 'w'):
                 pass
+        # check that broken symlinks don't break sanitization
+        symlink = os.path.join(invalid_folder, 'broken-link')
+        os.symlink(os.path.join(results_folder, 'no-such-file'),
+                   symlink)
+        fifo1 = os.path.join(results_folder, 'test_fifo1')
+        fifo2 = os.path.join(good_folder, 'test_fifo2')
+        fifo3 = os.path.join(invalid_folder, 'test_fifo3')
+        invalid_fifo4_name = 'test_fifo4_%s' % invalid_chars
+        fifo4 = os.path.join(invalid_folder, invalid_fifo4_name)
+        os.mkfifo(fifo1)
+        os.mkfifo(fifo2)
+        os.mkfifo(fifo3)
+        os.mkfifo(fifo4)
         gs_offloader.sanitize_dir(results_folder)
         for _, dirs, files in os.walk(results_folder):
             for name in dirs + files:
@@ -940,6 +960,33 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
                     for r in gs_offloader.INVALID_GS_CHAR_RANGE:
                         self.assertFalse(ord(c) >= r[0] and ord(c) <= r[1])
         self.assertTrue(os.path.exists(good_file))
+
+        self.assertTrue(os.path.exists(fifo1))
+        self.assertFalse(is_fifo(fifo1))
+        self.assertTrue(os.path.exists(fifo2))
+        self.assertFalse(is_fifo(fifo2))
+        corrected_folder = os.path.join(
+                results_folder,
+                gs_offloader.get_sanitized_name(invalid_folder_name))
+        corrected_fifo3 = os.path.join(
+                corrected_folder,
+                'test_fifo3')
+        self.assertFalse(os.path.exists(fifo3))
+        self.assertTrue(os.path.exists(corrected_fifo3))
+        self.assertFalse(is_fifo(corrected_fifo3))
+        corrected_fifo4 = os.path.join(
+                corrected_folder,
+                gs_offloader.get_sanitized_name(invalid_fifo4_name))
+        self.assertFalse(os.path.exists(fifo4))
+        self.assertTrue(os.path.exists(corrected_fifo4))
+        self.assertFalse(is_fifo(corrected_fifo4))
+
+        corrected_symlink = os.path.join(
+                corrected_folder,
+                'broken-link')
+        self.assertFalse(os.path.lexists(symlink))
+        self.assertTrue(os.path.exists(corrected_symlink))
+        self.assertFalse(os.path.islink(corrected_symlink))
         shutil.rmtree(results_folder)
 
 
@@ -997,7 +1044,7 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
         self.assertFalse(gs_offloader._is_valid_result(
             release_build, gs_offloader.CTS_RESULT_PATTERN, 'arc-bvt-cq'))
         self.assertTrue(gs_offloader._is_valid_result(
-            release_build, gs_offloader.GTS_RESULT_PATTERN, 'arc-gts-tot'))
+            release_build, gs_offloader.CTS_V2_RESULT_PATTERN, 'arc-gts'))
         self.assertFalse(gs_offloader._is_valid_result(
             None, gs_offloader.CTS_RESULT_PATTERN, 'arc-cts'))
         self.assertFalse(gs_offloader._is_valid_result(
@@ -1020,10 +1067,13 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
         sysinfo_folder = os.path.join(host_folder, 'sysinfo')
         cts_result_folder = os.path.join(
                 host_folder, 'cheets_CTS.android.dpi', 'results', 'cts-results')
+        cts_v2_result_folder = os.path.join(host_folder,
+                'cheets_CTS_N.CtsGraphicsTestCases', 'results', 'android-cts')
         gts_result_folder = os.path.join(
                 host_folder, 'cheets_GTS.google.admin', 'results', 'android-gts')
         timestamp_str = '2016.04.28_01.41.44'
         timestamp_cts_folder = os.path.join(cts_result_folder, timestamp_str)
+        timestamp_cts_v2_folder = os.path.join(cts_v2_result_folder, timestamp_str)
         timestamp_gts_folder = os.path.join(gts_result_folder, timestamp_str)
 
         # Test results in cts_result_folder with a different time-stamp.
@@ -1031,25 +1081,32 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
         timestamp_cts_folder_2 = os.path.join(cts_result_folder, timestamp_str_2)
 
         for folder in [debug_folder, sysinfo_folder, cts_result_folder,
-                       timestamp_cts_folder, timestamp_gts_folder, timestamp_cts_folder_2]:
+                       timestamp_cts_folder, timestamp_cts_folder_2,
+                       timestamp_cts_v2_folder, timestamp_gts_folder]:
             os.makedirs(folder)
 
         path_pattern_pair = [(timestamp_cts_folder, gs_offloader.CTS_RESULT_PATTERN),
                              (timestamp_cts_folder_2, gs_offloader.CTS_RESULT_PATTERN),
-                             (timestamp_gts_folder, gs_offloader.GTS_RESULT_PATTERN)]
+                             (timestamp_cts_v2_folder, gs_offloader.CTS_V2_RESULT_PATTERN),
+                             (timestamp_gts_folder, gs_offloader.CTS_V2_RESULT_PATTERN)]
 
         # Create timestamp.zip file_path.
         cts_zip_file = os.path.join(cts_result_folder, timestamp_str + '.zip')
         cts_zip_file_2 = os.path.join(cts_result_folder, timestamp_str_2 + '.zip')
+        cts_v2_zip_file = os.path.join(cts_v2_result_folder, timestamp_str + '.zip')
         gts_zip_file = os.path.join(gts_result_folder, timestamp_str + '.zip')
 
         # Create xml file_path.
         cts_result_file = os.path.join(timestamp_cts_folder, 'testResult.xml')
-        cts_result_file_2 = os.path.join(timestamp_cts_folder_2, 'testResult.xml')
+        cts_result_file_2 = os.path.join(timestamp_cts_folder_2,
+                                         'testResult.xml')
         gts_result_file = os.path.join(timestamp_gts_folder, 'test_result.xml')
+        cts_v2_result_file = os.path.join(timestamp_cts_v2_folder,
+                                         'test_result.xml')
 
-        for file_path in [cts_zip_file, cts_zip_file_2, gts_zip_file,
-                          cts_result_file, cts_result_file_2, gts_result_file]:
+        for file_path in [cts_zip_file, cts_zip_file_2, cts_v2_zip_file,
+                          gts_zip_file, cts_result_file, cts_result_file_2,
+                          gts_result_file, cts_v2_result_file]:
             with open(file_path, 'w') as f:
                 f.write('test')
 

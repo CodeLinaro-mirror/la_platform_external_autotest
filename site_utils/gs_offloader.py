@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -38,7 +39,7 @@ from autotest_lib.site_utils import pubsub_utils
 from autotest_lib.tko import models
 
 # Autotest requires the psutil module from site-packages, so it must be imported
-# after "import common" 
+# after "import common".
 try:
     # Does not exist, nor is needed, on moblab.
     import psutil
@@ -116,7 +117,7 @@ GS_OFFLOADER_MULTIPROCESSING = global_config.global_config.get_config_value(
 D = '[0-9][0-9]'
 TIMESTAMP_PATTERN = '%s%s.%s.%s_%s.%s.%s' % (D, D, D, D, D, D, D)
 CTS_RESULT_PATTERN = 'testResult.xml'
-GTS_RESULT_PATTERN = 'test_result.xml'
+CTS_V2_RESULT_PATTERN = 'test_result.xml'
 # Google Storage bucket URI to store results in.
 DEFAULT_CTS_RESULTS_GSURI = global_config.global_config.get_config_value(
         'CROS', 'cts_results_server', default='')
@@ -232,24 +233,50 @@ def get_sanitized_name(name):
 def sanitize_dir(dir_entry):
     """Replace all invalid characters in folder and file names with valid ones.
 
+    FIFOs are converted to regular files to prevent gsutil hangs (see crbug/684122).
+    Symlinks are converted to regular files that store the link destination
+    (crbug/692788).
+
     @param dir_entry: Directory entry to be sanitized.
     """
     if not os.path.exists(dir_entry):
         return
     renames = []
+    fifos = []
+    symlinks = []
     for root, dirs, files in os.walk(dir_entry):
         sanitized_root = get_sanitized_name(root)
         for name in dirs + files:
             sanitized_name = get_sanitized_name(name)
+            sanitized_path = os.path.join(sanitized_root, sanitized_name)
             if name != sanitized_name:
                 orig_path = os.path.join(sanitized_root, name)
-                rename_path = os.path.join(sanitized_root,
-                                           sanitized_name)
-                renames.append((orig_path, rename_path))
+                renames.append((orig_path, sanitized_path))
+            current_path = os.path.join(root, name)
+            file_stat = os.lstat(current_path)
+            if stat.S_ISFIFO(file_stat.st_mode):
+                # Replace fifos with markers
+                fifos.append(sanitized_path)
+            elif stat.S_ISLNK(file_stat.st_mode):
+                # Replace symlinks with markers
+                destination = os.readlink(current_path)
+                symlinks.append((sanitized_path, destination))
     for src, dest in renames:
         logging.warning('Invalid character found. Renaming %s to %s.', src,
                         dest)
         shutil.move(src, dest)
+    for fifo in fifos:
+        logging.debug('Removing fifo %s', fifo)
+        os.remove(fifo)
+        logging.debug('Creating marker %s', fifo)
+        with open(fifo, 'a') as marker:
+            marker.write('<FIFO>')
+    for link, destination in symlinks:
+        logging.debug('Removing symlink %s', link)
+        os.remove(link)
+        logging.debug('Creating marker %s', link)
+        with open(link, 'w') as marker:
+            marker.write('<symlink to %s>' % destination)
 
 
 def _get_zippable_folders(dir_entry):
@@ -343,10 +370,13 @@ def upload_testresult_files(dir_entry, multiprocessing):
     for host in glob.glob(os.path.join(dir_entry, '*')):
         cts_path = os.path.join(host, 'cheets_CTS.*', 'results', '*',
                                 TIMESTAMP_PATTERN)
-        gts_path = os.path.join(host, 'cheets_GTS.*', 'results', '*',
-                                TIMESTAMP_PATTERN)
+        cts_v2_path = os.path.join(host, 'cheets_CTS_*', 'results', '*',
+                                   TIMESTAMP_PATTERN)
+        gts_v2_path = os.path.join(host, 'cheets_GTS.*', 'results', '*',
+                                   TIMESTAMP_PATTERN)
         for result_path, result_pattern in [(cts_path, CTS_RESULT_PATTERN),
-                            (gts_path, GTS_RESULT_PATTERN)]:
+                            (cts_v2_path, CTS_V2_RESULT_PATTERN),
+                            (gts_v2_path, CTS_V2_RESULT_PATTERN)]:
             for path in glob.glob(result_path):
                 try:
                     _upload_files(host, path, result_pattern, multiprocessing)
@@ -374,8 +404,10 @@ def _is_valid_result(build, result_pattern, suite):
     # Not valid if it's cts result but not 'arc-cts*' or 'test_that_wrapper'
     # suite.
     whitelisted_suites = ['arc-cts', 'arc-cts-dev', 'arc-cts-beta',
-                          'arc-cts-stable', 'test_that_wrapper']
-    if result_pattern == CTS_RESULT_PATTERN and suite not in whitelisted_suites:
+                          'arc-cts-stable', 'arc-cts-perbuild', 'arc-gts',
+                          'arc-gts-perbuild', 'test_that_wrapper']
+    result_patterns = [CTS_RESULT_PATTERN, CTS_V2_RESULT_PATTERN]
+    if result_pattern in result_patterns and suite not in whitelisted_suites:
         return False
 
     return True

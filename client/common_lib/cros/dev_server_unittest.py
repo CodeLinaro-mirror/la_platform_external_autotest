@@ -17,6 +17,7 @@ import time
 import unittest
 import urllib2
 
+import common
 from autotest_lib.client.bin import utils as site_utils
 from autotest_lib.client.common_lib import android_utils
 from autotest_lib.client.common_lib import error
@@ -366,7 +367,7 @@ class DevServerTest(mox.MoxTestBase):
                 mox.IgnoreArg()).AndRaise(E500)
         self.mox.ReplayAll()
         self.assertFalse(self.dev_server.kill_au_process_for_host(
-                '100.0.0.0'))
+                '100.0.0.0', 100))
 
 
     def testURLErrorRetryKillAUProcess(self):
@@ -380,7 +381,8 @@ class DevServerTest(mox.MoxTestBase):
         time.sleep(mox.IgnoreArg())
         dev_server.ImageServerBase.run_call(mox.IgnoreArg()).AndRaise(E403)
         self.mox.ReplayAll()
-        self.assertFalse(self.dev_server.kill_au_process_for_host('100.0.0.0'))
+        self.assertFalse(self.dev_server.kill_au_process_for_host(
+                '100.0.0.0', 100))
 
 
     def testCmdErrorRetryCleanTrackLog(self):

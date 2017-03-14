@@ -6,7 +6,9 @@
 
 import logging
 import re
+import sys
 import threading
+import traceback
 from multiprocessing import pool
 
 import common
@@ -73,7 +75,8 @@ class TestBed(object):
         for adb_serial in self.adb_device_serials:
             self.adb_devices[adb_serial] = adb_host.ADBHost(
                 hostname=hostname, teststation=self.teststation,
-                adb_serial=adb_serial, afe_host=self._afe_host, **dargs)
+                adb_serial=adb_serial, afe_host=self._afe_host,
+                host_info_store=self.host_info_store, **dargs)
 
 
     def query_adb_device_serials(self):
@@ -136,8 +139,35 @@ class TestBed(object):
 
     def repair(self):
         """Run through repair on all the devices."""
+        # board name is needed for adb_host to repair as the adb_host objects
+        # created for testbed doesn't have host label and attributes retrieved
+        # from AFE.
+        info = self.host_info_store.get()
+        board = info.board
+        # Remove the tailing -# in board name as it can be passed in from
+        # testbed board labels
+        match = re.match(r'^(.*)-\d+$', board)
+        if match:
+            board = match.group(1)
+        failures = []
         for adb_device in self.get_adb_devices().values():
-            adb_device.repair()
+            try:
+                adb_device.repair(board=board, os=info.os)
+            except:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                failures.append((adb_device.adb_serial, exc_type, exc_value,
+                                 exc_traceback))
+        if failures:
+            serials = []
+            for serial, exc_type, exc_value, exc_traceback in failures:
+                serials.append(serial)
+                details = ''.join(traceback.format_exception(
+                        exc_type, exc_value, exc_traceback))
+                logging.error('Failed to repair device with serial %s, '
+                              'error:\n%s', serial, details)
+            raise error.AutoservRepairTotalFailure(
+                    'Fail to repair %d devices: %s' %
+                    (len(serials), ','.join(serials)))
 
 
     def verify(self):

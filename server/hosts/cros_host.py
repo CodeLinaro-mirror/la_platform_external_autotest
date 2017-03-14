@@ -300,7 +300,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         # TODO(fdeng): We need to simplify the
         # process of servo and servo_host initialization.
         # crbug.com/298432
-        self._servo_host =  servo_host.create_servo_host(
+        self._servo_host = servo_host.create_servo_host(
                 dut=self, servo_args=servo_args,
                 try_lab_servo=try_lab_servo,
                 try_servo_repair=try_servo_repair)
@@ -331,8 +331,12 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
 
     def _get_cros_repair_image_name(self):
-        return afe_utils.get_stable_cros_image_name(
-                self._get_board_from_afe())
+        info = self.host_info_store.get()
+        if info.board is None:
+            raise error.AutoservError('Cannot obtain repair image name. '
+                                      'No board label value found')
+
+        return afe_utils.get_stable_cros_image_name(info.board)
 
 
     def verify_job_repo_url(self, tag=''):
@@ -447,14 +451,12 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                     ds = dev_server.ImageServer(devserver_url)
                 else:
                     ds = dev_server.ImageServer.resolve(image_name)
+            elif info.build is not None:
+                ds = dev_server.ImageServer.resolve(info.build, hostname)
             else:
-                labels = afe_utils.get_labels(self, self.VERSION_PREFIX)
-                if not labels:
-                    raise error.AutoservError(
-                            'Failed to stage server-side package. The host has '
-                            'no job_report_url attribute or version label.')
-                image_name = labels[0][len(self.VERSION_PREFIX + ':'):]
-                ds = dev_server.ImageServer.resolve(image_name, hostname)
+                raise error.AutoservError(
+                        'Failed to stage server-side package. The host has '
+                        'no job_report_url attribute or version label.')
 
         # Get the OS version of the build, for any build older than
         # MIN_VERSION_SUPPORT_SSP, server side packaging is not supported.
@@ -623,6 +625,31 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         return tools.factory_image_url_pattern() % (devserver.url(), image_name)
 
 
+    def _get_au_monarch_fields(self, devserver, build):
+        """Form monarch fields by given devserve & build for auto-update.
+
+        @param devserver: the devserver (ImageServer instance) for auto-update.
+        @param build: the build to be updated.
+
+        @return A dictionary of monach fields.
+        """
+        try:
+            board, build_type, milestone, _ = server_utils.ParseBuildName(build)
+        except server_utils.ParseBuildNameException:
+            logging.warning('Unable to parse build name %s. Something is '
+                            'likely broken, but will continue anyway.',
+                            build)
+            board, build_type, milestone = ('', '', '')
+
+        monarch_fields = {
+                'dev_server': devserver.hostname,
+                'board': board,
+                'build_type': build_type,
+                'milestone': milestone
+        }
+        return monarch_fields
+
+
     def machine_install_by_devserver(self, update_url=None, force_update=False,
                     local_devserver=False, repair=False,
                     force_full_update=False):
@@ -679,20 +706,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         devserver = dev_server.resolve(build, self.hostname)
         server_name = devserver.hostname
 
-        try:
-            board, build_type, milestone, _ = server_utils.ParseBuildName(build)
-        except server_utils.ParseBuildNameException:
-            logging.warning('Unable to parse build name %s. Something is '
-                            'likely broken, but will continue anyway.',
-                            build)
-            board, build_type, milestone = ('', '', '')
-
-        monarch_fields = {
-                'dev_server': server_name,
-                'board': board,
-                'build_type': build_type,
-                'milestone': milestone
-        }
+        monarch_fields = self._get_au_monarch_fields(devserver, build)
 
         if previously_resolved:
             # Make sure devserver for Auto-Update has staged the build.
@@ -714,18 +728,48 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             c.increment(fields=monarch_fields)
 
         # Report provision stats.
-        (metrics.Counter('chromeos/autotest/provision/install_with_devserver')
-         .increment(fields=monarch_fields))
+        install_with_dev_counter = metrics.Counter(
+                'chromeos/autotest/provision/install_with_devserver')
+        install_with_dev_counter.increment(fields=monarch_fields)
         logging.debug('Resolved devserver for auto-update: %s', devserver.url())
 
         # and other metrics from this function.
         metrics.Counter('chromeos/autotest/provision/resolve'
                         ).increment(fields=monarch_fields)
 
-        devserver.auto_update(self.hostname, build,
-                              log_dir=self.job.resultdir,
-                              force_update=force_update,
-                              full_update=force_full_update)
+        success, retryable = devserver.auto_update(
+                self.hostname, build, log_dir=self.job.resultdir,
+                force_update=force_update, full_update=force_full_update)
+        if not success and retryable:
+          # It indicates that last provision failed due to devserver load
+          # issue, so another devserver is resolved to kick off provision
+          # job once again and only once.
+          logging.debug('Provision failed due to devserver issue,'
+                        'retry it with another devserver.')
+
+          # Check first whether this DUT is completely offline. If so, skip
+          # the following provision tries.
+          logging.debug('Checking whether host %s is online.', self.hostname)
+          if utils.ping(self.hostname, tries=1, deadline=1) == 0:
+              devserver = dev_server.resolve(
+                      build, self.hostname, ban_list=[devserver.url()])
+              devserver.trigger_download(build, synchronous=False)
+              monarch_fields = self._get_au_monarch_fields(devserver, build)
+              logging.debug('Retry auto_update: resolved devserver for '
+                            'auto-update: %s', devserver.url())
+
+              # Add metrics
+              install_with_dev_counter.increment(fields=monarch_fields)
+              c = metrics.Counter(
+                      'chromeos/autotest/provision/retry_by_devserver')
+              monarch_fields['last_devserver'] = server_name
+              monarch_fields['host'] = self.hostname
+              c.increment(fields=monarch_fields)
+
+              devserver.auto_update(
+                    self.hostname, build, log_dir=self.job.resultdir,
+                    force_update=force_update, full_update=force_full_update)
+
 
         # The reason to resolve a new devserver in function machine_install
         # is mostly because that the update_url there may has a strange format,

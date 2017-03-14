@@ -302,14 +302,6 @@ class Suite(object):
 
 
     @staticmethod
-    def parse_tag(tag):
-        """Splits a string on ',' optionally surrounded by whitespace.
-        @param tag: string to split.
-        """
-        return map(lambda x: x.strip(), tag.split(','))
-
-
-    @staticmethod
     def name_in_tag_predicate(name):
         """Returns predicate that takes a control file and looks for |name|.
 
@@ -320,8 +312,7 @@ class Suite(object):
         @return a callable that takes a ControlData and looks for |name| in that
                 ControlData object's suite member.
         """
-        return lambda t: (hasattr(t, 'suite') and
-                          name in Suite.parse_tag(t.suite))
+        return lambda t: name in t.suite_tag_parts
 
 
     @staticmethod
@@ -340,10 +331,9 @@ class Suite(object):
                 the control file, and ratio is the similarity between each suite
                 and the given name.
         """
-        return lambda t: ((None, 0) if not hasattr(t, 'suite') else
-                          [(suite,
-                            difflib.SequenceMatcher(a=suite, b=name).ratio())
-                           for suite in Suite.parse_tag(t.suite)])
+        return lambda t: [(suite,
+                           difflib.SequenceMatcher(a=suite, b=name).ratio())
+                          for suite in t.suite_tag_parts] or [(None, 0)]
 
 
     @staticmethod
@@ -466,10 +456,10 @@ class Suite(object):
             cf_getter = cls._create_ds_getter(build, devserver)
 
         suites = set()
-        predicate = lambda t: hasattr(t, 'suite')
-        for test in Suite.find_and_parse_tests(cf_getter, predicate,
-                                               add_experimental=True):
-            suites.update(Suite.parse_tag(test.suite))
+        predicate = lambda t: True
+        for test in cls.find_and_parse_tests(cf_getter, predicate,
+                                             add_experimental=True):
+            suites.update(test.suite_tag_parts)
         return list(suites)
 
 
@@ -536,11 +526,11 @@ class Suite(object):
             if run_prod_code:
                 cf_getter = cls.create_fs_getter(_AUTOTEST_DIR)
             else:
-                build = Suite.get_test_source_build(builds, **dargs)
+                build = cls.get_test_source_build(builds, **dargs)
                 cf_getter = cls._create_ds_getter(build, devserver)
 
-        return Suite(predicates,
-                     name, builds, board, cf_getter, run_prod_code, **dargs)
+        return cls(predicates,
+                   name, builds, board, cf_getter, run_prod_code, **dargs)
 
 
     @classmethod
@@ -569,8 +559,8 @@ class Suite(object):
             build = cls.get_test_source_build(builds, **dargs)
             cf_getter = cls._create_ds_getter(build, devserver)
 
-        return Suite([Suite.name_in_tag_predicate(name)],
-                     name, builds, board, cf_getter, **dargs)
+        return cls([cls.name_in_tag_predicate(name)],
+                   name, builds, board, cf_getter, **dargs)
 
 
     def __init__(
@@ -598,7 +588,9 @@ class Suite(object):
             job_retry=False,
             max_retries=sys.maxint,
             offload_failures_only=False,
-            test_source_build=None
+            test_source_build=None,
+            job_keyvals=None,
+            test_args=None
     ):
         """
         Constructor
@@ -646,7 +638,10 @@ class Suite(object):
         @param offload_failures_only: Only enable gs_offloading for failed
                                       jobs.
         @param test_source_build: Build that contains the server-side test code.
-
+        @param job_keyvals: General job keyvals to be inserted into keyval file,
+                            which will be used by tko/parse later.
+        @param test_args: A dict of args passed all the way to each individual
+                          test that will be actually ran.
         """
         if extra_deps is None:
             extra_deps = []
@@ -672,6 +667,7 @@ class Suite(object):
                 add_experimental=True,
                 forgiving_parser=forgiving_parser,
                 run_prod_code=run_prod_code,
+                test_args=test_args,
         )
 
         self._max_runtime_mins = max_runtime_mins
@@ -689,26 +685,8 @@ class Suite(object):
         self.wait_for_results = wait_for_results
         self._offload_failures_only = offload_failures_only
         self._test_source_build = test_source_build
-
-
-    @property
-    def stable_tests(self):
-        """
-        |self.tests|, filtered for non-experimental tests.
-
-        @returns: list
-        """
-        return filter(lambda t: not t.experimental, self.tests)
-
-
-    @property
-    def unstable_tests(self):
-        """
-        |self.tests|, filtered for experimental tests.
-
-        @returns: list
-        """
-        return filter(lambda t: t.experimental, self.tests)
+        self._job_keyvals = job_keyvals
+        self._test_args = test_args
 
 
     @property
@@ -910,14 +888,22 @@ class Suite(object):
         @param add_experimental: schedule experimental tests as well, or not.
         @returns: The number of tests that were scheduled.
         """
-        logging.debug('Discovered %d stable tests.', len(self.stable_tests))
+        scheduled_test_names = []
+        discoverer = _DynamicSuiteDiscoverer(
+                tests=self.tests,
+                add_experimental=add_experimental)
+        logging.debug('Discovered %d stable tests.',
+                      len(discoverer.stable_tests))
         logging.debug('Discovered %d unstable tests.',
-                      len(self.unstable_tests))
+                      len(discoverer.unstable_tests))
 
         Status('INFO', 'Start %s' % self._tag).record_result(record)
-        scheduled_test_names = []
         try:
-            for test in self._get_tests_to_schedule(add_experimental):
+            # Write job_keyvals into keyval file.
+            if self._job_keyvals:
+                utils.write_keyval(self._results_dir, self._job_keyvals)
+
+            for test in discoverer.discover_tests():
                 scheduled_job = self._schedule_test(record, test)
                 if scheduled_job is not None:
                     scheduled_test_names.append(test.name)
@@ -938,21 +924,6 @@ class Suite(object):
                     initial_jobs_to_tests=self._jobs_to_tests,
                     max_retries=self._max_retries)
         return len(scheduled_test_names)
-
-
-    def _get_tests_to_schedule(self, add_experimental=True):
-        """Return a list of tests to be scheduled for this suite.
-
-        @param add_experimental: schedule experimental tests as well, or not.
-        @returns: list of tests (ControlData objects)
-        """
-        tests = self.stable_tests
-        if add_experimental:
-            for test in self.unstable_tests:
-                if not test.name.startswith(constants.EXPERIMENTAL_PREFIX):
-                    test.name = constants.EXPERIMENTAL_PREFIX + test.name
-                tests.append(test)
-        return tests
 
 
     def _make_scheduled_tests_keyvals(self, scheduled_test_names):
@@ -1211,7 +1182,8 @@ class Suite(object):
 
     @staticmethod
     def _find_all_tests(cf_getter, suite_name='', add_experimental=False,
-                       forgiving_parser=True, run_prod_code=False):
+                        forgiving_parser=True, run_prod_code=False,
+                        test_args=None):
         """
         Function to scan through all tests and find all tests.
 
@@ -1245,6 +1217,8 @@ class Suite(object):
                               lives in prod aka the test code currently on the
                               lab servers by disabling SSP for the discovered
                               tests.
+        @param test_args: A dict of args to be seeded in test control file under
+                          the name |args_dict|.
 
         @raises ControlVariableException: If forgiving_parser is False and there
                                           is a syntax error in a control file.
@@ -1270,6 +1244,9 @@ class Suite(object):
                 text = suite_info[file]
             else:
                 text = cf_getter.get_control_file_contents(file)
+            # Seed test_args into the control file.
+            if test_args:
+                text = tools.inject_vars(test_args, text)
             try:
                 found_test = control_data.parse_control_string(
                         text, raise_warnings=True, path=file)
@@ -1292,7 +1269,7 @@ class Suite(object):
     @classmethod
     def find_and_parse_tests(cls, cf_getter, predicate, suite_name='',
                              add_experimental=False, forgiving_parser=True,
-                             run_prod_code=False):
+                             run_prod_code=False, test_args=None):
         """
         Function to scan through all tests and find eligible tests.
 
@@ -1317,6 +1294,7 @@ class Suite(object):
                               lives in prod aka the test code currently on the
                               lab servers by disabling SSP for the discovered
                               tests.
+        @param test_args: A dict of args to be seeded in test control file.
 
         @raises ControlVariableException: If forgiving_parser is False and there
                                           is a syntax error in a control file.
@@ -1327,7 +1305,8 @@ class Suite(object):
         """
         tests = cls._find_all_tests(cf_getter, suite_name, add_experimental,
                                     forgiving_parser,
-                                    run_prod_code=run_prod_code)
+                                    run_prod_code=run_prod_code,
+                                    test_args=test_args)
         logging.debug('Parsed %s control files.', len(tests))
         tests = [test for test in tests.itervalues() if predicate(test)]
         tests.sort(key=lambda t:
@@ -1375,6 +1354,52 @@ class Suite(object):
         return [s[0] for s in
                 sorted(similarities.items(), key=operator.itemgetter(1),
                        reverse=True)][:count]
+
+
+class _DynamicSuiteDiscoverer(object):
+    """Test discoverer for dynamic suite tests."""
+
+
+    def __init__(self, tests, add_experimental=True):
+        """Initialize instance.
+
+        @param tests: iterable of tests (ControlData objects)
+        @param add_experimental: schedule experimental tests as well, or not.
+        """
+        self._tests = list(tests)
+        self._add_experimental = add_experimental
+
+
+    def discover_tests(self):
+        """Return a list of tests to be scheduled for this suite.
+
+        @returns: list of tests (ControlData objects)
+        """
+        tests = self.stable_tests
+        if self._add_experimental:
+            for test in self.unstable_tests:
+                if not test.name.startswith(constants.EXPERIMENTAL_PREFIX):
+                    test.name = constants.EXPERIMENTAL_PREFIX + test.name
+                tests.append(test)
+        return tests
+
+
+    @property
+    def stable_tests(self):
+        """Non-experimental tests.
+
+        @returns: list
+        """
+        return filter(lambda t: not t.experimental, self._tests)
+
+
+    @property
+    def unstable_tests(self):
+        """Experimental tests.
+
+        @returns: list
+        """
+        return filter(lambda t: t.experimental, self._tests)
 
 
 def _is_nonexistent_board_error(e):

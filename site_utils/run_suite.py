@@ -59,7 +59,6 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config, enum
 from autotest_lib.client.common_lib import priorities
 from autotest_lib.client.common_lib import time_utils
-from autotest_lib.client.common_lib.cros.graphite import autotest_stats
 from autotest_lib.client.common_lib.cros import retry
 from autotest_lib.frontend.afe.json_rpc import proxy
 from autotest_lib.server import utils
@@ -259,6 +258,15 @@ def make_parser():
     parser.add_argument(
         '--skip_duts_check', dest='skip_duts_check', action='store_true',
         default=False, help='If True, skip minimum available DUTs check')
+    parser.add_argument(
+        '--job_keyvals', dest='job_keyvals', type=ast.literal_eval,
+        action='store', default=None,
+        help='A dict of job keyvals to be inject to suite control file')
+    parser.add_argument(
+        '--test_args', dest='test_args', type=ast.literal_eval,
+        action='store', default=None,
+        help=('A dict of args passed all the way to each individual test that '
+              'will be actually ran.'))
     return parser
 
 
@@ -645,57 +653,6 @@ class Timings(object):
                                            self.tests_end_time))
 
 
-    def SendResultsToStatsd(self, suite, build, board):
-        """
-        Sends data to statsd.
-
-        1. Makes a data_key of the form: run_suite.$board.$branch.$suite
-            eg: stats/gauges/<hostname>/run_suite/<board>/<branch>/<suite>/
-        2. Computes timings for several start and end event pairs.
-        3. Sends all timing values to statsd.
-
-        @param suite: scheduled suite that we want to record the results of.
-        @param build: the build that this suite ran on.
-                      eg: 'lumpy-release/R26-3570.0.0'
-        @param board: the board that this suite ran on.
-        """
-        if sys.version_info < (2, 7):
-            logging.error('Sending run_suite perf data to statsd requires'
-                          'python 2.7 or greater.')
-            return
-
-        # Constructs the key used for logging statsd timing data.
-        data_key = utils.get_data_key('run_suite', suite, build, board)
-
-        # Since we don't want to try subtracting corrupted datetime values
-        # we catch TypeErrors in time_utils.time_string_to_datetime and insert
-        # None instead. This means that even if, say,
-        # keyvals.get(constants.ARTIFACT_FINISHED_TIME) returns a corrupt
-        # value the member artifact_end_time is set to None.
-        if self.download_start_time:
-            if self.payload_end_time:
-                autotest_stats.Timer(data_key).send('payload_download_time',
-                        (self.payload_end_time -
-                         self.download_start_time).total_seconds())
-
-            if self.artifact_end_time:
-                autotest_stats.Timer(data_key).send('artifact_download_time',
-                        (self.artifact_end_time -
-                         self.download_start_time).total_seconds())
-
-        if self.tests_end_time:
-            if self.suite_start_time:
-                autotest_stats.Timer(data_key).send('suite_run_time',
-                        (self.tests_end_time -
-                         self.suite_start_time).total_seconds())
-
-            if self.tests_start_time:
-                autotest_stats.Timer(data_key).send('tests_run_time',
-                        (self.tests_end_time -
-                         self.tests_start_time).total_seconds())
-
-
-
 def instance_for_pool(pool_name):
     """
     Return the hostname of the server that should be used to service a suite
@@ -1050,6 +1007,14 @@ class TestView(object):
         return attributes
 
 
+    def override_afe_job_id(self, afe_job_id):
+        """Overrides the AFE job id for the test.
+
+        @param afe_job_id: The new AFE job id to use.
+        """
+        self.view['afe_job_id'] = afe_job_id
+
+
 def log_buildbot_links(log_func, links):
     """Output buildbot links to log.
 
@@ -1138,6 +1103,7 @@ class ResultCollector(object):
         self._child_views = []
         self._test_views = []
         self._retry_counts = {}
+        self._missing_results = {}
         self._web_links = []
         self._buildbot_links = []
         self._num_child_jobs = 0
@@ -1191,6 +1157,16 @@ class ResultCollector(object):
             v = TestView(v, suite_job, self._suite_name, self._build, self._user,
                          solo_test_run=self._solo_test_run)
             if v.is_relevant_suite_view():
+                # If the test doesn't have results in TKO and is being
+                # displayed in the suite view instead of the child view,
+                # then afe_job_id is incorrect and from the suite.
+                # Override it based on the AFE job id which was missing
+                # results.
+                # TODO: This is likely inaccurate if a test has multiple
+                # tries which all fail TKO parse stage.
+                if v['test_name'] in self._missing_results:
+                    v.override_afe_job_id(
+                            self._missing_results[v['test_name']][0])
                 relevant_views.append(v)
         return relevant_views
 
@@ -1216,15 +1192,18 @@ class ResultCollector(object):
     def _fetch_test_views_of_child_jobs(self, jobs=None):
         """Fetch test views of child jobs.
 
-        @returns: A tuple (child_views, retry_counts)
+        @returns: A tuple (child_views, retry_counts, missing_results)
                   child_views is list of TestView objects, representing
-                  all valid views. retry_counts is a dictionary that maps
-                  test_idx to retry counts. It only stores retry
-                  counts that are greater than 0.
+                  all valid views.
+                  retry_counts is a dictionary that maps test_idx to retry
+                  counts. It only stores retry counts that are greater than 0.
+                  missing_results is a dictionary that maps test names to
+                  lists of job ids.
 
         """
         child_views = []
         retry_counts = {}
+        missing_results = {}
         child_jobs = jobs or self._afe.get_jobs(parent_job_id=self._suite_job_id)
         if child_jobs:
             self._num_child_jobs = len(child_jobs)
@@ -1233,6 +1212,8 @@ class ResultCollector(object):
                      for v in self._tko.run(
                          call='get_detailed_test_views', afe_job_id=job.id,
                          invalid=0)]
+            if len(views) == 0:
+                missing_results.setdefault(job.name, []).append(job.id)
             contains_test_failure = any(
                     v.is_test() and v['status'] != 'GOOD' for v in views)
             for v in views:
@@ -1245,7 +1226,7 @@ class ResultCollector(object):
                     retry_count = self._compute_retry_count(v)
                     if retry_count > 0:
                         retry_counts[v['test_idx']] = retry_count
-        return child_views, retry_counts
+        return child_views, retry_counts, missing_results
 
 
     def _generate_web_and_buildbot_links(self):
@@ -1476,13 +1457,13 @@ class ResultCollector(object):
 
         """
         if self._solo_test_run:
-            self._test_views, self.retry_count = (
+            self._test_views, self.retry_count, self._missing_results = (
                   self._fetch_test_views_of_child_jobs(
                           jobs=self._afe.get_jobs(id=self._suite_job_id)))
         else:
-            self._suite_views = self._fetch_relevant_test_views_of_suite()
-            self._child_views, self._retry_counts = (
+            self._child_views, self._retry_counts, self._missing_results = (
                     self._fetch_test_views_of_child_jobs())
+            self._suite_views = self._fetch_relevant_test_views_of_suite()
             self._test_views = self._suite_views + self._child_views
         # For hostless job in Starting status, there is no test view associated.
         # This can happen when a suite job in Starting status is aborted. When
@@ -1501,10 +1482,6 @@ class ResultCollector(object):
 
     def gather_timing_stats(self):
         """Collect timing related statistics."""
-        # Send timings to statsd.
-        self.timings.SendResultsToStatsd(
-                self._original_suite_name, self._build, self._board)
-
         # Record suite runtime in metadata db.
         # Some failure modes can leave times unassigned, report sentinel value
         # in that case.
@@ -1571,6 +1548,8 @@ def create_suite(afe, options):
         offload_failures_only=options.offload_failures_only,
         run_prod_code=options.run_prod_code,
         delay_minutes=options.delay_minutes,
+        job_keyvals=options.job_keyvals,
+        test_args=options.test_args,
     )
 
 
@@ -1848,8 +1827,6 @@ def main():
 
     logging.info('Will return from run_suite with status: %s',
                   RETURN_CODES.get_string(code))
-    autotest_stats.Counter('run_suite.%s' %
-                           RETURN_CODES.get_string(code)).increment()
     return code
 
 

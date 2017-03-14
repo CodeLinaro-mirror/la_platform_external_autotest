@@ -254,12 +254,14 @@ class SuiteTest(mox.MoxTestBase):
 
         self.assertFalse(self.files['one'] in suite.tests)
         self.assertFalse(self.files['two'] in suite.tests)
-        self.assertFalse(self.files['one'] in suite.unstable_tests)
-        self.assertFalse(self.files['two'] in suite.stable_tests)
-        self.assertFalse(self.files['one'] in suite.stable_tests)
-        self.assertFalse(self.files['two'] in suite.unstable_tests)
         self.assertFalse(self.files['four'] in suite.tests)
         self.assertTrue(self.files['five'] in suite.tests)
+
+        discoverer = SuiteBase._DynamicSuiteDiscoverer(suite.tests)
+        self.assertFalse(self.files['one'] in discoverer.unstable_tests)
+        self.assertFalse(self.files['two'] in discoverer.stable_tests)
+        self.assertFalse(self.files['one'] in discoverer.stable_tests)
+        self.assertFalse(self.files['two'] in discoverer.unstable_tests)
 
 
     def testStableUnstableFilter(self):
@@ -273,12 +275,14 @@ class SuiteTest(mox.MoxTestBase):
 
         self.assertTrue(self.files['one'] in suite.tests)
         self.assertTrue(self.files['two'] in suite.tests)
-        self.assertTrue(self.files['one'] in suite.unstable_tests)
-        self.assertTrue(self.files['two'] in suite.stable_tests)
-        self.assertFalse(self.files['one'] in suite.stable_tests)
-        self.assertFalse(self.files['two'] in suite.unstable_tests)
         # Sanity check.
         self.assertFalse(self.files['four'] in suite.tests)
+
+        discoverer = SuiteBase._DynamicSuiteDiscoverer(suite.tests)
+        self.assertTrue(self.files['one'] in discoverer.unstable_tests)
+        self.assertTrue(self.files['two'] in discoverer.stable_tests)
+        self.assertFalse(self.files['one'] in discoverer.stable_tests)
+        self.assertFalse(self.files['two'] in discoverer.unstable_tests)
 
 
     def mock_control_file_parsing(self):
@@ -293,7 +297,8 @@ class SuiteTest(mox.MoxTestBase):
             mox.IgnoreArg(),
             add_experimental=True,
             forgiving_parser=True,
-            run_prod_code=False).AndReturn(self.files.values())
+            run_prod_code=False,
+            test_args=None).AndReturn(self.files.values())
 
 
     def expect_job_scheduling(self, recorder, add_experimental,
@@ -369,6 +374,12 @@ class SuiteTest(mox.MoxTestBase):
 
     def testScheduleTestsAndRecord(self):
         """Should schedule stable and experimental tests with the AFE."""
+        name_list = ['name-data_two', 'name-data_three',
+                     'name-data_four', 'name-data_five', 'name-data_six',
+                     'name-data_seven', 'experimental_name-data_one']
+        keyval_dict = {constants.SCHEDULED_TEST_COUNT_KEY: 7,
+                       constants.SCHEDULED_TEST_NAMES_KEY: repr(name_list)}
+
         self.mock_control_file_parsing()
         self.mox.ReplayAll()
         suite = Suite.create_from_name(self._TAG, self._BUILDS, self._BOARD,
@@ -378,6 +389,9 @@ class SuiteTest(mox.MoxTestBase):
         self.mox.ResetAll()
         recorder = self.mox.CreateMock(base_job.base_job)
         self.expect_job_scheduling(recorder, add_experimental=True, suite=suite)
+
+        self.mox.StubOutWithMock(utils, 'write_keyval')
+        utils.write_keyval(self.tmpdir, keyval_dict)
         self.mox.ReplayAll()
         suite.schedule(recorder.record_entry, True)
         for job in suite._jobs:

@@ -720,62 +720,6 @@ class MatplotlibPackage(ExternalPackage):
             ExternalPackage._build_and_install_current_dir_setupegg_py)
 
 
-class AtForkPackage(ExternalPackage):
-    """atfork package"""
-    version = '0.1.2'
-    local_filename = 'atfork-%s.zip' % version
-    # Since the url doesn't include version anymore, there exists a small
-    # chance that the url and hex_sum remain the same but a package with new
-    # version is linked by this url.
-    urls = ('https://github.com/google/python-atfork/archive/master.zip',)
-    hex_sum = '868dace98201cf8a920287c6186f135c1ec70cb0'
-    extracted_package_path = 'python-atfork-master'
-
-    _build_and_install = ExternalPackage._build_and_install_from_package
-    _build_and_install_current_dir = (
-            ExternalPackage._build_and_install_current_dir_noegg)
-
-
-class ParamikoPackage(ExternalPackage):
-    """paramiko package"""
-    version = '1.7.5'
-    local_filename = 'paramiko-%s.zip' % version
-    urls = ('https://pypi.python.org/packages/source/p/paramiko/' + local_filename,)
-    hex_sum = 'd23e437c0d8bd6aeb181d9990a9d670fb30d0c72'
-
-
-    _build_and_install = ExternalPackage._build_and_install_from_package
-
-
-    def _check_for_pycrypto(self):
-        # NOTE(gps): Linux distros have better python-crypto packages than we
-        # can easily get today via a wget due to the library's age and staleness
-        # yet many security and behavior bugs are fixed by patches that distros
-        # already apply.  PyCrypto has a new active maintainer in 2009.  Once a
-        # new release is made (http://pycrypto.org/) we should add an installer.
-        try:
-            import Crypto
-        except ImportError:
-            logging.error('Please run "sudo apt-get install python-crypto" '
-                          'or your Linux distro\'s equivalent.')
-            return False
-        return True
-
-
-    def _build_and_install_current_dir(self, install_dir):
-        if not self._check_for_pycrypto():
-            return False
-        # paramiko 1.7.4 doesn't require building, it is just a module directory
-        # that we can rsync into place directly.
-        if not os.path.isdir('paramiko'):
-            raise Error('no paramiko directory in %s.' % os.getcwd())
-        status = system("rsync -r 'paramiko' '%s/'" % install_dir)
-        if status:
-            logging.error('%s rsync to install_dir failed.', self.name)
-            return False
-        return True
-
-
 class JsonRPCLib(ExternalPackage):
     """jsonrpclib package"""
     version = '0.1.3'
@@ -1152,6 +1096,36 @@ class PyLintPackage(ExternalPackage):
             'cf252f211dbbf58bbbe01a3931092d8a8df8d55f5fe23ac5cef145aa6468/%s' %
             (url_filename),)
     hex_sum = 'b33594a2c627d72007bfa8c6d7619af699e26085'
+    _build_and_install = ExternalPackage._build_and_install_from_package
+    _build_and_install_current_dir = (
+            ExternalPackage._build_and_install_current_dir_setup_py)
+
+
+class Pytz(ExternalPackage):
+    """Pytz package."""
+    version = '2016.10'
+    url_filename = 'pytz-%s.tar.gz' % version
+    local_filename = url_filename
+    #md5=cc9f16ba436efabdcef3c4d32ae4919c
+    urls = ('https://pypi.python.org/packages/42/00/'
+            '5c89fc6c9b305df84def61863528e899e9dccb196f8438f6cbe960758fc5/%s' %
+            (url_filename),)
+    hex_sum = '8d63f1e9b1ee862841b990a7d8ad1d4508d9f0be'
+    _build_and_install = ExternalPackage._build_and_install_from_package
+    _build_and_install_current_dir = (
+            ExternalPackage._build_and_install_current_dir_setup_py)
+
+
+class Tzlocal(ExternalPackage):
+    """Tzlocal package."""
+    version = '1.3'
+    url_filename = 'tzlocal-%s.tar.gz' % version
+    local_filename = url_filename
+    # md5=3cb544b3975b59f91a793850a072d4a8
+    urls = ('https://pypi.python.org/packages/d3/64/'
+            'e4b18738496213f82b88b31c431a0e4ece143801fb6771dddd1c2bf0101b/%s' %
+            (url_filename),)
+    hex_sum = '730e9d7112335865a1dcfabec69c8c3086be424f'
     _build_and_install = ExternalPackage._build_and_install_from_package
     _build_and_install_current_dir = (
             ExternalPackage._build_and_install_current_dir_setup_py)

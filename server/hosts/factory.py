@@ -8,9 +8,9 @@ from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error, global_config
 from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros.dynamic_suite import constants
-from autotest_lib.server.hosts import cros_host, ssh_host
-from autotest_lib.server.hosts import moblab_host, sonic_host
-from autotest_lib.server.hosts import adb_host, emulated_adb_host, testbed
+from autotest_lib.server.hosts import adb_host, cros_host, emulated_adb_host
+from autotest_lib.server.hosts import iota_host, moblab_host, sonic_host
+from autotest_lib.server.hosts import ssh_host, testbed
 
 
 CONFIG = global_config.global_config
@@ -36,6 +36,7 @@ OS_HOST_DICT = {'android': adb_host.ADBHost,
                 'brillo': adb_host.ADBHost,
                 'cros' : cros_host.CrosHost,
                 'emulated_brillo': emulated_adb_host.EmulatedADBHost,
+                'iota': iota_host.IotaHost,
                 'moblab': moblab_host.MoblabHost}
 
 
@@ -128,11 +129,6 @@ def _choose_connectivity_class(hostname, ssh_port):
     if (hostname == 'localhost' and ssh_port == DEFAULT_SSH_PORT):
         return local_host.LocalHost
     # by default assume we're using SSH support
-    elif SSH_ENGINE == 'paramiko':
-        # Not all systems have paramiko installed so only import paramiko host
-        # if the global_config settings call for it.
-        from autotest_lib.server.hosts import paramiko_host
-        return paramiko_host.ParamikoHost
     elif SSH_ENGINE == 'raw_ssh':
         return ssh_host.SSHHost
     else:

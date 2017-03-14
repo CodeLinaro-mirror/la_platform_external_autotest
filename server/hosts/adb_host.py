@@ -21,7 +21,6 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib.cros import dev_server
 from autotest_lib.client.common_lib.cros import retry
-from autotest_lib.server import afe_utils
 from autotest_lib.server import autoserv_parser
 from autotest_lib.server import constants as server_constants
 from autotest_lib.server import utils
@@ -906,18 +905,31 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
         return
 
 
-    def repair(self):
-        """Attempt to get the DUT to pass `self.verify()`."""
-        try:
-            self.ensure_adb_mode(timeout=30)
+    def repair(self, board=None, os=None):
+        """Attempt to get the DUT to pass `self.verify()`.
+
+        @param board: Board name of the device. For host created in testbed,
+                      it does not have host labels and attributes. Therefore,
+                      the board name needs to be passed in from the testbed
+                      repair call.
+        @param os: OS of the device. For host created in testbed, it does not
+                   have host labels and attributes. Therefore, the OS needs to
+                   be passed in from the testbed repair call.
+        """
+        if self.is_up():
+            logging.debug('The device is up and accessible by adb. No need to '
+                          'repair.')
             return
-        except error.AutoservError as e:
-            logging.error(e)
+        # Force to do a reinstall in repair first. The reason is that it
+        # requires manual action to put the device into fastboot mode.
+        # If repair tries to switch the device back to adb mode, one will
+        # have to change it back to fastboot mode manually again.
         logging.debug('Verifying the device is accessible via fastboot.')
         self.ensure_bootloader_mode()
+        subdir_tag = self.adb_serial if board else None
         if not self.job.run_test(
-                'provision_AndroidUpdate', host=self, value=None,
-                force=True, repair=True):
+                'provision_AndroidUpdate', host=self, value=None, force=True,
+                repair=True, board=board, os=os, subdir_tag=subdir_tag):
             raise error.AutoservRepairTotalFailure(
                     'Unable to repair the device.')
 
@@ -1295,8 +1307,9 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
         """
         # Append the file name to the url if build_url is linked to the folder
         # containing the file.
-        if not build_url.endswith('/%s' % file):
-            src_url = os.path.join(build_url, file)
+        build_url = build_url.lower()
+        if not build_url.endswith('/%s' % file.lower()):
+            src_url = os.path.join(build_url, file.lower())
         else:
             src_url = build_url
         dest_file = os.path.join(dest_dir, file)
@@ -1746,14 +1759,12 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
                     ds = dev_server.AndroidBuildServer(devserver_url)
                 else:
                     ds = dev_server.AndroidBuildServer.resolve(image)
+            elif info.build is not None:
+                ds = dev_server.AndroidBuildServer.resolve(info.build, hostname)
             else:
-                labels = afe_utils.get_labels(self, self.VERSION_PREFIX)
-                if not labels:
-                    raise error.AutoservError(
-                            'Failed to stage server-side package. The host has '
-                            'no job_report_url attribute or version label.')
-                image = labels[0][len(self.VERSION_PREFIX + ':'):]
-                ds = dev_server.AndroidBuildServer.resolve(image, hostname)
+                raise error.AutoservError(
+                        'Failed to stage server-side package. The host has '
+                        'no job_report_url attribute or version label.')
 
         branch, target, build_id = utils.parse_launch_control_build(image)
         build_target, _ = utils.parse_launch_control_target(target)

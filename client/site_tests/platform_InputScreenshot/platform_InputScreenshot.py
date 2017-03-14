@@ -2,6 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import time
+import os.path
+
 from autotest_lib.client.bin import test
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
@@ -17,7 +20,7 @@ class platform_InputScreenshot(test.test):
     _DOWNLOADS = '/home/chronos/user/Downloads'
     _SCREENSHOT = 'Screenshot*'
     _ERROR = list()
-
+    _MIN_SIZE = 1000
 
     def warmup(self):
         """Test setup."""
@@ -36,23 +39,33 @@ class platform_InputScreenshot(test.test):
                             self._DOWNLOADS, self._SCREENSHOT))
 
 
-    def confirm_file_exist(self, path):
-        """Check if screenshot file can be found.
+    def confirm_file_exist(self, filepath):
+        """Check if screenshot file can be found and with minimum size.
 
-        @param path as file path.
+        @param filepath file path.
 
         @raises: error.TestFail if screenshot file does not exist.
 
         """
-        if not (utils.system_output('sync; find %s -name "%s"'
-                                    %(path, self._SCREENSHOT))):
-            self._ERROR.append('Screenshot was not found under:%s' %path)
+        if not os.path.isdir(filepath):
+            raise error.TestNAError("%s folder is not found" % filepath)
+
+        if not (utils.system_output('sync; sleep 2; find %s -name "%s"'
+                                    % (filepath, self._SCREENSHOT))):
+            self._ERROR.append('Screenshot was not found under:%s' % filepath)
+
+        filesize = utils.system_output('ls -l %s/%s | cut -d" " -f5'
+                                       % (filepath, self._SCREENSHOT))
+        if filesize < self._MIN_SIZE:
+            self._ERROR.append('Screenshot size:%s at %s is wrong'
+                               % (filesize, filepath))
 
 
     def create_screenshot(self):
         """Create a screenshot."""
         self.player.blocking_playback_of_default_file(
                input_type='keyboard', filename='keyboard_ctrl+f5')
+        time.sleep(self._WAIT)
 
 
     def run_once(self):

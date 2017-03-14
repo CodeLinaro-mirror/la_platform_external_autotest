@@ -46,6 +46,7 @@ from autotest_lib.server import site_utils
 from autotest_lib.server import utils
 from autotest_lib.server.cros import provision
 from autotest_lib.server.cros.dynamic_suite import frontend_wrappers
+from autotest_lib.server.hosts import afe_store
 from autotest_lib.site_utils import gmail_lib
 from autotest_lib.site_utils.suite_scheduler import constants
 
@@ -136,23 +137,26 @@ class TestPushException(Exception):
 
 
 @retry.retry(TestPushException, timeout_min=5, delay_sec=30)
-def check_dut_inventory(required_num_duts):
-    """Check DUT inventory for each board.
+def check_dut_inventory(required_num_duts, pool):
+    """Check DUT inventory for each board in the pool specified..
 
     @param required_num_duts: a dict specifying the number of DUT each platform
                               requires in order to finish push tests.
+    @param pool: the pool used by test_push.
     @raise TestPushException: if number of DUTs are less than the requirement.
     """
     print 'Checking DUT inventory...'
+    pool_label = constants.Labels.POOL_PREFIX + pool
     hosts = AFE.run('get_hosts', status='Ready', locked=False)
+    hosts = [h for h in hosts if pool_label in h.get('labels', [])]
     platforms = [host['platform'] for host in hosts]
     current_inventory = {p : platforms.count(p) for p in platforms}
     error_msg = ''
     for platform, req_num in required_num_duts.items():
         curr_num = current_inventory.get(platform, 0)
         if curr_num < req_num:
-            error_msg += ('\nRequire %d %s DUTs, only %d are Ready now' %
-                          (req_num, platform, curr_num))
+            error_msg += ('\nRequire %d %s DUTs in pool: %s, only %d are Ready'
+                          ' now' % (req_num, platform, pool, curr_num))
     if error_msg:
         raise TestPushException('Not enough DUTs to run push tests. %s' %
                                 error_msg)
@@ -184,14 +188,10 @@ def powerwash_dut_to_test_repair(hostname, timeout):
     AFE.reverify_hosts(hostnames=[hostname])
 
 
-def reverify_all_push_duts(pool):
-    """Reverify all the push DUTs.
-
-    @param pool: Name of the pool used by test_push.
-    """
-    print 'Reverifying DUTs in pool %s' % pool
-    pool_label = constants.Labels.POOL_PREFIX + pool
-    hosts = [h.hostname for h in AFE.get_hosts(label=pool_label)]
+def reverify_all_push_duts():
+    """Reverify all the push DUTs."""
+    print 'Reverifying all DUTs.'
+    hosts = [h.hostname for h in AFE.get_hosts()]
     AFE.reverify_hosts(hostnames=hosts)
 
 
@@ -380,11 +380,12 @@ def check_dut_image(build, suite_job_id):
             for job_id in job_ids]
     hostnames = set([hqe.host.hostname for hqe in hqes])
     for hostname in hostnames:
-        found_build = site_utils.get_build_from_afe(hostname, AFE)
-        if found_build != build:
+        host_info_store = afe_store.AfeStore(hostname, AFE)
+        info = host_info_store.get()
+        if info.build != build:
             raise TestPushException('DUT is not imaged properly. Host %s has '
                                     'build %s, while build %s is expected.' %
-                                    (hostname, found_build, build))
+                                    (hostname, info.build, build))
 
 
 def test_suite(suite_name, expected_results, arguments, use_shard=False,
@@ -581,9 +582,9 @@ def main():
         # Use daemon flag will kill child processes when parent process fails.
         use_daemon = not arguments.continue_on_failure
         # Verify all the DUTs at the beginning of testing push.
-        reverify_all_push_duts(arguments.pool)
+        reverify_all_push_duts()
         time.sleep(15) # Wait 15 secs for the verify test to start.
-        check_dut_inventory(arguments.num_duts)
+        check_dut_inventory(arguments.num_duts, arguments.pool)
         queue = multiprocessing.Queue()
 
         push_to_prod_suite = multiprocessing.Process(
@@ -648,12 +649,15 @@ def main():
                     'Test for pushing to prod failed. Do NOT push!',
                     ('Test CLs of the following repos failed. Below are the '
                      'repos and the corresponding test HEAD.\n\n%s\n\n.'
-                     'Error occurred during test:\n\n%s\n\n' %
+                     'Error occurred during test:\n\n%s\n\n'
+                     'All logs have been saved to /var/log/test_push.log '
+                     'on push master. Detail debugging info can be found at '
+                     'go/push-to-prod' %
                      (updated_repo_msg, str(e)) + '\n'.join(run_suite_output)))
         raise
     finally:
         # Reverify all the hosts
-        reverify_all_push_duts(arguments.pool)
+        reverify_all_push_duts()
 
     message = ('\nAll tests are completed successfully, the prod branch of the '
                'following repos ready to be pushed to the hash list below.\n'
