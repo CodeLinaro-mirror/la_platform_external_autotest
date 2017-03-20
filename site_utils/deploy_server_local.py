@@ -29,7 +29,7 @@ from autotest_lib.server.cros.dynamic_suite import frontend_wrappers
 
 
 # How long after restarting a service do we watch it to see if it's stable.
-SERVICE_STABILITY_TIMER = 120
+SERVICE_STABILITY_TIMER = 60
 
 # A list of commands that only applies to primary server. For example,
 # test_importer should only be run in primary master scheduler. If two servers
@@ -299,7 +299,6 @@ def restart_services(service_names, dryrun=False, skip_service_status=False):
     # Restart each, and record the status (including pid).
     for name in service_names:
         restart_service(name)
-        service_statuses[name] = service_status(name)
 
     # Skip service status check if --skip-service-status is specified. Used for
     # servers in backup status.
@@ -309,7 +308,8 @@ def restart_services(service_names, dryrun=False, skip_service_status=False):
 
     # Wait for a while to let the services settle.
     time.sleep(SERVICE_STABILITY_TIMER)
-
+    service_statuses = {name: service_status(name) for name in service_names}
+    time.sleep(SERVICE_STABILITY_TIMER)
     # Look for any services that changed status.
     unstable_services = [n for n in service_names
                          if service_status(n) != service_statuses[n]]
@@ -485,16 +485,9 @@ def main(args):
     behaviors = parse_arguments(args)
 
     if behaviors.verify:
-        try:
-            print('Checking tree status:')
-            verify_repo_clean()
-            print('Clean.')
-        except DirtyTreeException as e:
-            print('Local tree is dirty, can\'t perform update safely.')
-            print()
-            print('repo status:')
-            print(e.args[0])
-            return 1
+        print('Checking tree status:')
+        verify_repo_clean()
+        print('Tree status: clean')
 
     versions_before = repo_versions()
     versions_after = set()
@@ -513,15 +506,9 @@ def main(args):
         # If the corresponding repo/file not change, no need to run the cmd.
         cmds_skip = (set() if behaviors.force_update else
                      {t[0] for t in cmd_versions_before & cmd_versions_after})
-        try:
-            run_deploy_actions(
-                    cmds_skip, behaviors.dryrun, behaviors.skip_service_status,
-                    use_chromite_master=behaviors.update_push_servers)
-        except UnstableServices as e:
-            print('The following services were not stable after '
-                  'the update:')
-            print(e.args[0])
-            return 1
+        run_deploy_actions(
+                cmds_skip, behaviors.dryrun, behaviors.skip_service_status,
+                use_chromite_master=behaviors.update_push_servers)
 
     if behaviors.report:
         print('Changes:')

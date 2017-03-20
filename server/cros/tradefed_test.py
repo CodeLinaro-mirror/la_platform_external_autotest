@@ -41,6 +41,11 @@ from autotest_lib.server import autotest
 from autotest_lib.server import test
 from autotest_lib.server import utils
 
+# TODO(ihf): If akeshet doesn't fix crbug.com/691046 delete metrics again.
+try:
+    from chromite.lib import metrics
+except ImportError:
+    metrics = utils.metrics_mock
 
 # TODO(ihf): Find a home for all these paths. This is getting out of hand.
 _SDK_TOOLS_DIR_M = 'gs://chromeos-arc-images/builds/git_mnc-dr-arc-dev-linux-static_sdk_tools/3554341'
@@ -166,6 +171,19 @@ def adb_keepalive(target, extra_paths):
         # The adb_keepalive.py script runs forever until SIGTERM is sent.
         base_utils.nuke_subprocess(job.sp)
         base_utils.join_bg_jobs([job])
+
+
+@contextlib.contextmanager
+def pushd(d):
+    """Defines pushd.
+    @param d: the directory to change to.
+    """
+    current = os.getcwd()
+    os.chdir(d)
+    try:
+        yield
+    finally:
+        os.chdir(current)
 
 
 class TradefedTest(test.test):
@@ -527,6 +545,72 @@ class TradefedTest(test.test):
             # Keep track of PATH.
             self._install_paths.append(os.path.dirname(local))
 
+    def _copy_media(self, media):
+        """Calls copy_media to push media files to DUT via adb."""
+        logging.info('Copying media to device. This can take a few minutes.')
+        copy_media = os.path.join(media, 'copy_media.sh')
+        with pushd(media):
+            try:
+                self._run('file', args=('/bin/sh',), verbose=True,
+                          ignore_status=True, timeout=60,
+                          stdout_tee=utils.TEE_TO_LOGS,
+                          stderr_tee=utils.TEE_TO_LOGS)
+                self._run('sh', args=('--version',), verbose=True,
+                          ignore_status=True, timeout=60,
+                          stdout_tee=utils.TEE_TO_LOGS,
+                          stderr_tee=utils.TEE_TO_LOGS)
+            except:
+                logging.warning('Could not obtain sh version.')
+            self._run(
+                'sh',
+                args=('-e', copy_media, 'all'),
+                timeout=7200,  # Wait at most 2h for download of media files.
+                verbose=True,
+                ignore_status=False,
+                stdout_tee=utils.TEE_TO_LOGS,
+                stderr_tee=utils.TEE_TO_LOGS)
+
+    def _verify_media(self, media):
+        """Verify that the local media directory matches the DUT.
+        Used for debugging b/32978387 where we may see file corruption."""
+        # TODO(ihf): Remove function once b/32978387 is resolved.
+        # Find all files in the bbb_short and bbb_full directories, md5sum these
+        # files and sort by filename, both on the DUT and on the local tree.
+        logging.info('Computing md5 of remote media files.')
+        remote = self._run('adb', args=('shell',
+            'cd /sdcard/test; find ./bbb_short ./bbb_full -type f -print0 | '
+            'xargs -0 md5sum | grep -v "\.DS_Store" | sort -k 2'))
+        logging.info('Computing md5 of local media files.')
+        local = self._run('/bin/sh', args=('-c',
+            ('cd %s; find ./bbb_short ./bbb_full -type f -print0 | '
+            'xargs -0 md5sum | grep -v "\.DS_Store" | sort -k 2') % media))
+
+        # 'adb shell' terminates lines with CRLF. Normalize before comparing.
+        if remote.stdout.replace('\r\n','\n') != local.stdout:
+            logging.error('Some media files differ on DUT /sdcard/test vs. local.')
+            logging.info('media=%s', media)
+            logging.error('remote=%s', remote)
+            logging.error('local=%s', local)
+            # TODO(ihf): Return False.
+            return True
+        logging.info('Media files identical on DUT /sdcard/test vs. local.')
+        return True
+
+    def _push_media(self, CTS_URI):
+        """Downloads, caches and pushed media files to DUT."""
+        media = self._install_bundle(CTS_URI['media'])
+        base = os.path.splitext(os.path.basename(CTS_URI['media']))[0]
+        cts_media = os.path.join(media, base)
+        # TODO(ihf): this really should measure throughput in Bytes/s.
+        m = 'chromeos/autotest/infra_benchmark/cheets/push_media/duration'
+        fields = {'success': False,
+                  'dut_host_name': self._host.hostname}
+        with metrics.SecondsTimer(m, fields=fields) as c:
+            self._copy_media(cts_media)
+            c['success'] = True
+        if not self._verify_media(cts_media):
+            raise error.TestFail('Error: saw corruption pushing media files.')
+
     def _run(self, *args, **kwargs):
         """Executes the given command line.
 
@@ -670,13 +754,15 @@ class TradefedTest(test.test):
                                  'become inconsistent.')
         return (tests, passed, failed, not_executed)
 
-    def _parse_result_N(self, result, waivers=None):
-        """Check the result from the tradefed output.
+    def _parse_result_v2(self, result, accumulative_count=False, waivers=None):
+        """Check the result from the tradefed-v2 output.
 
         This extracts the test pass/fail/executed list from the output of
         tradefed. It is up to the caller to handle inconsistencies.
 
         @param result: The result object from utils.run.
+        @param accumulative_count: set True if using an old version of tradefed
+                                   that prints test count in accumulative way.
         @param waivers: a set() of tests which are permitted to fail.
         """
         # Parse the stdout to extract test status. In particular step over
@@ -692,17 +778,36 @@ class TradefedTest(test.test):
         failed = int(match.group(2))
         not_executed = int(match.group(3))
 
-        # Starting x86 CtsUtilTestCases with 204 tests
-        match = re.search(r'Starting (?:armeabi-v7a|x86) (.*) with '
-                          r'(\d+(?:,\d+)?) tests', result.stdout)
-        if match and match.group(2):
-            tests = int(match.group(2).replace(',', ''))
+        # Some tests may be split into several groups. E.g. per architecture as
+        # follows;
+        #   Starting armeabi-v7a GtsSearchHostTestCases with 1 test
+        #   Continuing armeabi-v7a GtsSearchHostTestCases with 2 tests
+        #   Starting x86 GtsSearchHostTestCases with 1 test
+        #   Continuing x86 GtsSearchHostTestCases with 2 tests
+        match_list = re.findall(r'(?:Start|Continu)ing (armeabi-v7a|x86) (?:.*)'
+                                r' with (\d+(?:,\d+)?) test', result.stdout)
+
+        if match_list:
+            # Old version of tradefed displays an accumulated count in the
+            # 'Continuing' messages. New one spreads the count to each.
+            # For the former (accumulative_count=True), only use the last one.
+            # For the latter, sum up the counts.
+            abi_to_count = dict()
+            for (abi, num_str) in match_list:
+                num = int(num_str.replace(',', ''))
+                if accumulative_count:
+                    abi_to_count[abi] = num
+                else:
+                    abi_to_count[abi] = abi_to_count.get(abi, 0) + num
+            tests = sum(abi_to_count.values())
+            abis = list(abi_to_count.keys())
             logging.info('Found %d tests.', tests)
         else:
             # Unfortunately this happens. Assume it made no other mistakes.
             logging.warning('Tradefed forgot to print number of tests.')
             # TODO(ihf): Once b/35530394 is fixed "+ not_executed".
             tests = passed + failed
+            abis = []
 
         # TODO(rohitbm): make failure parsing more robust by extracting the list
         # of failing tests instead of searching in the result blob. As well as
@@ -714,11 +819,11 @@ class TradefedTest(test.test):
                 fail_count = (result.stdout.count(testname + ' FAIL') +
                               result.stdout.count(testname + ' fail'))
                 if fail_count:
-                    if fail_count > 2:
-                        raise error.TestFail('Error: There are too many '
-                                             'failures found in the output to '
-                                             'be valid for applying waivers. '
-                                             'Please check output.')
+                    if fail_count > len(abis):
+                        raise error.TestFail('Error: Found %d failures for %s '
+                                             'but there are only %d abis: %s' %
+                                             (fail_count, testname, len(abis),
+                                             abis))
                     waived += fail_count
                     logging.info('Waived failure for %s %d time(s)',
                                  testname, fail_count)

@@ -20,7 +20,6 @@ from autotest_lib.server.cros.faft.rpc_proxy import RPCProxy
 from autotest_lib.server.cros.faft.utils import mode_switcher
 from autotest_lib.server.cros.faft.utils.faft_checkers import FAFTCheckers
 from autotest_lib.server.cros.servo import chrome_ec
-from autotest_lib.server.cros.servo import chrome_usbpd
 
 ConnectionError = mode_switcher.ConnectionError
 
@@ -139,7 +138,7 @@ class FirmwareTest(FAFTBase):
             self.ec = chrome_ec.ChromeEC(self.servo)
         # Check for presence of a USBPD console
         if self.faft_config.chrome_usbpd:
-            self.usbpd = chrome_usbpd.ChromeUSBPD(self.servo)
+            self.usbpd = chrome_ec.ChromeUSBPD(self.servo)
         elif self.faft_config.chrome_ec:
             # If no separate USBPD console, then PD exists on EC console
             self.usbpd = self.ec
@@ -673,9 +672,10 @@ class FirmwareTest(FAFTBase):
             self.servo.set('cr50_console_capture', 'on')
             self.cr50_console_file = os.path.join(self.resultsdir,
                                                   'cr50_console.txt')
+            self.cr50 = chrome_ec.ChromeCr50(self.servo)
         except error.TestFail as e:
             if 'No control named' in str(e):
-                logging.warn('cr50 console capture not supported.')
+                logging.warn('cr50 console not supported.')
         if self.faft_config.chrome_ec:
             try:
                 self.servo.set('ec_uart_capture', 'on')
@@ -1059,7 +1059,7 @@ class FirmwareTest(FAFTBase):
         if not callable(action):
             raise error.TestError('action is not callable!')
 
-        info_msg = 'calling %s' % str(action)
+        info_msg = 'calling %s' % action.__name__
         if args:
             info_msg += ' with args %s' % str(args)
         logging.info(info_msg)
@@ -1091,7 +1091,7 @@ class FirmwareTest(FAFTBase):
             self.switcher.wait_for_client(timeout=shutdown_timeout)
             raise error.TestFail(
                     'Should shut the device down after calling %s.' %
-                    str(shutdown_action))
+                    shutdown_action.__name__)
         except ConnectionError:
             logging.info(
                 'DUT is surely shutdown. We are going to power it on again...')
