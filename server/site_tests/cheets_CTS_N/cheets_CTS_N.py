@@ -30,8 +30,7 @@ _DL_CTS = 'https://dl.google.com/dl/android/cts/'
 _CTS_URI = {
     'arm': _DL_CTS + 'android-cts-7.1_r3-linux_x86-arm.zip',
     'x86': _DL_CTS + 'android-cts-7.1_r3-linux_x86-x86.zip',
-    'media11': _DL_CTS + 'android-cts-media-1.1.zip',
-    'media12': _DL_CTS + 'android-cts-media-1.2.zip',
+    'media': _DL_CTS + 'android-cts-media-1.2.zip',
 }
 
 _SDK_TOOLS_DIR_N = 'gs://chromeos-arc-images/builds/git_nyc-mr1-arc-linux-static_sdk_tools/3544738'
@@ -131,7 +130,8 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
             if test_method is not None:
                 cmd += ['-m', test_method]
         else:
-            raise error.TestFail('Error: Need to provide more arguments.')
+            logging.warning('Running all tests. This can take several days.')
+            cmd = ['run', 'commandAndExit', 'cts']
         # We handle media download ourselves in the lab, as lazy as possible.
         cmd.append('--precondition-arg')
         cmd.append('skip-media-download')
@@ -295,6 +295,7 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
         self.result_history = {}
         steps = -1  # For historic reasons the first iteration is not counted.
         total_tests = 0
+        total_passed = 0
         self.summary = ''
         if target_module is not None:
             test_name = 'module.%s' % target_module
@@ -313,8 +314,8 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
                 test_method=target_method,
                 session_id=session_id)
         else:
-            raise error.TestFail(
-                'Error: should assign a module, a plan, or a class name')
+            test_command = self._tradefed_run_command()
+            test_name = 'all_CTS'
 
         # Unconditionally run CTS module until we see some tests executed.
         while total_tests == 0 and steps < self._max_retry:
@@ -359,15 +360,18 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
                     # Try to figure out what happened. Example: b/35605415.
                     self._run_cts_tradefed([['list', 'results']],
                                            collect_results=False)
-                    logging.warning('Test count inconsistent. %s' %
+                    logging.warning('Test count inconsistent. %s',
                                     self.summary)
                 # Keep track of global count, we can't trust continue/retry.
-                total_tests = tests
+                if total_tests == 0:
+                    total_tests = tests
+                total_passed += passed
                 steps += 1
             # The DUT has rebooted at this point and is in a clean state.
         if total_tests == 0:
             raise error.TestFail('Error: Could not find any tests in module.')
 
+        retry_inconsistency_error = None
         # If the results were not completed or were failing then continue or
         # retry them iteratively MAX_RETRY times.
         while steps < self._max_retry and failed > 0:
@@ -378,10 +382,20 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
                     self._ready_arc()
                     logging.info('Retrying failures of %s with session_id %d:',
                                  test_name, session_id)
+                    expected_tests = failed + notexecuted
                     session_id, counts = self._tradefed_retry(test_name,
                                                               session_id)
                     tests, passed, failed, notexecuted, waived = counts
                     self.result_history[steps] = counts
+                    # Consistency check, did we really run as many as we
+                    # thought initially?
+                    if expected_tests != tests:
+                        retry_inconsistency_error = ('Retry inconsistency - '
+                           'initially saw %d failed+notexecuted, ran %d tests. '
+                           'passed=%d, failed=%d, notexecuted=%d, waived=%d.' %
+                           (expected_tests, tests, passed, failed, notexecuted,
+                            waived))
+                        logging.warning(retry_inconsistency_error)
                     if not self._consistent(tests, passed, failed, notexecuted):
                         logging.warning('Tradefed inconsistency - retrying.')
                         session_id, counts = self._tradefed_retry(test_name,
@@ -394,26 +408,24 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
                     if not self._consistent(tests, passed, failed, notexecuted):
                         logging.warning('Test count inconsistent. %s',
                                         self.summary)
+                    total_passed += passed
                 # The DUT has rebooted at this point and is in a clean state.
 
         # Final classification of test results.
-        if passed == 0 or failed > waived:
+        if total_passed == 0 or failed > waived:
             raise error.TestFail(
                 'Failed: after %d retries giving up. '
                 'passed=%d, failed=%d, notexecuted=%d, waived=%d. %s' %
-                (steps, passed, failed, notexecuted, waived, self.summary))
-        # Consistency check, did we really run as many as we thought initially?
-        if total_tests != tests:
-            raise error.TestFail('Failed: initially saw %d tests, '
-                                 'ran %d tests. passed=%d, failed=%d, '
-                                 'notexecuted=%d, waived=%d. %s' %
-                                  (total_tests, tests, passed, failed,
-                                   notexecuted, waived, self.summary))
-        if not self._consistent(tests, passed, failed, notexecuted):
+                (steps, total_passed, failed, notexecuted, waived,
+                 self.summary))
+        if not self._consistent(total_tests, total_passed, failed, notexecuted):
             raise error.TestFail('Error: Test count inconsistent. %s' %
                                  self.summary)
+        if retry_inconsistency_error:
+            raise error.TestFail('Error: %s %s' % (retry_inconsistency_error,
+                                                   self.summary))
         if steps > 0:
             # TODO(ihf): Make this error.TestPass('...') once available.
             raise error.TestWarn(
                 'Passed: after %d retries passing %d tests, waived=%d. %s' %
-                (steps, passed, waived, self.summary))
+                (steps, total_passed, waived, self.summary))
