@@ -1,6 +1,8 @@
 # Copyright 2017 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+import logging
 import os
 import socket
 import time
@@ -24,6 +26,9 @@ class AutotestJobInfo(object):
     # Tell the uploader what type of info this object holds.
     tags=['autotest']
 
+    # Version of the data stored.
+    version = 2
+
     def __init__(self, job):
         self._job = job
         self._tasks = list(
@@ -37,6 +42,11 @@ class AutotestJobInfo(object):
     def id(self):
         """The id of the autotest job."""
         return job_directories.get_job_id_or_task_id(self._job.dir)
+
+    @property
+    def label(self):
+        """The label of the autotest job."""
+        return self._job.label
 
     @property
     def user(self):
@@ -62,6 +72,11 @@ class AutotestJobInfo(object):
     def drone(self):
         """The drone used to run the job."""
         return self._job.keyval_dict.get('drone', socket.gethostname())
+
+    @property
+    def keyvals(self):
+        """Keyval dict for this job."""
+        return self._job.keyval_dict
 
     @property
     def tasks(self):
@@ -91,6 +106,7 @@ class AutotestJobInfo(object):
 
         @returns The task info.
         """
+        logging.info('Using default autotest task info for %s.', test.testname)
         return AutotestTaskInfo(test, self)
 
 
@@ -102,6 +118,9 @@ class AutotestTaskInfo(object):
 
     # A list of logs to upload for this task.
     logs = ['debug', 'status.log', 'crash', 'keyval']
+
+    # Version of the data stored.
+    version = 2
 
     def __init__(self, test, job):
         """
@@ -138,6 +157,11 @@ class AutotestTaskInfo(object):
     def subdir(self):
         """The sub directory used for this test."""
         return self._test.subdir
+
+    @property
+    def attributes(self):
+        """Attributes of this task."""
+        return getattr(self._test, 'attributes', {})
 
     @property
     def results_dir(self):

@@ -81,8 +81,11 @@ class _ChromeLogin(object):
     def __enter__(self):
         """Logs in to the Chrome."""
         logging.info('Ensure Android is running...')
-        autotest.Autotest(self._host).run_test('cheets_CTSHelper',
-                                               check_client_result=True)
+        # If we can't login to Chrome and launch Android we want this job to
+        # die roughly after 5 minutes instead of hanging for the duration.
+        autotest.Autotest(self._host).run_timed_test('cheets_CTSHelper',
+                                                     timeout=300,
+                                                     check_client_result=True)
 
     def __exit__(self, exc_type, exc_value, traceback):
         """On exit, to wipe out all the login state, reboot the machine.
@@ -804,16 +807,20 @@ class TradefedTest(test.test):
                    raise error.TestFail('Error: Unexpected test end: ' + line)
                npass, nfail, nnotexec = map(int, match.group(2,3,4))
 
-               if accumulative_count:
-                   total_test[abi] = ntest
-                   total_pass[abi] = npass
-                   total_fail[abi] = nfail
-               else:
-                   total_test[abi] = (total_test.get(abi, 0) + ntest -
-                       last_notexec.get(abi, 0))
-                   total_pass[abi] = total_pass.get(abi, 0) + npass
-                   total_fail[abi] = total_fail.get(abi, 0) + nfail
-               last_notexec[abi] = nnotexec
+               # When the test crashes too ofen, tradefed seems to finish the
+               # iteration by running "0 tests, 0 passed, ...". Do not count
+               # that in.
+               if ntest > 0:
+                   if accumulative_count:
+                       total_test[abi] = ntest
+                       total_pass[abi] = npass
+                       total_fail[abi] = nfail
+                   else:
+                       total_test[abi] = (total_test.get(abi, 0) + ntest -
+                           last_notexec.get(abi, 0))
+                       total_pass[abi] = total_pass.get(abi, 0) + npass
+                       total_fail[abi] = total_fail.get(abi, 0) + nfail
+                   last_notexec[abi] = nnotexec
                abi = None
 
         if abi:
