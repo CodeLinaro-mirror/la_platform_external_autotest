@@ -298,6 +298,10 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
 
         Refer to _device_run method for docstring for parameters.
         """
+        # Suppresses 'adb devices' from printing to the logs, which often
+        # causes large log files.
+        if command == "devices":
+            kwargs['verbose'] = False
         return self._device_run(ADB_CMD, command, **kwargs)
 
 
@@ -656,10 +660,11 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
         self.adb_run('reboot', timeout=10, ignore_timeout=True)
         if not self.wait_down(boot_id=boot_id):
             raise error.AutoservRebootError(
-                    'ADB Device is still up after reboot')
+                    'ADB Device %s is still up after reboot' % self.adb_serial)
         if not self.wait_up():
             raise error.AutoservRebootError(
-                    'ADB Device failed to return from reboot.')
+                    'ADB Device %s failed to return from reboot.' %
+                    self.adb_serial)
         self._reset_adbd_connection()
 
 
@@ -671,10 +676,12 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
         self.fastboot_run('reboot')
         if not self.wait_down(command=FASTBOOT_CMD):
             raise error.AutoservRebootError(
-                    'Device is still in fastboot mode after reboot')
+                    'Device %s is still in fastboot mode after reboot' %
+                    self.fastboot_serial)
         if not self.wait_up():
             raise error.AutoservRebootError(
-                    'Device failed to boot to adb after fastboot reboot.')
+                    'Device %s failed to boot to adb after fastboot reboot.' %
+                    self.adb_serial)
         self._reset_adbd_connection()
 
 
@@ -1244,7 +1251,8 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
         self.adb_run('reboot bootloader')
         if not self.wait_up(command=FASTBOOT_CMD):
             raise error.AutoservError(
-                    'The device failed to reboot into bootloader mode.')
+                    'Device %s failed to reboot into bootloader mode.' %
+                    self.fastboot_serial)
 
 
     def ensure_adb_mode(self, timeout=DEFAULT_WAIT_UP_TIME_SECONDS):
@@ -1263,7 +1271,8 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
         self.fastboot_run('reboot', timeout=timeout, ignore_timeout=True)
         if not self.wait_up(timeout=timeout):
             raise error.AutoservError(
-                    'The device failed to reboot into adb mode.')
+                    'Device %s failed to reboot into adb mode.' %
+                    self.adb_serial)
         self._reset_adbd_connection()
 
 
@@ -1675,8 +1684,21 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
         if include_build_info:
             teststation_temp_dir = self.teststation.get_tmp_dir()
 
-            job_repo_url = afe_utils.get_host_attribute(
-                    self, self.job_repo_url_attribute)
+            try:
+                job_repo_url = afe_utils.get_host_attribute(
+                        self, self.job_repo_url_attribute)
+            except error.AutoservError:
+                logging.warning(
+                    'Device %s could not get repo url for build info.',
+                    self.adb_serial)
+                return
+
+            if not job_repo_url:
+                logging.warning(
+                    'Device %s could not get repo url for build info.',
+                    self.adb_serial)
+                return
+
             build_info = ADBHost.get_build_info_from_build_url(
                     job_repo_url)
 
@@ -1741,8 +1763,30 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
         """
         logging.info('Skipping setup wizard on %s.', self.adb_serial)
         self.check_boot_to_adb_complete()
-        self.run('am start -n com.google.android.setupwizard/'
-                 '.SetupWizardExitActivity')
+        result = self.run('am start -n com.google.android.setupwizard/'
+                          '.SetupWizardExitActivity')
+
+        if result.exit_status != 0:
+            if result.stdout.startswith('ADB_CMD_OUTPUT:255'):
+                # If the result returns ADB_CMD_OUTPUT:255, then run the above
+                # as root.
+                logging.debug('Need root access to bypass setup wizard.')
+                self._restart_adbd_with_root_permissions()
+                result = self.run('am start -n com.google.android.setupwizard/'
+                                  '.SetupWizardExitActivity')
+
+            if result.stdout == 'ADB_CMD_OUTPUT:0':
+                # If the result returns ADB_CMD_OUTPUT:0, Error type 3, then the
+                # setup wizard does not exist, so we do not have to bypass it.
+                if result.stderr and not \
+                        result.stderr.startswith('Error type 3\n'):
+                    logging.error('Unrecoverable skip setup wizard failure:'
+                                  ' %s', result.stderr)
+                    raise error.TestError()
+                logging.debug('Skip setup wizard received harmless error: '
+                              'No setup to bypass.')
+
+        logging.debug('Bypass setup wizard was successful.')
 
 
     def get_attributes_to_clear_before_provision(self):
@@ -1785,9 +1829,8 @@ class ADBHost(abstract_ssh.AbstractSSHHost):
             ds = dev_server.AndroidBuildServer.resolve(image, hostname)
         else:
             info = self.host_info_store.get()
-            job_repo_url = afe_utils.get_host_attribute(
-                    self, self.job_repo_url_attribute)
-            if job_repo_url:
+            job_repo_url = info.attributes.get(self.job_repo_url_attribute)
+            if job_repo_url is not None:
                 devserver_url, image = (
                         tools.get_devserver_build_from_package_url(
                                 job_repo_url, True))

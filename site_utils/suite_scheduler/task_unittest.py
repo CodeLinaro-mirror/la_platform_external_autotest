@@ -10,6 +10,7 @@ import mox, unittest
 
 # driver must be imported first due to circular imports in base_event and task
 import driver  # pylint: disable-msg=W0611
+import error
 import deduping_scheduler, forgiving_config_parser, task, build_event
 
 
@@ -79,6 +80,28 @@ class TaskCreateTest(TaskTestBase):
                                               self._PRIORITY, self._TIMEOUT))
         self.assertTrue(new_task._FitsSpec(self._BRANCH))
         self.assertFalse(new_task._FitsSpec('12'))
+
+
+    def testCreateFromConfigCheckBoards(self):
+        """Ensure a CrOS Task can be built from a correct config boards."""
+        board_whitelist = 'board2,board3'
+        board_lists = {self._BOARD: board_whitelist}
+        keyword, new_task = task.Task.CreateFromConfigSection(
+                self.config, self._TASK_NAME, board_lists=board_lists)
+        self.assertEquals(keyword, self._EVENT_KEY)
+        self.assertEquals(new_task.boards,
+                          set([x.strip() for x in board_whitelist.split(',')]))
+
+
+    def testCreateFromConfigCheckNonExistBoards(self):
+        """Ensure a CrOS Task can be built if board_list is not specified."""
+        board_whitelist = 'board2,board3'
+        board_lists = {'test-%s' % self._BOARD: board_whitelist}
+        keyword, new_task = task.Task.CreateFromConfigSection(
+                self.config, self._TASK_NAME, board_lists=board_lists)
+        self.assertEquals(keyword, self._EVENT_KEY)
+        self.assertEquals(new_task.boards,
+                          set([x.strip() for x in self._BOARD.split(',')]))
 
 
     def testCreateFromConfigEqualBranch(self):
@@ -167,7 +190,7 @@ class TaskCreateTest(TaskTestBase):
     def testCreateFromNoSuiteConfig(self):
         """Ensure we require a suite in Task config."""
         self.config.remove_option(self._TASK_NAME, 'suite')
-        self.assertRaises(task.MalformedConfigEntry,
+        self.assertRaises(error.MalformedConfigEntry,
                           task.Task.CreateFromConfigSection,
                           self.config,
                           self._TASK_NAME)
@@ -176,7 +199,7 @@ class TaskCreateTest(TaskTestBase):
     def testCreateFromNoKeywordConfig(self):
         """Ensure we require a run_on event in Task config."""
         self.config.remove_option(self._TASK_NAME, 'run_on')
-        self.assertRaises(task.MalformedConfigEntry,
+        self.assertRaises(error.MalformedConfigEntry,
                           task.Task.CreateFromConfigSection,
                           self.config,
                           self._TASK_NAME)
@@ -184,7 +207,7 @@ class TaskCreateTest(TaskTestBase):
 
     def testCreateFromNonexistentConfig(self):
         """Ensure we fail gracefully if we pass in a bad section name."""
-        self.assertRaises(task.MalformedConfigEntry,
+        self.assertRaises(error.MalformedConfigEntry,
                           task.Task.CreateFromConfigSection,
                           self.config,
                           'not_a_thing')
@@ -194,7 +217,7 @@ class TaskCreateTest(TaskTestBase):
         """Ensure testbed_dut_count specified in boards is only applicable for
         testing Launch Control builds."""
         self.config.set(self._TASK_NAME, 'boards', 'shamu-2')
-        self.assertRaises(task.MalformedConfigEntry,
+        self.assertRaises(error.MalformedConfigEntry,
                           task.Task.CreateFromConfigSection,
                           self.config,
                           self._TASK_NAME)

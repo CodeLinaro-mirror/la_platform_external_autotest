@@ -9,6 +9,7 @@ from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import chrome
 from autotest_lib.client.cros import cros_logging
+from autotest_lib.client.cros.graphics import graphics_utils
 
 # Kernel 3.8 to 3.14 has cur_delay_info, 3.18+ has frequency_info.
 CLOCK_PATHS = [
@@ -25,7 +26,7 @@ PSR_PATHS = ['/sys/kernel/debug/dri/0/i915_edp_psr_status']
 RC6_PATHS = ['/sys/kernel/debug/dri/0/i915_drpc_info']
 
 
-class graphics_Idle(test.test):
+class graphics_Idle(graphics_utils.GraphicsTest):
     """Class for graphics_Idle.  See 'control' for details."""
     version = 1
     _gpu_type = None
@@ -33,7 +34,12 @@ class graphics_Idle(test.test):
     _board = None
 
     def run_once(self, arc_mode=None):
+        # If we are in arc_mode, do not report failures to perf dashboard.
+        if arc_mode:
+            self._test_failure_report_enable = False
+
         # We use kiosk mode to make sure Chrome is idle.
+        self.add_failures('Graphics_Idle')
         with chrome.Chrome(
                 logged_in=False, extra_browser_args=['--kiosk'],
                 arc_mode=arc_mode):
@@ -47,13 +53,16 @@ class graphics_Idle(test.test):
             errors += self.verify_graphics_dvfs()
             errors += self.verify_graphics_fbc()
             errors += self.verify_graphics_psr()
-            errors += self.verify_graphics_gem_idle()
+            # TODO(ihf): enable once crbug.com/727983 is fixed.
+            if not utils.system_output('uname -r').startswith('4.4.'):
+                errors += self.verify_graphics_gem_idle()
             errors += self.verify_graphics_i915_min_clock()
             errors += self.verify_graphics_rc6()
             errors += self.verify_lvds_downclock()
             errors += self.verify_short_blanking()
             if errors:
                 raise error.TestFail('Failed: %s' % errors)
+        self.remove_failures('Graphics_Idle')
 
     def get_valid_path(self, paths):
         for path in paths:
@@ -149,6 +158,12 @@ class graphics_Idle(test.test):
         """ On i915 systems, check that we get into the lowest clock frequency;
         idle before doing so, and retry every second for 20 seconds."""
         logging.info('Running verify_graphics_i915_min_clock')
+
+        # TODO(benzh): enable once crbug.com/719040 is fixed.
+        if self._gpu_type == 'baytrail' and utils.count_cpus() == 4:
+            logging.info('Waived min clock check due to crbug.com/719040')
+            return ''
+
         if (utils.get_cpu_soc_family() == 'x86_64' and
                 self._gpu_type != 'pinetrail'):
             tries = 0

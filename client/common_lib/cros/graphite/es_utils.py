@@ -72,9 +72,6 @@ try:
     import elasticsearch
     from elasticsearch import helpers as elasticsearch_helpers
 except ImportError:
-    logging.debug('Failed to import elasticsearch. Mock classes will be used '
-                  'and calls to Elasticsearch server will be no-op. Test run '
-                  'is not affected by the missing elasticsearch module.')
     import elasticsearch_mock as elasticsearch
     elasticsearch_helpers = elasticsearch.Elasticsearch()
 
@@ -176,6 +173,9 @@ class ESMetadata(object):
         @return: True if post action succeeded. Otherwise return False.
 
         """
+        if not self.host:
+            return True
+
         if not metadata:
             return True
 
@@ -209,6 +209,9 @@ class ESMetadata(object):
         @return: True if post action succeeded. Otherwise return False.
 
         """
+        if not self.host:
+            return True
+
         if not data_list:
             return True
 
