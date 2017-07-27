@@ -13,7 +13,7 @@ TEST_TYPE = 'server'
 TIME = 'LENGTHY'
 
 DOC = ('Run module CtsServicesHostTestCases of the '
-       'Android 7.1_r3 Compatibility Test Suite (CTS), build 3764431,'
+       'Android 7.1_r6 Compatibility Test Suite (CTS), build 4009365,'
        'using arm ABI in the ARC++ container.')
 
 def run_CTS(machine):
@@ -22,7 +22,7 @@ def run_CTS(machine):
         'cheets_CTS_N',
         host=host,
         iterations=1,
-        max_retry=3,
+        max_retry=10,
         needs_push_media=False,
         tag='CtsServicesHostTestCases',
         target_module='CtsServicesHostTestCases',

@@ -30,6 +30,7 @@ import warnings
 
 from autotest_lib.client.bin import sysinfo
 from autotest_lib.client.common_lib import base_job
+from autotest_lib.client.common_lib import control_data
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import logging_manager
@@ -76,10 +77,6 @@ VERIFY_JOB_REPO_URL_CONTROL_FILE = _control_segment_path('verify_job_repo_url')
 RESET_CONTROL_FILE = _control_segment_path('reset')
 GET_NETWORK_STATS_CONTROL_FILE = _control_segment_path('get_network_stats')
 
-# by default provide a stub that generates no site data
-def _get_site_job_data_dummy(job):
-    return {}
-
 
 def get_machine_dicts(machine_names, in_lab, host_attributes=None):
     """Converts a list of machine names to list of dicts.
@@ -95,17 +92,32 @@ def get_machine_dicts(machine_names, in_lab, host_attributes=None):
             'host_info_store': A host_info.CachingHostInfoStore object to obtain
                     host information. A stub if in_lab is False.
     """
-    if host_attributes is None:
-        host_attributes = dict()
     machine_dict_list = []
     for machine in machine_names:
-        afe_host = _create_afe_host(machine, in_lab)
-        afe_host.attributes.update(host_attributes)
+        # See autoserv_parser.parse_args. Only one of in_lab or host_attributes
+        # can be provided.
+        if not in_lab:
+            afe_host = server_utils.EmptyAFEHost()
+            host_info_store = host_info.InMemoryHostInfoStore()
+            if host_attributes is not None:
+                afe_host.attributes.update(host_attributes)
+                info = host_info.HostInfo(attributes=host_attributes)
+                host_info_store.commit(info)
+        elif host_attributes:
+            raise error.AutoservError(
+                    'in_lab and host_attribute are mutually exclusive. '
+                    'Obtained in_lab:%s, host_attributes:%s'
+                    % (in_lab, host_attributes))
+        else:
+            afe_host = _create_afe_host(machine)
+            host_info_store = _create_host_info_store(machine)
+
         machine_dict_list.append({
                 'hostname' : machine,
                 'afe_host' : afe_host,
-                'host_info_store': _create_host_info_store(machine, in_lab),
+                'host_info_store': host_info_store,
         })
+
     return machine_dict_list
 
 
@@ -249,7 +261,6 @@ class base_server_job(base_job.base_job):
         """
         super(base_server_job, self).__init__(resultdir=resultdir,
                                               test_retry=test_retry)
-        path = os.path.dirname(__file__)
         self.test_retry = test_retry
         self.control = control
         self._uncollected_log_file = os.path.join(self.resultdir,
@@ -302,7 +313,7 @@ class base_server_job(base_job.base_job):
 
         # only write these keyvals out on the first job in a resultdir
         if 'job_started' not in utils.read_keyval(self.resultdir):
-            job_data.update(get_site_job_data(self))
+            job_data.update(self._get_job_data())
             utils.write_keyval(self.resultdir, job_data)
 
         self._parse_job = parse_job
@@ -337,6 +348,14 @@ class base_server_job(base_job.base_job):
         # TODO(jrbarnette) The utility of the 'harness' attribute even
         # to client jobs is suspect.  Probably, we should remove it.
         self.harness = None
+
+        if control:
+            self.max_result_size_KB = control_data.parse_control(
+                    control, raise_warnings=False).max_result_size_KB
+        else:
+            # Set the maximum result size to be the default specified in
+            # global config, if the job has no control file associated.
+            self.max_result_size_KB = control_data.DEFAULT_MAX_RESULT_SIZE_KB
 
 
     @classmethod
@@ -803,7 +822,7 @@ class base_server_job(base_job.base_job):
 
                 # If no device error occured, no need to collect crashinfo.
                 collect_crashinfo = self.failed_with_device_error
-            except Exception, e:
+            except Exception as e:
                 try:
                     logging.exception(
                             'Exception escaped control file, job aborting:')
@@ -819,7 +838,7 @@ class base_server_job(base_job.base_job):
                 # Clean up temp directory used for copies of the control files
                 try:
                     shutil.rmtree(temp_control_file_dir)
-                except Exception, e:
+                except Exception as e:
                     logging.warning('Could not remove temp directory %s: %s',
                                  temp_control_file_dir, e)
 
@@ -862,37 +881,34 @@ class base_server_job(base_job.base_job):
         def group_func():
             try:
                 test.runtest(self, url, tag, args, dargs)
-            except error.TestBaseException, e:
+            except error.TestBaseException as e:
                 self.record(e.exit_status, subdir, testname, str(e))
                 raise
-            except Exception, e:
+            except Exception as e:
                 info = str(e) + "\n" + traceback.format_exc()
                 self.record('FAIL', subdir, testname, info)
                 raise
             else:
                 self.record('GOOD', subdir, testname, 'completed successfully')
 
-        result, exc_info = self._run_group(testname, subdir, group_func)
-        if exc_info and isinstance(exc_info[1], error.TestBaseException):
+        try:
+            result = self._run_group(testname, subdir, group_func)
+        except error.TestBaseException as e:
             return False
-        elif exc_info:
-            raise exc_info[0], exc_info[1], exc_info[2]
         else:
             return True
 
 
     def _run_group(self, name, subdir, function, *args, **dargs):
-        """\
-        Underlying method for running something inside of a group.
-        """
+        """Underlying method for running something inside of a group."""
         result, exc_info = None, None
         try:
             self.record('START', subdir, name)
             result = function(*args, **dargs)
-        except error.TestBaseException, e:
+        except error.TestBaseException as e:
             self.record("END %s" % e.exit_status, subdir, name)
-            exc_info = sys.exc_info()
-        except Exception, e:
+            raise
+        except Exception as e:
             err_msg = str(e) + '\n'
             err_msg += traceback.format_exc()
             self.record('END ABORT', subdir, name, err_msg)
@@ -900,25 +916,29 @@ class base_server_job(base_job.base_job):
         else:
             self.record('END GOOD', subdir, name)
 
-        return result, exc_info
+        return result
 
 
     def run_group(self, function, *args, **dargs):
         """\
-        function:
-                subroutine to run
-        *args:
-                arguments for the function
+        @param function: subroutine to run
+        @returns: (result, exc_info). When the call succeeds, result contains
+                the return value of |function| and exc_info is None. If
+                |function| raises an exception, exc_info contains the tuple
+                returned by sys.exc_info(), and result is None.
         """
 
         name = function.__name__
-
         # Allow the tag for the group to be specified.
         tag = dargs.pop('tag', None)
         if tag:
             name = tag
 
-        return self._run_group(name, None, function, *args, **dargs)[0]
+        try:
+            result = self._run_group(name, None, function, *args, **dargs)[0]
+        except error.TestBaseException:
+            return None, sys.exc_info()
+        return result, None
 
 
     def run_op(self, op, op_func, get_kernel_func):
@@ -936,7 +956,7 @@ class base_server_job(base_job.base_job):
         try:
             self.record('START', None, op)
             op_func()
-        except Exception, e:
+        except Exception as e:
             err_msg = str(e) + '\n' + traceback.format_exc()
             self.record('END FAIL', None, op, err_msg)
             raise
@@ -1385,6 +1405,33 @@ class base_server_job(base_job.base_job):
                 host.clear_known_hosts()
 
 
+    def _get_job_data(self):
+        """Add custom data to the job keyval info.
+
+        When multiple machines are used in a job, change the hostname to
+        the platform of the first machine instead of machine1,machine2,...  This
+        makes the job reports easier to read and keeps the tko_machines table from
+        growing too large.
+
+        Returns:
+            keyval dictionary with new hostname value, or empty dictionary.
+        """
+        job_data = {}
+        # Only modify hostname on multimachine jobs. Assume all host have the same
+        # platform.
+        if len(self.machines) > 1:
+            # Search through machines for first machine with a platform.
+            for host in self.machines:
+                keyval_path = os.path.join(self.resultdir, 'host_keyvals', host)
+                keyvals = utils.read_keyval(keyval_path)
+                host_plat = keyvals.get('platform', None)
+                if not host_plat:
+                    continue
+                job_data['hostname'] = host_plat
+                break
+        return job_data
+
+
 class warning_manager(object):
     """Class for controlling warning logs. Manages the enabling and disabling
     of warnings."""
@@ -1426,16 +1473,12 @@ def _is_current_server_job(test):
     return test.testname == 'SERVER_JOB'
 
 
-def _create_afe_host(hostname, in_lab):
-    """Create a real or stub frontend.Host object.
+def _create_afe_host(hostname):
+    """Create an afe_host object backed by the AFE.
 
     @param hostname: Name of the host for which we want the Host object.
-    @param in_lab: (bool) whether we have access to the AFE.
     @returns: An object of type frontend.AFE
     """
-    if not in_lab:
-        return server_utils.EmptyAFEHost()
-
     afe = frontend_wrappers.RetryingAFE(timeout_min=5, delay_sec=10)
     hosts = afe.get_hosts(hostname=hostname)
     if not hosts:
@@ -1444,16 +1487,12 @@ def _create_afe_host(hostname, in_lab):
     return hosts[0]
 
 
-def _create_host_info_store(hostname, in_lab):
+def _create_host_info_store(hostname):
     """Create a real or stub afe_store.AfeStore object.
 
     @param hostname: Name of the host for which we want the store.
-    @param in_lab: (bool) whether we have access to the AFE.
     @returns: An object of type afe_store.AfeStore
     """
-    if not in_lab:
-        return host_info.InMemoryHostInfoStore()
-
     host_info_store = afe_store.AfeStore(hostname)
     try:
         host_info_store.get(force_refresh=True)
@@ -1461,12 +1500,6 @@ def _create_host_info_store(hostname, in_lab):
         raise error.AutoservError('Could not obtain HostInfo for hostname %s' %
                                   hostname)
     return host_info_store
-
-
-# load up site-specific code for generating site-specific job data
-get_site_job_data = utils.import_site_function(__file__,
-    "autotest_lib.server.site_server_job", "get_site_job_data",
-    _get_site_job_data_dummy)
 
 
 site_server_job = utils.import_site_class(

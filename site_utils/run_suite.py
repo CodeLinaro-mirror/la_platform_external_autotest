@@ -61,6 +61,7 @@ from autotest_lib.client.common_lib import priorities
 from autotest_lib.client.common_lib import time_utils
 from autotest_lib.client.common_lib.cros import retry
 from autotest_lib.frontend.afe.json_rpc import proxy
+from autotest_lib.server import site_utils
 from autotest_lib.server import utils
 from autotest_lib.server.cros import provision
 from autotest_lib.server.cros.dynamic_suite import constants
@@ -90,6 +91,16 @@ SEVERITY = {RETURN_CODES.OK: 0,
             RETURN_CODES.SUITE_TIMEOUT: 2,
             RETURN_CODES.INFRA_FAILURE: 3,
             RETURN_CODES.ERROR: 4}
+
+# Minimum RPC timeout setting for calls expected to take long time, e.g.,
+# create_suite_job. If default socket time (socket.getdefaulttimeout()) is
+# None or greater than this value, the default will be used.
+# The value here is set to be the same as the timeout for the RetryingAFE object
+# so long running RPCs can wait long enough before being aborted.
+_MIN_RPC_TIMEOUT = 600
+
+# Number of days back to search for existing job.
+_SEARCH_JOB_MAX_DAYS = 14
 
 
 def get_worse_code(code1, code2):
@@ -267,6 +278,22 @@ def make_parser():
         action='store', default=None,
         help=('A dict of args passed all the way to each individual test that '
               'will be actually ran.'))
+    parser.add_argument(
+        '--require_log', action='store_true',
+        help=('Stream logs of run_suite.py to a local file named '
+              'run_suite-<build name>.log.'))
+
+    # Used for monitoring purposes, to measure no-op swarming proxy latency.
+    parser.add_argument('--do_nothing', action='store_true',
+                        help=argparse.SUPPRESS)
+
+    # Used when lab/job status checking is needed. Currently its only user is
+    # suite scheduler v2.
+    parser.add_argument(
+        '--pre_check', action='store_true',
+        help=('Check lab and job status before kicking off a suite. Used by '
+              'suite scheduler v2.'))
+
     return parser
 
 
@@ -728,8 +755,7 @@ class TestView(object):
 
         Formalize the test_name we got from the test view.
 
-        Remove 'build/suite' prefix if any. And append 'experimental' prefix
-        for experimental tests if their names do not start with 'experimental'.
+        Remove 'build/suite' prefix if any.
 
         If one runs a test in control file via the following code,
            job.runtest('my_Test', tag='tag')
@@ -747,29 +773,27 @@ class TestView(object):
            prefix from the job name, and append the rest to 'SERVER_JOB'
            or 'CLIENT_JOB' as a prefix. So the names returned by this
            method will look like:
-             'experimental_Telemetry Smoothness Measurement_SERVER_JOB'
-             'experimental_dummy_Pass_SERVER_JOB'
+             'Telemetry Smoothness Measurement_SERVER_JOB'
+             'dummy_Pass_SERVER_JOB'
              'dummy_Fail_SERVER_JOB'
 
         3) A test view is of a suite job and its status is ABORT.
            In this case, the view['test_name'] is the child job's name.
-           If it is an experimental test, 'experimental' will be part
-           of the name. For instance,
+           For instance,
              'lumpy-release/R35-5712.0.0/perf_v2/
-                   experimental_Telemetry Smoothness Measurement'
-             'lumpy-release/R35-5712.0.0/dummy/experimental_dummy_Pass'
+                   Telemetry Smoothness Measurement'
+             'lumpy-release/R35-5712.0.0/dummy/dummy_Pass'
              'lumpy-release/R35-5712.0.0/dummy/dummy_Fail'
            The above names will be converted to the following:
-             'experimental_Telemetry Smoothness Measurement'
-             'experimental_dummy_Pass'
+             'Telemetry Smoothness Measurement'
+             'dummy_Pass'
              'dummy_Fail'
 
         4) A test view's status is of a suite job and its status is TEST_NA.
            In this case, the view['test_name'] is the NAME field of the control
-           file. If it is an experimental test, 'experimental' will part of
-           the name. For instance,
-             'experimental_Telemetry Smoothness Measurement'
-             'experimental_dummy_Pass'
+           file. For instance,
+             'Telemetry Smoothness Measurement'
+             'dummy_Pass'
              'dummy_Fail'
            This method will not modify these names.
 
@@ -791,16 +815,9 @@ class TestView(object):
             testname= '%s_%s' % (self.view['job_name'], self.view['test_name'])
         else:
             testname = self.view['test_name']
-        experimental =  self.is_experimental()
         # Remove the build and suite name from testname if any.
-        testname = tools.get_test_name(
+        self.testname = tools.get_test_name(
                 self.build, self.suite_name, testname)
-        # If an experimental test was aborted, testname
-        # would include the 'experimental' prefix already.
-        prefix = constants.EXPERIMENTAL_PREFIX if (
-                experimental and not
-                testname.startswith(constants.EXPERIMENTAL_PREFIX)) else ''
-        self.testname = prefix + testname
         return self.testname
 
 
@@ -833,17 +850,6 @@ class TestView(object):
 
         """
         return self.view['job_keyvals'].get('retry_original_job_id') is not None
-
-
-    def is_experimental(self):
-        """Check whether a test view is for an experimental test.
-
-        @returns: True if it is for an experimental test, False otherwise.
-
-        """
-        return (self.view['job_keyvals'].get('experimental') == 'True' or
-                tools.get_test_name(self.build, self.suite_name,
-                        self.view['test_name']).startswith('experimental'))
 
 
     def hit_timeout(self):
@@ -1299,8 +1305,6 @@ class ResultCollector(object):
 
         for v in self._test_views:
             # The order of checking each case is important.
-            if v.is_experimental():
-                continue
             if v.get_testname() == TestView.SUITE_JOB:
                 if v.is_aborted() and v.hit_timeout():
                     current_code = RETURN_CODES.SUITE_TIMEOUT
@@ -1578,16 +1582,14 @@ def main_without_exception_handling(options):
         if os.path.exists(log_dir):
             log_name = os.path.join(log_dir, log_name)
 
-    utils.setup_logging(logfile=log_name)
+    if options.require_log:
+        utils.setup_logging(logfile=log_name)
 
     if not options.bypass_labstatus and not options.web:
         utils.check_lab_status(options.build)
-    instance_server = (options.web if options.web else
-                       instance_for_pool(options.pool))
-    afe = frontend_wrappers.RetryingAFE(server=instance_server,
-                                        timeout_min=options.afe_timeout_mins,
-                                        delay_sec=options.delay_sec)
-    logging.info('Autotest instance: %s', instance_server)
+
+    afe = _create_afe(options)
+    instance_server = afe.server
 
     rpc_helper = diagnosis_utils.RPCHelper(afe)
     is_real_time = True
@@ -1650,6 +1652,22 @@ def main_without_exception_handling(options):
         return _handle_job_wait(afe, job_id, options, job_timer, is_real_time)
 
 
+def _create_afe(options):
+    """Return an afe instance based on options.
+
+    @param options          Parsed options.
+
+    @return afe, an AFE instance.
+    """
+    instance_server = (options.web if options.web else
+                       instance_for_pool(options.pool))
+    afe = frontend_wrappers.RetryingAFE(server=instance_server,
+                                        timeout_min=options.afe_timeout_mins,
+                                        delay_sec=options.delay_sec)
+    logging.info('Autotest instance created: %s', instance_server)
+    return afe
+
+
 def _handle_job_wait(afe, job_id, options, job_timer, is_real_time):
     """Handle suite job synchronously.
 
@@ -1661,7 +1679,6 @@ def _handle_job_wait(afe, job_id, options, job_timer, is_real_time):
 
     @return SuiteResult of suite job.
     """
-    code = RETURN_CODES.OK
     output_dict = {}
     rpc_helper = diagnosis_utils.RPCHelper(afe)
     instance_server = afe.server
@@ -1697,7 +1714,7 @@ def _handle_job_wait(afe, job_id, options, job_timer, is_real_time):
     original_suite_name = get_original_suite_name(options.name,
                                                     options.suite_args)
     # Start collecting test results.
-    logging.info('%s Start collectint test results and dump them to json.',
+    logging.info('%s Start collecting test results and dump them to json.',
                  diagnosis_utils.JobTimer.format_time(datetime.now()))
     TKO = frontend_wrappers.RetryingTKO(server=instance_server,
                                         timeout_min=options.afe_timeout_mins,
@@ -1786,12 +1803,38 @@ def _handle_job_nowait(job_id, options, instance_server):
                         {'return_message': '--no_wait specified; Exiting.'})
 
 
+def _should_run(options):
+    """Check whether the suite should be run based on lab/job status checking.
+
+    @param options          Parsed options.
+    """
+    try:
+        site_utils.check_lab_status(options.test_source_build)
+    except site_utils.TestLabException as ex:
+        logging.exception('Lab is closed or build is blocked. Skipping '
+                          'suite %s, board %s, build %s:  %s',
+                          options.name, options.board,
+                          options.test_source_build, str(ex))
+        return False
+
+    start_time = str(datetime.now() -
+                     timedelta(days=_SEARCH_JOB_MAX_DAYS))
+    afe = _create_afe(options)
+    return not afe.get_jobs(
+            name__istartswith=options.test_source_build,
+            name__iendswith='control.'+options.name,
+            created_on__gte=start_time,
+            min_rpc_timeout=_MIN_RPC_TIMEOUT)
+
 def main():
     """Entry point."""
     utils.verify_not_root_user()
 
     parser = make_parser()
     options = parser.parse_args()
+    if options.do_nothing:
+        return
+
     try:
         # Silence the log when dumping outputs into json
         if options.json_dump:
@@ -1802,6 +1845,14 @@ def main():
             code = RETURN_CODES.INVALID_OPTIONS
             output_dict = {'return_code': RETURN_CODES.INVALID_OPTIONS}
         else:
+            if options.pre_check and not _should_run(options):
+                logging.info('Lab is closed, OR build %s is blocked, OR suite '
+                             '%s for this build has already been kicked off '
+                             'once in past %d days.',
+                             options.test_source_build, options.name,
+                             _SEARCH_JOB_MAX_DAYS)
+                return
+
             code, output_dict = main_without_exception_handling(options)
     except diagnosis_utils.BoardNotAvailableError as e:
         output_dict = {'return_message': 'Skipping testing: %s' % e.message}

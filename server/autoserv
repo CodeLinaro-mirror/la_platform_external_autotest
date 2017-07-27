@@ -53,7 +53,7 @@ from autotest_lib.server.cros.dynamic_suite import frontend_wrappers
 from autotest_lib.site_utils import job_directories
 from autotest_lib.site_utils import job_overhead
 from autotest_lib.site_utils import lxc
-from autotest_lib.site_utils import lxc_utils
+from autotest_lib.site_utils.lxc import utils as lxc_utils
 from autotest_lib.client.common_lib import pidfile, logging_manager
 
 
@@ -616,21 +616,6 @@ def main():
         parser.parser.print_help()
         sys.exit(1)
 
-    # If the job requires to run with server-side package, try to stage server-
-    # side package first. If that fails with error that autotest server package
-    # does not exist, fall back to run the job without using server-side
-    # packaging. If option warn_no_ssp is specified, that means autoserv is
-    # running in a drone does not support SSP, thus no need to stage server-side
-    # package.
-    ssp_url = None
-    ssp_url_warning = False
-    if (not parser.options.warn_no_ssp and parser.options.require_ssp):
-        ssp_url, ssp_error_msg = _stage_ssp(parser)
-        # The build does not have autotest server package. Fall back to not
-        # to use server-side package. Logging is postponed until logging being
-        # set up.
-        ssp_url_warning = not ssp_url
-
     if parser.options.no_logging:
         results = None
     else:
@@ -652,6 +637,21 @@ def main():
         # needs to create the log file in there.
         if not os.path.isdir(results):
             os.makedirs(results)
+
+    # If the job requires to run with server-side package, try to stage server-
+    # side package first. If that fails with error that autotest server package
+    # does not exist, fall back to run the job without using server-side
+    # packaging. If option warn_no_ssp is specified, that means autoserv is
+    # running in a drone does not support SSP, thus no need to stage server-side
+    # package.
+    ssp_url = None
+    ssp_url_warning = False
+    if (not parser.options.warn_no_ssp and parser.options.require_ssp):
+        ssp_url, ssp_error_msg = _stage_ssp(parser)
+        # The build does not have autotest server package. Fall back to not
+        # to use server-side package. Logging is postponed until logging being
+        # set up.
+        ssp_url_warning = not ssp_url
 
     # Server-side packaging will only be used if it's required and the package
     # is available. If warn_no_ssp is specified, it means that autoserv is
@@ -762,11 +762,11 @@ def main():
         except SystemExit as e:
             exit_code = e.code
             if exit_code:
-                logging.exception(e)
-        except Exception as e:
+                logging.exception('Uncaught SystemExit with code %s', exit_code)
+        except Exception:
             # If we don't know what happened, we'll classify it as
             # an 'abort' and return 1.
-            logging.exception(e)
+            logging.exception('Uncaught Exception, exit_code = 1.')
             exit_code = 1
     finally:
         if pid_file_manager:

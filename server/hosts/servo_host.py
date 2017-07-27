@@ -428,7 +428,7 @@ class ServoHost(ssh_host.SSHHost):
         except Exception as e:
             # Sometimes creating the job will raise an exception. We'll log it
             # but we don't want to fail because of it.
-            logging.exception('Scheduling reboot job failed: %s', e)
+            logging.exception('Scheduling reboot job failed due to Exception.')
             metadata = {'dut': dut,
                         'servo_host': self.hostname,
                         'error': str(e),
@@ -563,6 +563,8 @@ class ServoHost(ssh_host.SSHHost):
         if status in autoupdater.UPDATER_PROCESSING_UPDATE:
             logging.info('servo host %s already processing an update, update '
                          'engine client status=%s', self.hostname, status)
+        elif status == autoupdater.UPDATER_NEED_REBOOT:
+            return
         elif current_build_number != target_build_number:
             logging.info('Using devserver url: %s to trigger update on '
                          'servo host %s, from %s to %s', url, self.hostname,
