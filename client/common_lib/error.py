@@ -143,6 +143,14 @@ class CmdError(TestError):
         msg += '\n' + repr(self.result_obj)
         return msg
 
+    def __eq__(self, other):
+        if type(self) == type(other):
+            return (self.command == other.command
+                    and self.result_obj == other.result_obj
+                    and self.additional_text == other.additional_text)
+        else:
+            return NotImplemented
+
 
 class CmdTimeoutError(CmdError):
     """Indicates that a command timed out."""
@@ -200,6 +208,30 @@ class HostInstallTimeoutError(JobError):
 
 class AutotestHostRunError(GenericHostRunError, AutotestError):
     pass
+
+
+class AutotestHostRunCmdError(AutotestHostRunError):
+    """Indicates that the command run via Host.run failed.
+
+    This is equivalent to CmdError when raised from a Host object instead of
+    directly on the DUT using utils.run
+    """
+
+    def __init__(self, command, result_obj, additional_text=''):
+        description = command
+        if additional_text:
+            description += ' (%s)' % additional_text
+        super(AutotestHostRunCmdError, self).__init__(description, result_obj)
+        self.command = command
+        self.additional_text = additional_text
+
+
+class AutotestHostRunTimeoutError(AutotestHostRunCmdError):
+    """Indicates that a command run via Host.run timed out.
+
+    This is equivalent to CmdTimeoutError when raised from a Host object instead
+    of directly on the DUT using utils.run
+    """
 
 
 # server-specific errors

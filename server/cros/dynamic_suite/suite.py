@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import abc
 import datetime
 import difflib
 import functools
@@ -962,7 +963,6 @@ class _BaseSuite(object):
             max_runtime_mins=24*60,
             timeout_mins=24*60,
             file_bugs=False,
-            file_experimental_bugs=False,
             suite_job_id=None,
             ignore_deps=False,
             extra_deps=None,
@@ -1030,7 +1030,6 @@ class _BaseSuite(object):
         self._jobs_to_tests = {}
 
         self._file_bugs = file_bugs
-        self._file_experimental_bugs = file_experimental_bugs
         self._suite_job_id = suite_job_id
         self._job_retry=job_retry
         self._max_retries = max_retries
@@ -1061,7 +1060,7 @@ class _BaseSuite(object):
         )
 
 
-    def _schedule_test(self, record, test, retry_for=None, ignore_errors=False):
+    def _schedule_test(self, record, test, retry_for=None):
         """Schedule a single test and return the job.
 
         Schedule a single test by creating a job, and then update relevant
@@ -1072,8 +1071,7 @@ class _BaseSuite(object):
 
         Returns a frontend.Job object if the test is successfully scheduled.
         If scheduling failed due to NoEligibleHostException or a non-existent
-        board label, returns None.  If ignore_errors is True, all unknown
-        errors return None, otherwise the errors are raised as-is.
+        board label, returns None.
 
         @param record: A callable to use for logging.
                        prototype: record(base_job.status_log_entry)
@@ -1081,9 +1079,6 @@ class _BaseSuite(object):
         @param retry_for: If we are scheduling a test to retry an
                           old job, the afe_job_id of the old job
                           will be passed in as |retry_for|.
-        @param ignore_errors: If True, when an rpc error occur, ignore
-                             the error and will return None.
-                             If False, rpc errors will be raised.
 
         @returns: A frontend.Job object or None
         """
@@ -1109,17 +1104,11 @@ class _BaseSuite(object):
                 return None
             else:
                 raise e
-        except (error.RPCException, proxy.JSONRPCException) as e:
+        except (error.RPCException, proxy.JSONRPCException):
             if retry_for:
                 # Mark that we've attempted to retry the old job.
                 self._retry_handler.set_attempted(job_id=retry_for)
-
-            if ignore_errors:
-                logging.error('Failed to schedule test: %s, Reason: %s',
-                              test.name, e)
-                return None
-            else:
-                raise e
+            raise
         else:
             self._jobs.append(job)
             self._jobs_to_tests[job.id] = test
@@ -1223,12 +1212,7 @@ class _BaseSuite(object):
         if self._has_retry(result):
             return False
 
-        is_not_experimental = (
-            constants.EXPERIMENTAL_PREFIX not in result._test_name and
-            constants.EXPERIMENTAL_PREFIX not in result._job_name)
-
         return (self._file_bugs and result.test_executed and
-                (is_not_experimental or self._file_experimental_bugs) and
                 not result.is_testna() and
                 result.is_worse_than(job_status.Status('GOOD', '', 'reason')))
 
@@ -1244,7 +1228,7 @@ class _BaseSuite(object):
                 and self._retry_handler.has_following_retry(result))
 
 
-    def wait(self, record, bug_template=None):
+    def wait(self, record, reporter):
         """
         Polls for the job statuses, using |record| to print status when each
         completes.
@@ -1252,24 +1236,8 @@ class _BaseSuite(object):
         @param record: callable that records job status.
                  prototype:
                    record(base_job.status_log_entry)
-        @param bug_template: A template dictionary specifying the default bug
-                             filing options for failures in this suite.
+        @param reporter: _ResultReporter instance.
         """
-        # reporting modules have dependency on external packages, e.g., httplib2
-        # Such dependency can cause issue to any module tries to import suite.py
-        # without building site-packages first. Since the reporting modules are
-        # only used in this function, move the imports here avoid the
-        # requirement of building site packages to use other functions in this
-        # module.
-        from autotest_lib.server.cros.dynamic_suite import reporting
-
-        if bug_template is None:
-            bug_template = {}
-
-        if self._file_bugs:
-            bug_reporter = reporting.Reporter()
-        else:
-            bug_reporter = reporting.NullReporter()
         try:
             if self._suite_job_id:
                 results_generator = job_status.wait_for_child_results(
@@ -1285,8 +1253,7 @@ class _BaseSuite(object):
                     result=result,
                     record=record,
                     results_generator=results_generator,
-                    bug_reporter=bug_reporter,
-                    bug_template=bug_template)
+                    reporter=reporter)
 
         except Exception:  # pylint: disable=W0703
             logging.exception('Exception waiting for results')
@@ -1294,8 +1261,31 @@ class _BaseSuite(object):
                    'Exception waiting for results').record_result(record)
 
 
-    def _record_result(self, result, record, results_generator, bug_reporter,
-                         bug_template):
+    def get_result_reporter(self, bug_template):
+        """Return the _ResultReporter instance to use for the suite.
+
+        @param bug_template: A template dictionary specifying the default bug
+                             filing options for failures in this suite.
+        """
+        # reporting modules have dependency on external packages, e.g., httplib2
+        # Such dependency can cause issue to any module tries to import suite.py
+        # without building site-packages first. Since the reporting modules are
+        # only used in this function, move the imports here avoid the
+        # requirement of building site packages to use other functions in this
+        # module.
+        from autotest_lib.server.cros.dynamic_suite import reporting
+
+        if self._should_file_bugs:
+            if self._file_bugs:
+                bug_reporter = reporting.Reporter()
+            else:
+                bug_reporter = reporting.NullReporter()
+            return _BugResultReporter(self, bug_reporter, bug_template)
+        else:
+            return _EmailResultReporter(self, bug_template)
+
+
+    def _record_result(self, result, record, results_generator, reporter):
         """
         Record a single test job result.
 
@@ -1304,40 +1294,27 @@ class _BaseSuite(object):
                  prototype:
                    record(base_job.status_log_entry)
         @param results_generator: Results generator for sending job retries.
-        @param bug_reporter: Reporter instance for reporting bugs.
-        @param bug_template: A template dictionary specifying the default bug
-                             filing options for failures in this suite.
+        @param reporter: _ResultReporter instance.
         """
         result.record_all(record)
         self._remember_job_keyval(result)
 
         if self._job_retry and self._retry_handler._should_retry(result):
-            new_job = self._schedule_test(
-                    record=record, test=self._jobs_to_tests[result.id],
-                    retry_for=result.id, ignore_errors=True)
-            if new_job:
+            test = self._jobs_to_tests[result.id]
+            try:
+                new_job = self._schedule_test(
+                        record=record, test=test, retry_for=result.id)
+            except (error.RPCException, proxy.JSONRPCException) as e:
+                logging.error('Failed to schedule test: %s, Reason: %s',
+                              test.name, e)
+            else:
                 results_generator.send([new_job])
 
         # TODO (fdeng): If the suite times out before a retry could
         # finish, we would lose the chance to file a bug for the
         # original job.
         if self._should_report(result):
-            if self._should_file_bugs:
-                self._file_bug(result, bug_reporter, bug_template)
-            else:
-                # reporting modules have dependency on external
-                # packages, e.g., httplib2 Such dependency can cause
-                # issue to any module tries to import suite.py without
-                # building site-packages first. Since the reporting
-                # modules are only used in this function, move the
-                # imports here avoid the requirement of building site
-                # packages to use other functions in this module.
-                from autotest_lib.server.cros.dynamic_suite import reporting
-
-                reporting.send_email(
-                        self._get_test_bug(result),
-                        self._get_bug_template(result, bug_template))
-
+            reporter.report(result)
 
     def _get_bug_template(self, result, bug_template):
         """Get BugTemplate for test job.
@@ -1589,7 +1566,6 @@ class Suite(_BaseSuite):
             max_runtime_mins=24*60,
             timeout_mins=24*60,
             file_bugs=False,
-            file_experimental_bugs=False,
             suite_job_id=None,
             ignore_deps=False,
             extra_deps=None,
@@ -1675,7 +1651,6 @@ class Suite(_BaseSuite):
                 max_runtime_mins=max_runtime_mins,
                 timeout_mins=timeout_mins,
                 file_bugs=file_bugs,
-                file_experimental_bugs=file_experimental_bugs,
                 suite_job_id=suite_job_id,
                 ignore_deps=ignore_deps,
                 extra_deps=extra_deps,
@@ -1707,7 +1682,7 @@ class ProvisionSuite(_BaseSuite):
             run_prod_code=False,
             test_args=None,
             test_source_build=None,
-            **suite_args):
+            **kwargs):
         """
         Constructor
 
@@ -1720,8 +1695,8 @@ class ProvisionSuite(_BaseSuite):
         @param test_args: A dict of args passed all the way to each individual
                           test that will be actually ran.
         @param test_source_build: Build that contains the server-side test code.
-        @param suite_args: Various keyword arguments passed to
-                           _BaseSuite constructor.
+        @param kwargs: Various keyword arguments passed to
+                       _BaseSuite constructor.
         """
         dummy_test = _load_dummy_test(
                 builds, devserver, cf_getter,
@@ -1732,7 +1707,7 @@ class ProvisionSuite(_BaseSuite):
                 tag=tag,
                 builds=builds,
                 board=board,
-                **suite_args)
+                **kwargs)
 
 
 def _load_dummy_test(
@@ -1751,8 +1726,6 @@ def _load_dummy_test(
     @param test_args: A dict of args passed all the way to each individual
                       test that will be actually ran.
     @param test_source_build: Build that contains the server-side test code.
-    @param suite_args: Various keyword arguments passed to
-                       _BaseSuite constructor.
     """
     if cf_getter is None:
         if run_prod_code:
@@ -1817,3 +1790,79 @@ def _is_nonexistent_board_error(e):
     return (isinstance(e.problem_keys, dict)
             and len(e.problem_keys) == 1
             and 'meta_hosts' in e.problem_keys)
+
+
+class _ResultReporter(object):
+    """Abstract base class for reporting test results.
+
+    Usually, this is used to report test failures.
+    """
+
+    __metaclass__ = abc.ABCMeta
+
+    @abc.abstractmethod
+    def report(self, result):
+        """Report test result.
+
+        @param result: Status instance for job.
+        """
+
+
+class MemoryResultReporter(_ResultReporter):
+    """Reporter that stores results internally for testing."""
+
+    def __init__(self):
+        self.results = []
+
+    def report(self, result):
+        self.results.append(result)
+
+
+class _BugResultReporter(_ResultReporter):
+    """
+    Report test results as bugs.
+    """
+
+    def __init__(self, suite, bug_reporter, bug_template):
+        """
+        Instantiate instance.
+
+        @param suite: _BaseSuite instance
+        @param bug_reporter: Reporter instance for reporting bugs.
+        @param bug_template: A template dictionary specifying the default bug
+                             filing options for failures in this suite.
+        """
+        self._suite = suite
+        self._bug_reporter = bug_reporter
+        self._bug_template = bug_template
+
+    def report(self, result):
+        self._suite._file_bug(result, self._bug_reporter, self._bug_template)
+
+
+class _EmailResultReporter(_ResultReporter):
+    """
+    Report test results as email.
+
+    @param suite: _BaseSuite instance
+    @param bug_template: A template dictionary specifying the default bug
+                         filing options for failures in this suite.
+    """
+
+    def __init__(self, suite, bug_template):
+        self._suite = suite
+        self._bug_template = bug_template
+
+    def report(self, result):
+        # reporting modules have dependency on external
+        # packages, e.g., httplib2 Such dependency can cause
+        # issue to any module tries to import suite.py without
+        # building site-packages first. Since the reporting
+        # modules are only used in this function, move the
+        # imports here avoid the requirement of building site
+        # packages to use other functions in this module.
+        from autotest_lib.server.cros.dynamic_suite import reporting
+
+        reporting.send_email(
+                self._suite._get_test_bug(result),
+                self._suite._get_bug_template(result, self._bug_template))

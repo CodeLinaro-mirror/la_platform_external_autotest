@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from datetime import datetime, timedelta
 import collections
 import json
 import logging
@@ -28,6 +29,9 @@ def snippet(text):
     return ('%s%s\n%s\n%s%s' %
             (start, snip[len(start):], text, end, snip[len(end):]))
 
+UPDATE_ENGINE_PERF_PATH = '/mnt/stateful_partition/unencrypted/preserve'
+UPDATE_ENGINE_PERF_SCRIPT = 'update_engine_performance_monitor.py'
+UPDATE_ENGINE_PERF_RESULTS_FILE = 'perf_data_results.json'
 
 # Update event types.
 EVENT_TYPE_DOWNLOAD_COMPLETE = '1'
@@ -203,12 +207,12 @@ class ExpectedUpdateEvent(object):
         """Returns a dictionary of expected attributes."""
         return dict(self._expected_attrs)
 
-# TODO(dhaddock): Update timeout here to compare timeout against event
-# timestamp instead of how long it took to read from the file hostlog file.
+
 class ExpectedUpdateEventChain(object):
     """Defines a chain of expected update events."""
     def __init__(self):
         self._expected_events_chain = []
+        self._current_timestamp = None
 
 
     def add_event(self, expected_events, timeout, on_timeout=None):
@@ -265,8 +269,7 @@ class ExpectedUpdateEventChain(object):
                 raise ExpectedUpdateEventChainFailed(err_msg)
 
 
-    @staticmethod
-    def _verify_event_with_timeout(expected_events, timeout, on_timeout,
+    def _verify_event_with_timeout(self, expected_events, timeout, on_timeout,
                                    get_next_event):
         """Verify an expected event occurs within a given timeout.
 
@@ -278,20 +281,29 @@ class ExpectedUpdateEventChain(object):
         @return None if event complies, an error string otherwise.
 
         """
-        base_timestamp = curr_timestamp = time.time()
-        expired_timestamp = base_timestamp + timeout
-        while curr_timestamp <= expired_timestamp:
-            new_event = get_next_event()
-            if new_event:
-                logging.info('Event received after %s seconds',
-                             round(curr_timestamp - base_timestamp, 1))
-                results = [event.verify(new_event) for event in expected_events]
-                return None if None in results else ' AND '.join(results)
+        new_event = get_next_event()
+        if new_event:
+            # If this is the first event, set it as the current time
+            if self._current_timestamp is None:
+                self._current_timestamp = datetime.strptime(new_event[
+                                                                'timestamp'],
+                                                            '%Y-%m-%d %H:%M:%S')
 
-            # No new events, sleep for one second only (so we don't miss
-            # events at the end of the allotted timeout).
-            time.sleep(1)
-            curr_timestamp = time.time()
+            # Get the time stamp for the current event and convert to datetime
+            timestamp = new_event['timestamp']
+            event_timestamp = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+
+            # Add the timeout onto the timestamp to get its expiry
+            event_timeout = self._current_timestamp + timedelta(seconds=timeout)
+
+            # If the event happened before the timeout
+            if event_timestamp < event_timeout:
+                difference = event_timestamp - self._current_timestamp
+                logging.info('Event took %s seconds to fire during the '
+                             'update', difference.seconds)
+                results = [event.verify(new_event) for event in expected_events]
+                self._current_timestamp = event_timestamp
+                return None if None in results else ' AND '.join(results)
 
         logging.error('Timeout expired')
         if on_timeout is None:
@@ -336,7 +348,7 @@ class UpdateEventLogVerifier(object):
                   self._event_log = json.loads(out_log.read())
             except Exception as e:
                 raise error.TestFail('Error while reading the hostlogs '
-                                     'from devserver: %s', e)
+                                     'from devserver: %s' % e)
 
         # Return next new event, if one is found.
         if len(self._event_log) > self._num_consumed_events:
@@ -440,9 +452,10 @@ class TestPlatform(object):
         raise NotImplementedError
 
 
-    def stop_update_perf(self):
+    def stop_update_perf(self, resultdir):
         """Stops performance monitoring and returns data (if available).
 
+        @param resultdir: Directory containing test result files.
         @return Dictionary containing performance attributes.
         """
         raise NotImplementedError
@@ -679,19 +692,8 @@ class ChromiumOSTestPlatform(TestPlatform):
         if target_archive_uri:
             target_stateful_uri = self._get_stateful_uri(target_archive_uri)
         else:
-            # Attempt to get the job_repo_url to find the stateful payload for
-            # the target image.
-            info = self._host.host_info_store.get()
-            job_repo_url = info.attributes.get(
-                    self._host.job_repo_url_attribute, '')
-            if not job_repo_url:
-                target_stateful_uri = self._payload_to_stateful_uri(
+            target_stateful_uri = self._payload_to_stateful_uri(
                     target_payload_uri)
-            else:
-                _, devserver_label = tools.get_devserver_build_from_package_url(
-                        job_repo_url)
-                staged_target_stateful_url = self._stage_payload(
-                        devserver_label, self._STATEFUL_UPDATE_FILENAME)
 
         if not staged_target_stateful_url and target_stateful_uri:
             staged_target_stateful_url = self._stage_payload_by_uri(
@@ -702,8 +704,7 @@ class ChromiumOSTestPlatform(TestPlatform):
                      test_conf['update_type'], target_payload_uri,
                      staged_target_url)
         logging.info('Target stateful update from %s staged at %s',
-                     target_stateful_uri or 'standard location',
-                     staged_target_stateful_url)
+                     target_stateful_uri, staged_target_stateful_url)
 
         return self.StagedURLs(staged_source_url, staged_source_stateful_url,
                                staged_target_url, staged_target_stateful_url)
@@ -713,45 +714,6 @@ class ChromiumOSTestPlatform(TestPlatform):
         """Runs login_LoginSuccess test on the DUT."""
         client_at = autotest.Autotest(self._host)
         client_at.run_test('login_LoginSuccess', tag=tag)
-
-
-    def _start_perf_mon(self, bindir):
-        """Starts monitoring performance and resource usage on a DUT.
-
-        Call _stop_perf_mon() with the returned PID to stop monitoring
-        and collect the results.
-
-        @param bindir: Directoy containing monitoring script.
-
-        @return The PID of the newly created DUT monitoring process.
-        """
-        # We can't assume much about the source image so we copy the
-        # performance monitoring script to the DUT directly.
-        path = os.path.join(bindir, 'update_engine_performance_monitor.py')
-        self._host.send_file(path, '/tmp')
-        cmd = 'python /tmp/update_engine_performance_monitor.py --start-bg'
-        return int(self._host.run(cmd).stdout)
-
-
-    def _stop_perf_mon(self, perf_mon_pid):
-        """Stops monitoring performance and resource usage on a DUT.
-
-        @param perf_mon_pid: the PID returned from _start_perf_mon().
-
-        @return Dictionary containing performance attributes, or None if
-                unavailable.
-        """
-        # Gracefully handle problems with performance monitoring by
-        # just returning None.
-        try:
-            cmd = ('python /tmp/update_engine_performance_monitor.py '
-                   '--stop-bg=%d') % perf_mon_pid
-            perf_json_txt = self._host.run(cmd).stdout
-            return json.loads(perf_json_txt)
-        except Exception as e:
-            logging.warning('Failed to parse output from '
-                            'update_engine_performance_monitor.py: %s', e)
-        return None
 
 
     # Interface overrides.
@@ -784,17 +746,27 @@ class ChromiumOSTestPlatform(TestPlatform):
 
 
     def start_update_perf(self, bindir):
-        if self._perf_mon_pid is None:
-            self._perf_mon_pid = self._start_perf_mon(bindir)
+        """Copy performance monitoring script to DUT.
+
+        The updater will kick off the script during the update.
+        """
+        path = os.path.join(bindir, UPDATE_ENGINE_PERF_SCRIPT)
+        self._host.send_file(path, UPDATE_ENGINE_PERF_PATH)
 
 
-    def stop_update_perf(self):
-        perf_data = None
-        if self._perf_mon_pid is not None:
-            perf_data = self._stop_perf_mon(self._perf_mon_pid)
-            self._perf_mon_pid = None
-
-        return perf_data
+    def stop_update_perf(self, resultdir):
+        """ Copy the performance metrics back from the DUT."""
+        try:
+            path = os.path.join('/var/log', UPDATE_ENGINE_PERF_RESULTS_FILE)
+            self._host.get_file(path, resultdir)
+            self._host.run('rm %s' % path)
+            script = os.path.join(UPDATE_ENGINE_PERF_PATH,
+                                  UPDATE_ENGINE_PERF_SCRIPT)
+            self._host.run('rm %s' % script)
+            return os.path.join(resultdir, UPDATE_ENGINE_PERF_RESULTS_FILE)
+        except:
+            logging.debug('Failed to copy performance metrics from DUT.')
+            return None
 
 
     def trigger_update(self, target_payload_uri):
@@ -852,20 +824,10 @@ class autoupdate_EndToEndTest(test.test):
                      e.g. 'localhost:8080/static/my_file.gz'. These are usually
                      given after staging an artifact using a autotest_devserver
                      though they can be re-created given enough assumptions.
-      *update_url's: Urls refering to the update RPC on a given omaha devserver.
-                     Since we always use an instantiated omaha devserver to run
-                     updates, these will always reference an existing instance
-                     of an omaha devserver that we just created for the purposes
-                     of updating.
-
     """
     version = 1
 
     # Timeout periods, given in seconds.
-    _WAIT_AFTER_SHUTDOWN_SECONDS = 10
-    _WAIT_AFTER_UPDATE_SECONDS = 20
-    _WAIT_FOR_USB_INSTALL_SECONDS = 4 * 60
-    _WAIT_FOR_MP_RECOVERY_SECONDS = 8 * 60
     _WAIT_FOR_INITIAL_UPDATE_CHECK_SECONDS = 12 * 60
     # TODO(sosa): Investigate why this needs to be so long (this used to be
     # 120 and regressed).
@@ -896,6 +858,24 @@ class autoupdate_EndToEndTest(test.test):
         self._omaha_devserver = None
 
 
+    def _get_hostlog_file(self, filename, pid):
+        """Return the hostlog file location.
+
+        @param filename: The partial filename to look for.
+        @param pid: The pid of the update.
+
+        """
+        hosts = [self._host.hostname, self._host.ip]
+        for host in hosts:
+            hostlog = '%s_%s_%s' % (filename, host, pid)
+            file_url = os.path.join(self.job.resultdir,
+                                    dev_server.AUTO_UPDATE_LOG_DIR,
+                                    hostlog)
+            if os.path.exists(file_url):
+                return file_url
+        raise error.TestFail('Could not find %s for pid %s' % (filename, pid))
+
+
     def _dump_update_engine_log(self, test_platform):
         """Dumps relevant AU error log."""
         try:
@@ -907,14 +887,22 @@ class autoupdate_EndToEndTest(test.test):
             pass
 
 
-    def _report_perf_data(self, perf_data):
+    def _report_perf_data(self, perf_file):
         """Reports performance and resource data.
 
         Currently, performance attributes are expected to include 'rss_peak'
         (peak memory usage in bytes).
 
-        @param perf_data: A dictionary containing performance attributes.
+        @param perf_file: A file with performance metrics.
         """
+        logging.debug('Reading perf results from %s.' % perf_file)
+        try:
+            with open(perf_file, 'r') as perf_file_handle:
+                perf_data = json.loads(perf_file_handle.read())
+        except Exception as e:
+            logging.warning('Error while reading the perf data file: %s' % e)
+            return
+
         rss_peak = perf_data.get('rss_peak')
         if rss_peak:
             rss_peak_kib = rss_peak / 1024
@@ -924,8 +912,8 @@ class autoupdate_EndToEndTest(test.test):
                                    units='KiB',
                                    higher_is_better=False)
         else:
-            logging.warning('No rss_peak key in JSON returned by '
-                            'update_engine_performance_monitor.py')
+            logging.warning('No rss_peak key in JSON returned by %s',
+                            UPDATE_ENGINE_PERF_SCRIPT)
 
 
     def _error_initial_check(self, expected, actual, mismatched_attrs):
@@ -1052,20 +1040,13 @@ class autoupdate_EndToEndTest(test.test):
         source_release = test_conf['source_release']
         target_release = test_conf['target_release']
 
-        # TODO(dhaddock): Reuse update_engine_performance_monitor
-        # script with chromite autoupdater. Can't use it here anymore because
-        # the DUT is restarted a bunch of times during the update and the
-        # process is killed before we can get the results back.
+        test_platform.start_update_perf(self.bindir)
         try:
             # Update the DUT to the target image.
             pid = test_platform.trigger_update(test_conf['target_payload_uri'])
 
             # Verify the host log that was returned from the update.
-            rootfs_hostlog = '%s_%s_%s' % ('devserver_hostlog_rootfs',
-                                           self._host.hostname, pid)
-            file_url = os.path.join(self.job.resultdir,
-                                    dev_server.AUTO_UPDATE_LOG_DIR,
-                                    rootfs_hostlog)
+            file_url = self._get_hostlog_file('devserver_hostlog_rootfs', pid)
 
             logging.info('Checking update steps with devserver hostlog file: '
                          '%s' % file_url)
@@ -1121,6 +1102,10 @@ class autoupdate_EndToEndTest(test.test):
             logging.fatal('ERROR: Failure occurred during the target update.')
             raise
 
+        perf_file = test_platform.stop_update_perf(self.job.resultdir)
+        if perf_file is not None:
+            self._report_perf_data(perf_file)
+
         if test_platform.oobe_triggers_update():
             # If DUT automatically checks for update during OOBE,
             # checking the post-update CrOS version and slot is sufficient.
@@ -1132,11 +1117,7 @@ class autoupdate_EndToEndTest(test.test):
             # Observe post-reboot update check, which should indicate that the
             # image version has been updated.
             # Verify the host log that was returned from the update.
-            reboot_hostlog = '%s_%s_%s' % ('devserver_hostlog_reboot',
-                                           self._host.hostname, pid)
-            file_url = os.path.join(self.job.resultdir,
-                                    dev_server.AUTO_UPDATE_LOG_DIR,
-                                    reboot_hostlog)
+            file_url = self._get_hostlog_file('devserver_hostlog_reboot', pid)
 
             logging.info('Checking post-reboot devserver hostlogs: %s' %
                          file_url)

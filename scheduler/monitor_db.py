@@ -351,6 +351,8 @@ class Dispatcher(object):
                 self._schedule_special_tasks()
             with breakdown_timer.Step('schedule_new_jobs'):
                 self._schedule_new_jobs()
+            with breakdown_timer.Step('gather_tick_metrics'):
+                self._gather_tick_metrics()
             with breakdown_timer.Step('sync_refresh'):
                 self._log_tick_msg('Starting _drone_manager.sync_refresh')
                 _drone_manager.sync_refresh()
@@ -406,6 +408,13 @@ class Dispatcher(object):
         logging.info('Logging garbage collector stats on tick %d.',
                      self._tick_count)
         gc_stats._log_garbage_collector_stats()
+
+
+    def _gather_tick_metrics(self):
+        """Gather metrics during tick, after all tasks have been scheduled."""
+        metrics.Gauge(
+            'chromeos/autotest/scheduler/agent_count'
+        ).set(len(self._agents))
 
 
     def _register_agent_for_ids(self, agent_dict, object_ids, agent):
@@ -519,17 +528,27 @@ class Dispatcher(object):
         used_queue_entries = set()
         hqe_count_by_status = {}
         for entry in queue_entries:
-            hqe_count_by_status[entry.status] = (
-                hqe_count_by_status.get(entry.status, 0) + 1)
-            if self.get_agents_for_entry(entry):
-                # already being handled
-                continue
-            if entry in used_queue_entries:
-                # already picked up by a synchronous job
-                continue
-            agent_task = self._get_agent_task_for_queue_entry(entry)
-            agent_tasks.append(agent_task)
-            used_queue_entries.update(agent_task.queue_entries)
+            try:
+                hqe_count_by_status[entry.status] = (
+                    hqe_count_by_status.get(entry.status, 0) + 1)
+                if self.get_agents_for_entry(entry):
+                    # already being handled
+                    continue
+                if entry in used_queue_entries:
+                    # already picked up by a synchronous job
+                    continue
+                agent_task = self._get_agent_task_for_queue_entry(entry)
+                agent_tasks.append(agent_task)
+                used_queue_entries.update(agent_task.queue_entries)
+            except scheduler_lib.MalformedRecordError as e:
+                logging.exception('Skipping agent task for a malformed hqe.')
+                # TODO(akeshet): figure out a way to safely permanently discard
+                # this errant HQE. It appears that calling entry.abort() is not
+                # sufficient, as that already makes some assumptions about
+                # record sanity that may be violated. See crbug.com/739530 for
+                # context.
+                m = 'chromeos/autotest/scheduler/skipped_malformed_hqe'
+                metrics.Counter(m).increment()
 
         for status, count in hqe_count_by_status.iteritems():
             metrics.Gauge(

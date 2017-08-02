@@ -11,7 +11,7 @@ frecon,root,root,No,No,No,No
 session_manager,root,root,No,No,No,No
 rsyslogd,syslog,syslog,No,Yes,No,No
 dbus-daemon,messagebus,messagebus,No,Yes,No,No
-wpa_supplicant,wpa,wpa,No,Yes,No,No
+wpa_supplicant,wpa,wpa,No,Yes,Yes,No
 shill,root,root,No,No,No,No
 chapsd,chaps,chronos-access,No,Yes,Yes,No
 cryptohomed,root,root,No,No,No,No
@@ -35,7 +35,7 @@ thermal.sh,root,root,No,No,No,No
 daisydog,watchdog,watchdog,Yes,Yes,Yes,No
 permission_brok,devbroker,root,No,Yes,Yes,No
 netfilter-queue,nfqueue,nfqueue,No,Yes,No,Yes
-warn_collector,root,root,No,No,No,No
+anomaly_collect,root,root,No,No,No,No
 attestationd,attestation,attestation,No,No,No,No
 periodic_schedu,root,root,No,No,No,No
 esif_ufd,root,root,No,No,No,No

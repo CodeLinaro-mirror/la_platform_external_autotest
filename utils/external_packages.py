@@ -783,20 +783,6 @@ class GwtPackage(ExternalPackage):
         return True
 
 
-class StatsdPackage(ExternalPackage):
-    """python-statsd package"""
-    version = '1.7.2'
-    url_filename = 'python-statsd-%s.tar.gz' % version
-    local_filename = url_filename
-    urls = ('http://pypi.python.org/packages/source/p/python-statsd/%s' % (
-        url_filename),)
-    hex_sum = '2cc186ebdb723e2420b432ab71639786d877694b'
-
-    _build_and_install = ExternalPackage._build_and_install_from_package
-    _build_and_install_current_dir = (
-                        ExternalPackage._build_and_install_current_dir_setup_py)
-
-
 class GdataPackage(ExternalPackage):
     """
     Pulls the GData library, giving us an API to query tracker.
@@ -815,35 +801,6 @@ class GdataPackage(ExternalPackage):
     def _get_installed_version_from_module(self, module):
         # gdata doesn't contain a proper version
         return self.version
-
-
-class DnsPythonPackage(ExternalPackage):
-    """
-    dns module
-
-    Used in unittests.
-    """
-    module_name = 'dns'
-    version = '1.3.5'
-    url_filename = 'dnspython-%s.tar.gz' % version
-    local_filename = url_filename
-    urls = ('http://www.dnspython.org/kits/%s/%s' % (
-        version, url_filename),)
-
-    hex_sum = '06314dad339549613435470c6add992910e26e5d'
-
-    _build_and_install = ExternalPackage._build_and_install_from_package
-    _build_and_install_current_dir = (
-                        ExternalPackage._build_and_install_current_dir_noegg)
-
-    def _get_installed_version_from_module(self, module):
-        """Ask our module its version string and return it or '' if unknown."""
-        try:
-            __import__(self.module_name + '.version')
-            return module.version.version
-        except AttributeError:
-            logging.error('could not get version from %s', module)
-            return ''
 
 
 class PyudevPackage(ExternalPackage):
