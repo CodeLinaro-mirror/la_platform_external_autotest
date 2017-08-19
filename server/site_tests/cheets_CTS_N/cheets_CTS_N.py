@@ -28,8 +28,8 @@ _CTS_TIMEOUT_SECONDS = 3600
 # Public download locations for android cts bundles.
 _DL_CTS = 'https://dl.google.com/dl/android/cts/'
 _CTS_URI = {
-    'arm': _DL_CTS + 'android-cts-7.1_r6-linux_x86-arm.zip',
-    'x86': _DL_CTS + 'android-cts-7.1_r6-linux_x86-x86.zip',
+    'arm': _DL_CTS + 'android-cts-7.1_r7-linux_x86-arm.zip',
+    'x86': _DL_CTS + 'android-cts-7.1_r7-linux_x86-x86.zip',
     'media': _DL_CTS + 'android-cts-media-1.3.zip',
 }
 
@@ -272,6 +272,7 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
                  max_retry=None,
                  cts_tradefed_args=None,
                  pre_condition_commands=[],
+                 warn_on_test_retry=True,
                  timeout=_CTS_TIMEOUT_SECONDS):
         """Runs the specified CTS once, but with several retries.
 
@@ -290,6 +291,10 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
         @param needs_push_media: need to push test media streams.
         @param max_retry: number of retry steps before reporting results.
         @param timeout: time after which tradefed can be interrupted.
+        @param pre_condition_command: a list of scripts to be run on the
+        dut before the test is run, the scripts must already be installed.
+        @param warn_on_test_retry: False if you want to skip warning message
+        about tradefed retries.
         @param cts_tradefed_args: a list of args to pass to tradefed.
         """
 
@@ -453,7 +458,7 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
         if retry_inconsistency_error:
             raise error.TestFail('Error: %s %s' % (retry_inconsistency_error,
                                                    self.summary))
-        if steps > 0:
+        if steps > 0 and warn_on_test_retry:
             # TODO(ihf): Make this error.TestPass('...') once available.
             raise error.TestWarn(
                 'Passed: after %d retries passing %d tests, waived=%d. %s' %

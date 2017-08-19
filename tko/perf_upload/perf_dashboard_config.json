@@ -33,6 +33,10 @@
     "master_name": "ChromeOS_Enterprise"
   },
   {
+    "autotest_name": "enterprise_CFM_Perf.meet_app",
+    "master_name": "ChromeOS_Enterprise"
+  },
+  {
     "autotest_name": "enterprise_CFM_USBPeripheralHotplugDetect.c920",
     "master_name": "ChromeOS_Enterprise"
   },
@@ -157,14 +161,16 @@
     "master_name": "ChromeOSPerf"
   },
   {
-    "autotest_name": "enterprise_LongevityTrackerServer.chromesign",
-    "master_name": "ChromeOS_Enterprise",
-    "dashboard_test_name": "enterprise_LongevityTrackerServer"
+    "autotest_name": "enterprise_LongevityTrackerServer.chromesign_20min",
+    "master_name": "ChromeOS_Enterprise"
+  },
+  {
+    "autotest_name": "enterprise_LongevityTrackerServer.chromesign_3hr",
+    "master_name": "ChromeOS_Enterprise"
   },
   {
     "autotest_name": "enterprise_LongevityTrackerServer.riseplayer",
-    "master_name": "ChromeOS_Enterprise",
-    "dashboard_test_name": "enterprise_LongevityTrackerServer"
+    "master_name": "ChromeOS_Enterprise"
   },
   {
     "autotest_name": "network_WiFi_AttenuatedPerf.ht40_ch001",
@@ -659,7 +665,11 @@
     "master_name": "ChromeOSVideo"
   },
   {
-    "autotest_name": "video_WebRtcPausePlayPeerConnections",
+    "autotest_name": "webrtc_PausePlayPeerConnections.video",
+    "master_name": "ChromeOSWebRtcVideo"
+  },
+  {
+    "autotest_name": "webrtc_PausePlayPeerConnections.audio",
     "master_name": "ChromeOSWebRtcVideo"
   },
   {

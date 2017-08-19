@@ -47,7 +47,7 @@ from autotest_lib.client.common_lib import env
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import logging_manager
-from autotest_lib.client.common_lib.cros.graphite import stats_es_mock
+from autotest_lib.client.common_lib import metrics_mock_class
 from autotest_lib.client.cros import constants
 
 from autotest_lib.client.common_lib.lsbrelease_utils import *
@@ -1215,6 +1215,17 @@ class CmdResult(object):
         self.stdout = stdout
         self.stderr = stderr
         self.duration = duration
+
+
+    def __eq__(self, other):
+        if type(self) == type(other):
+            return (self.command == other.command
+                    and self.exit_status == other.exit_status
+                    and self.stdout == other.stdout
+                    and self.stderr == other.stderr
+                    and self.duration == other.duration)
+        else:
+            return NotImplemented
 
 
     def __repr__(self):
@@ -2749,6 +2760,6 @@ def poll_for_condition(condition,
         time.sleep(sleep_interval)
 
 
-class metrics_mock(stats_es_mock.mock_class_base):
+class metrics_mock(metrics_mock_class.mock_class_base):
     """mock class for metrics in case chromite is not installed."""
     pass

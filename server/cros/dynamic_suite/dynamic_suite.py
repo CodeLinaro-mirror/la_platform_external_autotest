@@ -5,6 +5,7 @@
 import datetime
 import logging
 import time
+import warnings
 
 import common
 
@@ -196,7 +197,7 @@ Step by step:
 
 # Relevant CrosDynamicSuiteExceptions are defined in client/common_lib/error.py.
 
-class SuiteSpec(object):
+class _SuiteSpec(object):
     """This class contains the info that defines a suite run."""
 
     _REQUIRED_KEYWORDS = {
@@ -224,7 +225,6 @@ class SuiteSpec(object):
             check_hosts=True,
             add_experimental=True,
             file_bugs=False,
-            file_experimental_bugs=False,
             max_runtime_mins=24*60,
             timeout_mins=24*60,
             suite_dependencies=None,
@@ -261,8 +261,6 @@ class SuiteSpec(object):
         @param check_hosts: require appropriate hosts to be available now.
         @param add_experimental: schedule experimental tests as well, or not.
         @param file_bugs: File bugs when tests in this suite fail.
-        @param file_experimental_bugs: File bugs when experimental tests in
-                                       this suite fail.
         @param max_runtime_mins: Max runtime in mins for each of the sub-jobs
                                  this suite will run.
         @param timeout_mins: Max lifetime in minutes for each of the sub-jobs
@@ -320,10 +318,8 @@ class SuiteSpec(object):
         self.pool = ('pool:%s' % pool) if pool else pool
         self.num = num
         self.check_hosts = check_hosts
-        self.skip_reimage = skip_reimage
         self.add_experimental = add_experimental
         self.file_bugs = file_bugs
-        self.file_experimental_bugs = file_experimental_bugs
         self.dependencies = {'': []}
         self.max_runtime_mins = max_runtime_mins
         self.timeout_mins = timeout_mins
@@ -344,6 +340,10 @@ class SuiteSpec(object):
         self._init_test_source_build(test_source_build)
         self._translate_builds()
         self._add_builds_to_suite_deps()
+
+        for key, value in dargs.iteritems():
+            warnings.warn('Ignored key %r was passed to suite with value %r'
+                          % (key, value))
 
     def _check_init_params(self, **kwargs):
         for key, expected_type in self._REQUIRED_KEYWORDS.iteritems():
@@ -403,7 +403,7 @@ class SuiteSpec(object):
         """Add builds to suite_dependencies.
 
         To support provision both CrOS and firmware, option builds are added to
-        SuiteSpec, e.g.,
+        _SuiteSpec, e.g.,
 
         builds = {'cros-version:': 'x86-alex-release/R18-1655.0.0',
                   'fwrw-version:': 'x86-alex-firmware/R36-5771.50.0'}
@@ -417,15 +417,6 @@ class SuiteSpec(object):
         )
 
 
-def skip_reimage(g):
-    """
-    Pulls the SKIP_IMAGE value out of a global variables dictionary.
-    @param g: The global variables dictionary.
-    @return:  Value associated with SKIP-IMAGE
-    """
-    return False
-
-
 def run_provision_suite(**dargs):
     """
     Run a provision suite.
@@ -435,14 +426,13 @@ def run_provision_suite(**dargs):
 
     @param job: an instance of client.common_lib.base_job representing the
                 currently running suite job.
-    @param suite_args: keyword arguments passed to suite.
 
     @raises AsynchronousBuildFailure: if there was an issue finishing staging
                                       from the devserver.
     @raises MalformedDependenciesException: if the dependency_info file for
                                             the required build fails to parse.
     """
-    spec = SuiteSpec(**dargs)
+    spec = _SuiteSpec(**dargs)
 
     afe = frontend_wrappers.RetryingAFE(timeout_min=30, delay_sec=10,
                                         user=spec.job.user, debug=False)
@@ -469,7 +459,6 @@ def run_provision_suite(**dargs):
             max_runtime_mins=spec.max_runtime_mins,
             timeout_mins=spec.timeout_mins,
             file_bugs=spec.file_bugs,
-            file_experimental_bugs=spec.file_experimental_bugs,
             suite_job_id=my_job_id,
             extra_deps=spec.suite_dependencies,
             priority=spec.priority,
@@ -495,13 +484,13 @@ def reimage_and_run(**dargs):
     provided builds, and then run the indicated test suite on them.
     Guaranteed to be compatible with any build from stable to dev.
 
-    @param dargs: Dictionary containing the arguments passed to SuiteSpec().
+    @param dargs: Dictionary containing the arguments passed to _SuiteSpec().
     @raises AsynchronousBuildFailure: if there was an issue finishing staging
                                       from the devserver.
     @raises MalformedDependenciesException: if the dependency_info file for
                                             the required build fails to parse.
     """
-    suite_spec = SuiteSpec(**dargs)
+    suite_spec = _SuiteSpec(**dargs)
 
     afe = frontend_wrappers.RetryingAFE(timeout_min=30, delay_sec=10,
                                         user=suite_spec.job.user, debug=False)
@@ -524,7 +513,7 @@ def _perform_reimage_and_run(spec, afe, tko, suite_job_id=None):
     """
     Do the work of reimaging hosts and running tests.
 
-    @param spec: a populated SuiteSpec object.
+    @param spec: a populated _SuiteSpec object.
     @param afe: an instance of AFE as defined in server/frontend.py.
     @param tko: an instance of TKO as defined in server/frontend.py.
     @param suite_job_id: Job id that will act as parent id to all sub jobs.
@@ -543,7 +532,6 @@ def _perform_reimage_and_run(spec, afe, tko, suite_job_id=None):
             max_runtime_mins=spec.max_runtime_mins,
             timeout_mins=spec.timeout_mins,
             file_bugs=spec.file_bugs,
-            file_experimental_bugs=spec.file_experimental_bugs,
             suite_job_id=suite_job_id,
             extra_deps=spec.suite_dependencies,
             priority=spec.priority,
@@ -563,7 +551,7 @@ def _run_suite_with_spec(suite, spec):
     Do the work of reimaging hosts and running tests.
 
     @param suite: _BaseSuite instance to run.
-    @param spec: a populated SuiteSpec object.
+    @param spec: a populated _SuiteSpec object.
     """
     _run_suite(
         suite=suite,
@@ -620,7 +608,8 @@ def _run_suite(
 
     if suite.wait_for_results:
         logging.debug('Waiting on suite.')
-        suite.wait(job.record_entry, bug_template)
+        reporter = suite.get_result_reporter(bug_template)
+        suite.wait(job.record_entry, reporter=reporter)
         logging.debug('Finished waiting on suite. '
                       'Returning from _perform_reimage_and_run.')
     else:

@@ -95,6 +95,7 @@ import common
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import utils
+from autotest_lib.site_utils.lxc import constants
 from autotest_lib.site_utils.lxc import utils as lxc_utils
 
 
@@ -108,8 +109,6 @@ SSP_DEPLOY_SHADOW_CONFIG_FILE = os.path.join(common.autotest_dir,
 # A temp folder used to store files to be appended to the files inside
 # container.
 APPEND_FOLDER = 'usr/local/ssp_append'
-# Path to folder that contains autotest code inside container.
-CONTAINER_AUTOTEST_DIR = '/usr/local/autotest'
 
 DeployConfig = collections.namedtuple(
         'DeployConfig', ['source', 'target', 'append', 'permission'])
@@ -204,20 +203,26 @@ class DeployConfigManager(object):
         return c
 
 
-    def __init__(self, container):
+    def __init__(self, container, config_file=None):
         """Initialize the deploy config manager.
 
         @param container: The container needs to deploy config.
-
+        @param config_file: An optional config file.  For testing.
         """
         self.container = container
         # If shadow config is used, the deployment procedure will skip some
         # special handling of config file, e.g.,
         # 1. Set enable_master_ssh to False in autotest shadow config.
         # 2. Set ssh logleve to ERROR for all hosts.
-        self.is_shadow_config = os.path.exists(SSP_DEPLOY_SHADOW_CONFIG_FILE)
-        config_file = (SSP_DEPLOY_SHADOW_CONFIG_FILE if self.is_shadow_config
-                       else SSP_DEPLOY_CONFIG_FILE)
+        if config_file is None:
+            self.is_shadow_config = os.path.exists(
+                    SSP_DEPLOY_SHADOW_CONFIG_FILE)
+            config_file = (
+                    SSP_DEPLOY_SHADOW_CONFIG_FILE if self.is_shadow_config
+                    else SSP_DEPLOY_CONFIG_FILE)
+        else:
+            self.is_shadow_config = False
+
         with open(config_file) as f:
             deploy_configs = json.load(f)
         self.deploy_configs = [self.validate(c) for c in deploy_configs
@@ -303,7 +308,7 @@ class DeployConfigManager(object):
            made in the host.
 
         """
-        shadow_config = os.path.join(CONTAINER_AUTOTEST_DIR,
+        shadow_config = os.path.join(constants.CONTAINER_AUTOTEST_DIR,
                                      'shadow_config.ini')
 
         # Inject "AUTOSERV/enable_master_ssh: False" in shadow config as
@@ -392,6 +397,9 @@ class DeployConfigManager(object):
             if (mount_config.force_create and
                 not os.path.exists(mount_config.source)):
                 utils.run('mkdir -p %s' % mount_config.source)
+            self.container.mount_dir(mount_config.source,
+                                     mount_config.target,
+                                     mount_config.readonly)
 
 
     def deploy_post_start(self):

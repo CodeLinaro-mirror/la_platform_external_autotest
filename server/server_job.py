@@ -16,6 +16,7 @@ import fcntl
 import getpass
 import itertools
 import logging
+import multiprocessing
 import os
 import pickle
 import platform
@@ -37,6 +38,8 @@ from autotest_lib.client.common_lib import logging_manager
 from autotest_lib.client.common_lib import packages
 from autotest_lib.client.common_lib import utils
 from autotest_lib.server import profilers
+from autotest_lib.server import site_gtest_runner
+from autotest_lib.server import site_server_job_utils
 from autotest_lib.server import subcommand
 from autotest_lib.server import test
 from autotest_lib.server import utils as server_utils
@@ -45,6 +48,7 @@ from autotest_lib.server.hosts import abstract_ssh
 from autotest_lib.server.hosts import afe_store
 from autotest_lib.server.hosts import factory as host_factory
 from autotest_lib.server.hosts import host_info
+from autotest_lib.server.hosts import ssh_multiplex
 from autotest_lib.tko import db as tko_db
 from autotest_lib.tko import models as tko_models
 from autotest_lib.tko import status_lib
@@ -78,19 +82,24 @@ RESET_CONTROL_FILE = _control_segment_path('reset')
 GET_NETWORK_STATS_CONTROL_FILE = _control_segment_path('get_network_stats')
 
 
-def get_machine_dicts(machine_names, in_lab, host_attributes=None):
+def get_machine_dicts(machine_names, in_lab, host_attributes=None,
+                      connection_pool=None):
     """Converts a list of machine names to list of dicts.
 
     @param machine_names: A list of machine names.
     @param in_lab: A boolean indicating whether we're running in lab.
     @param host_attributes: Optional list of host attributes to add for each
             host.
+    @param connection_pool: ssh_multiplex.ConnectionPool instance to share
+            master connections across control scripts.
     @returns: A list of dicts. Each dict has the following keys:
             'hostname': Name of the machine originally in machine_names (str).
             'afe_host': A frontend.Host object for the machine, or a stub if
                     in_lab is false.
             'host_info_store': A host_info.CachingHostInfoStore object to obtain
                     host information. A stub if in_lab is False.
+            'connection_pool': ssh_multiplex.ConnectionPool instance to share
+                    master ssh connection across control scripts.
     """
     machine_dict_list = []
     for machine in machine_names:
@@ -116,6 +125,7 @@ def get_machine_dicts(machine_names, in_lab, host_attributes=None):
                 'hostname' : machine,
                 'afe_host' : afe_host,
                 'host_info_store': host_info_store,
+                'connection_pool': connection_pool,
         })
 
     return machine_dict_list
@@ -197,7 +207,7 @@ class server_job_record_hook(object):
             job._parse_status(rendered_entry)
 
 
-class base_server_job(base_job.base_job):
+class server_job(base_job.base_job):
     """The server-side concrete implementation of base_job.
 
     Optional properties provided by this implementation:
@@ -259,8 +269,8 @@ class base_server_job(base_job.base_job):
         @param in_lab: Boolean that indicates if this is running in the lab
                        environment.
         """
-        super(base_server_job, self).__init__(resultdir=resultdir,
-                                              test_retry=test_retry)
+        super(server_job, self).__init__(resultdir=resultdir,
+                                         test_retry=test_retry)
         self.test_retry = test_retry
         self.control = control
         self._uncollected_log_file = os.path.join(self.resultdir,
@@ -336,10 +346,13 @@ class base_server_job(base_job.base_job):
         # unexpected reboot.
         self.failed_with_device_error = False
 
+        self._connection_pool = ssh_multiplex.ConnectionPool()
+
         self.parent_job_id = parent_job_id
         self.in_lab = in_lab
         self.machine_dict_list = get_machine_dicts(
-                self.machines, self.in_lab, host_attributes)
+                self.machines, self.in_lab, host_attributes,
+                self._connection_pool)
 
         # TODO(jrbarnette) The harness attribute is only relevant to
         # client jobs, but it's required to be present, or we will fail
@@ -580,9 +593,9 @@ class base_server_job(base_job.base_job):
         """Wrap function as appropriate for calling by parallel_simple."""
         # machines could be a list of dictionaries, e.g.,
         # [{'host_attributes': {}, 'hostname': '100.96.51.226'}]
-        # The dictionary is generated in base_server_job.__init__, refer to
+        # The dictionary is generated in server_job.__init__, refer to
         # variable machine_dict_list, then passed in with namespace, see method
-        # base_server_job._make_namespace.
+        # server_job._make_namespace.
         # To compare the machinese to self.machines, which is a list of machine
         # hostname, we need to convert machines back to a list of hostnames.
         # Note that the order of hostnames doesn't matter, as is_forking will be
@@ -660,6 +673,94 @@ class base_server_job(base_job.base_job):
             if not isinstance(result, Exception):
                 success_machines.append(machine)
         return success_machines
+
+
+    def distribute_across_machines(self, tests, machines,
+                                   continuous_parsing=False):
+        """Run each test in tests once using machines.
+
+        Instead of running each test on each machine like parallel_on_machines,
+        run each test once across all machines. Put another way, the total
+        number of tests run by parallel_on_machines is len(tests) *
+        len(machines). The number of tests run by distribute_across_machines is
+        len(tests).
+
+        Args:
+            tests: List of tests to run.
+            machines: List of machines to use.
+            continuous_parsing: Bool, if true parse job while running.
+        """
+        # The Queue is thread safe, but since a machine may have to search
+        # through the queue to find a valid test the lock provides exclusive
+        # queue access for more than just the get call.
+        test_queue = multiprocessing.JoinableQueue()
+        test_queue_lock = multiprocessing.Lock()
+
+        unique_machine_attributes = []
+        sub_commands = []
+        work_dir = self.resultdir
+
+        for machine in machines:
+            if 'group' in self.resultdir:
+                work_dir = os.path.join(self.resultdir, machine)
+
+            mw = site_server_job_utils.machine_worker(self,
+                                                      machine,
+                                                      work_dir,
+                                                      test_queue,
+                                                      test_queue_lock,
+                                                      continuous_parsing)
+
+            # Create the subcommand instance to run this machine worker.
+            sub_commands.append(subcommand.subcommand(mw.run,
+                                                      [],
+                                                      work_dir))
+
+            # To (potentially) speed up searching for valid tests create a list
+            # of unique attribute sets present in the machines for this job. If
+            # sets were hashable we could just use a dictionary for fast
+            # verification. This at least reduces the search space from the
+            # number of machines to the number of unique machines.
+            if not mw.attribute_set in unique_machine_attributes:
+                unique_machine_attributes.append(mw.attribute_set)
+
+        # Only queue tests which are valid on at least one machine.  Record
+        # skipped tests in the status.log file using record_skipped_test().
+        for test_entry in tests:
+            # Check if it's an old style test entry.
+            if len(test_entry) > 2 and not isinstance(test_entry[2], dict):
+                test_attribs = {'include': test_entry[2]}
+                if len(test_entry) > 3:
+                    test_attribs['exclude'] = test_entry[3]
+                if len(test_entry) > 4:
+                    test_attribs['attributes'] = test_entry[4]
+
+                test_entry = list(test_entry[:2])
+                test_entry.append(test_attribs)
+
+            ti = site_server_job_utils.test_item(*test_entry)
+            machine_found = False
+            for ma in unique_machine_attributes:
+                if ti.validate(ma):
+                    test_queue.put(ti)
+                    machine_found = True
+                    break
+            if not machine_found:
+                self.record_skipped_test(ti)
+
+        # Run valid tests and wait for completion.
+        subcommand.parallel(sub_commands)
+
+
+    def record_skipped_test(self, skipped_test, message=None):
+        """Insert a failure record into status.log for this test."""
+        msg = message
+        if msg is None:
+            msg = 'No valid machines found for test %s.' % skipped_test
+        logging.info(msg)
+        self.record('START', None, skipped_test.test_name)
+        self.record('INFO', None, skipped_test.test_name, msg)
+        self.record('END TEST_NA', None, skipped_test.test_name, msg)
 
 
     def _has_failed_tests(self):
@@ -762,8 +863,11 @@ class base_server_job(base_job.base_job):
 
         self.aborted = False
         namespace.update(self._make_namespace())
-        namespace.update({'args' : self.args,
-                          'job_labels' : job_labels})
+        namespace.update({
+                'args': self.args,
+                'job_labels': job_labels,
+                'gtest_runner': site_gtest_runner.gtest_runner(),
+        })
         test_start_time = int(time.time())
 
         if self.resultdir:
@@ -1405,6 +1509,16 @@ class base_server_job(base_job.base_job):
                 host.clear_known_hosts()
 
 
+    def close(self):
+        """Closes this job's operation."""
+
+        # Use shallow copy, because host.close() internally discards itself.
+        for host in list(self.hosts):
+            host.close()
+        assert not self.hosts
+        self._connection_pool.shutdown()
+
+
     def _get_job_data(self):
         """Add custom data to the job keyval info.
 
@@ -1500,12 +1614,3 @@ def _create_host_info_store(hostname):
         raise error.AutoservError('Could not obtain HostInfo for hostname %s' %
                                   hostname)
     return host_info_store
-
-
-site_server_job = utils.import_site_class(
-    __file__, "autotest_lib.server.site_server_job", "site_server_job",
-    base_server_job)
-
-
-class server_job(site_server_job):
-    pass

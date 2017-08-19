@@ -142,7 +142,8 @@ class ResultCollectorUnittest(unittest.TestCase):
         collector = run_suite.ResultCollector(
                 'fake_server', self.afe, self.tko,
                 build='fake/build', board='fake', suite_name='dummy',
-                suite_job_id=suite_job_id)
+                suite_job_id=suite_job_id,
+                return_code_function=run_suite._ReturnCodeComputer())
         collector._missing_results = {
                 test_missing['test_name']: [14, 15],
         }
@@ -197,7 +198,8 @@ class ResultCollectorUnittest(unittest.TestCase):
                                 [good_job_id, bad_job_id, missing_job_id])
         collector = run_suite.ResultCollector(
                 'fake_server', self.afe, self.tko,
-                build, board, suite_name, suite_job_id)
+                build, board, suite_name, suite_job_id,
+                return_code_function=run_suite._ReturnCodeComputer())
         child_views, retry_counts, missing_results = (
                 collector._fetch_test_views_of_child_jobs())
         # child_views should contain tests 21, 22, 23
@@ -241,7 +243,8 @@ class ResultCollectorUnittest(unittest.TestCase):
 
         collector = run_suite.ResultCollector(
                 'fake_server', self.afe, self.tko,
-                build, board, suite_name, suite_job_id, user='chromeos-test')
+                build, board, suite_name, suite_job_id, user='chromeos-test',
+                return_code_function=run_suite._ReturnCodeComputer())
         collector._suite_views = [suite_job_view]
         collector._test_views = [suite_job_view, good_test, bad_test]
         collector._max_testname_width = max(
@@ -267,14 +270,17 @@ class ResultCollectorUnittest(unittest.TestCase):
                                 '%s-%s' % (v['afe_job_id'], 'chromeos-test')))
                  for v in collector._test_views if v['status'] != 'GOOD']
         # Verify buildbot links are generated correctly.
-        for i in range(len(collector._buildbot_links)):
+        for i in range(len(collector.buildbot_links)):
             expect = expected_buildbot_links[i]
-            self.assertEqual(collector._buildbot_links[i].anchor, expect[0])
-            self.assertEqual(collector._buildbot_links[i].url, expect[1])
-            self.assertEqual(collector._buildbot_links[i].retry_count, 0)
+            self.assertEqual(collector.buildbot_links[i].anchor, expect[0])
+            self.assertEqual(collector.buildbot_links[i].url, expect[1])
+            self.assertEqual(collector.buildbot_links[i].retry_count, 0)
             # Assert that a wmatrix retry dashboard link is created.
             self.assertNotEqual(
-                    collector._buildbot_links[i].GenerateWmatrixRetryLink(),'')
+                    collector.buildbot_links[i].GenerateWmatrixRetryLink(), '')
+            self.assertNotEqual(
+                    collector.buildbot_links[i].GenerateWmatrixHistoryLink(),
+                    '')
 
 
     def _end_to_end_test_helper(
@@ -431,7 +437,8 @@ class ResultCollectorUnittest(unittest.TestCase):
         self._mock_afe_get_jobs(suite_job_id, child_jobs)
         collector = run_suite.ResultCollector(
                'fake_server', self.afe, self.tko,
-               'lumpy-release/R36-5788.0.0', 'lumpy', 'dummy', suite_job_id)
+               'lumpy-release/R36-5788.0.0', 'lumpy', 'dummy', suite_job_id,
+               return_code_function=run_suite._ReturnCodeComputer())
         collector.run()
         return collector
 
