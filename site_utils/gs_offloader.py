@@ -244,7 +244,7 @@ def _replace_fifo_with_file(path):
     """
     logging.debug('Removing fifo %s', path)
     os.remove(path)
-    logging.debug('Creating marker %s', path)
+    logging.debug('Creating fifo marker %s', path)
     with open(path, 'w') as f:
         f.write('<FIFO>')
 
@@ -270,7 +270,7 @@ def _replace_symlink_with_file(path):
     target = os.readlink(path)
     logging.debug('Removing symlink %s', path)
     os.remove(path)
-    logging.debug('Creating marker %s', path)
+    logging.debug('Creating symlink marker %s', path)
     with open(path, 'w') as f:
         f.write('<symlink to %s>' % target)
 
@@ -687,10 +687,12 @@ class GSOffloader(BaseGSOffloader):
             process = None
             with timeout_util.Timeout(OFFLOAD_TIMEOUT_SECS):
                 gs_path = '%s%s' % (self._gs_uri, dest_path)
+                cmd = _get_cmd_list(self._multiprocessing, dir_entry, gs_path)
+                logging.debug('Attempting an offload command %s', cmd)
                 process = subprocess.Popen(
-                        _get_cmd_list(self._multiprocessing, dir_entry, gs_path),
-                        stdout=stdout_file, stderr=stderr_file)
+                    cmd, stdout=stdout_file, stderr=stderr_file)
                 process.wait()
+                logging.debug('Offload command %s completed.', cmd)
 
             _emit_gs_returncode_metric(process.returncode)
             if process.returncode != 0:
@@ -735,6 +737,7 @@ class GSOffloader(BaseGSOffloader):
                                                    job_complete_time)):
             return
         try:
+            logging.debug('Pruning uploaded directory %s', dir_entry)
             shutil.rmtree(dir_entry)
         except OSError as e:
             # The wrong file permission can lead call `shutil.rmtree(dir_entry)`
@@ -813,6 +816,7 @@ def _mark_uploaded(dirpath):
 
     @param dirpath: Directory path string.
     """
+    logging.debug('Creating uploaded marker for directory %s', dirpath)
     with open(_get_uploaded_marker_file(dirpath), 'a'):
         pass
 
@@ -847,6 +851,8 @@ def wait_for_gs_write_access(gs_uri):
     dummy_file = tempfile.NamedTemporaryFile()
     test_cmd = _get_cmd_list(False, dummy_file.name, gs_uri)
     while True:
+        logging.debug('Checking for write access with dummy file %s',
+                      dummy_file.name)
         try:
             subprocess.check_call(test_cmd)
             subprocess.check_call(
@@ -855,8 +861,11 @@ def wait_for_gs_write_access(gs_uri):
                                   os.path.basename(dummy_file.name))])
             break
         except subprocess.CalledProcessError:
-            logging.debug('Unable to offload to %s, sleeping.', gs_uri)
-            time.sleep(120)
+            t = 120
+            logging.debug('Unable to offload dummy file to %s, sleeping for %s '
+                          'seconds.', gs_uri, t)
+            time.sleep(t)
+    logging.debug('Dummy file write check to gs succeeded.')
 
 
 class Offloader(object):
@@ -938,7 +947,7 @@ class Offloader(object):
                     or _is_uploaded(job.dirname)):
                 del self._open_jobs[jobkey]
                 removed_job_count += 1
-        logging.debug('End of offload cycle - cleared %d new jobs, '
+        logging.debug('End of offload cycle - cleared %d jobs, '
                       'carrying %d open jobs',
                       removed_job_count, len(self._open_jobs))
 

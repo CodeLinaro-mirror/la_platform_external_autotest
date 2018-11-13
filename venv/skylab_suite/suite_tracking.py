@@ -15,8 +15,8 @@ import logging.config
 from lucifer import autotest
 from skylab_suite import swarming_lib
 
-# Test status in _IGNORED_TEST_STATE won't be reported as test failure
-# if --use_fallback is specified. Or test may be reported as failure as
+# Test status in _IGNORED_TEST_STATE won't be reported as test failure.
+# Or test may be reported as failure as
 # it's probably caused by the DUT is not well-provisioned.
 # TODO: Stop ignoring TASK_NO_RESOURCE if we drop TEST_NA feature.
 # Blocking issues:
@@ -95,7 +95,7 @@ def _print_task_link_annotation(task_id, text):
             text, swarming_lib.get_task_link(task_id)))
 
 
-def _get_task_id_for_task_summaries(task_id):
+def get_task_id_for_task_summaries(task_id):
     """Adjust the swarming task id to end in 0 for showing task summaries.
 
     Milo results are only generated for task summaries, that is, tasks whose
@@ -111,12 +111,12 @@ def _log_buildbot_links(suite_handler, suite_name, test_results):
     reporting_utils = autotest.load('server.cros.dynamic_suite.reporting_utils')
     print(annotations.StepLink(
             'Link to the suite create task: %s' % suite_name,
-            swarming_lib.get_task_link(_get_task_id_for_task_summaries(
+            swarming_lib.get_task_link(get_task_id_for_task_summaries(
                     suite_handler.suite_id))))
     if suite_handler.task_id is not None:
         print(annotations.StepLink(
                 'Link to the suite wait task: %s' % suite_name,
-                swarming_lib.get_task_link(_get_task_id_for_task_summaries(
+                swarming_lib.get_task_link(get_task_id_for_task_summaries(
                         suite_handler.task_id))))
 
     if (suite_handler.is_provision() and
@@ -192,7 +192,8 @@ def _parse_test_results(suite_handler):
     @return a list of test results.
     """
     test_results = []
-    for child_task in suite_handler.active_child_tasks:
+    for child_task in suite_handler.get_active_child_tasks(
+            suite_handler.suite_id):
         task_id = child_task['task_id']
         logging.info('Parsing task results of %s', task_id)
         test_handler_spec = suite_handler.get_test_by_task_id(task_id)
@@ -272,8 +273,7 @@ def _get_suite_state(child_test_results, suite_handler):
 
     _final_suite_states = _get_final_suite_states()
     for result in child_test_results:
-        if ((suite_handler.use_fallback and
-             result['state'] not in _IGNORED_TEST_STATE) and
+        if ((result['state'] not in _IGNORED_TEST_STATE) and
             result['state'] in _final_suite_states):
             return _final_suite_states[result['state']]
 

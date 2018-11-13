@@ -66,6 +66,27 @@ class TestRunnerUnittests(mox.MoxTestBase):
         pass
 
 
+    def _results_directory_from_results_list(self, results_list):
+        """Generate a temp directory filled with provided test results.
+
+        @param results_list: List of results, each result is a tuple of strings
+                             (test_name, test_status_message).
+        @returns: Absolute path to the results directory.
+        """
+        global_dir = tempfile.mkdtemp()
+        for index, (test_name, test_status_message) in enumerate(results_list):
+            dir_name = '-'.join(['results',
+                                 "%02.f" % (index + 1),
+                                 test_name])
+            local_dir = os.path.join(global_dir, dir_name)
+            os.mkdir(local_dir)
+            os.mkdir('%s/debug' % local_dir)
+            with open("%s/status.log" % local_dir, mode='w+') as status:
+                status.write(test_status_message)
+                status.flush()
+        return global_dir
+
+
     def test_handle_local_result_for_good_test(self):
         getter = self.mox.CreateMock(control_file_getter.DevServerGetter)
         getter.get_control_file_list(suite_name=mox.IgnoreArg()).AndReturn([])
@@ -78,18 +99,15 @@ class TestRunnerUnittests(mox.MoxTestBase):
         suite = test_runner_utils.LocalSuite([], "tag", [], None, getter,
                                              job_retry=True)
         suite._retry_handler = suite_module.RetryHandler({job.id: test})
+
         #No calls, should not be retried
-        directory = tempfile.mkdtemp()
-        try:
-            os.mkdir('%s/debug' % directory)
-            with open("%s/status.log" % directory, mode='w+') as status:
-                status.write("GOOD: nonexistent test completed successfully")
-                status.flush()
-                new_id = suite.handle_local_result(
-                    job.id, directory,
-                    lambda log_entry, log_in_subdir=False: None)
-        finally:
-            shutil.rmtree(directory)
+        directory = self._results_directory_from_results_list([
+            ("dummy_Good", "GOOD: nonexistent test completed successfully")])
+        new_id = suite.handle_local_result(
+            job.id, directory,
+            lambda log_entry, log_in_subdir=False: None)
+        self.assertIsNone(new_id)
+        shutil.rmtree(directory)
 
 
     def test_handle_local_result_for_bad_test(self):
@@ -106,18 +124,35 @@ class TestRunnerUnittests(mox.MoxTestBase):
         suite = test_runner_utils.LocalSuite([], "tag", [], None, getter,
                                              job_retry=True)
         suite._retry_handler = suite_module.RetryHandler({job.id: test})
-        directory = tempfile.mkdtemp()
-        try:
-            os.mkdir('%s/debug' % directory)
-            with open("%s/status.log" % directory, mode='w+') as status:
-                status.write("FAIL")
-                status.flush()
-                new_id = suite.handle_local_result(
-                    job.id, directory,
-                    lambda log_entry, log_in_subdir=False: None)
-                self.assertIsNotNone(new_id)
-        finally:
-            shutil.rmtree(directory)
+
+        directory = self._results_directory_from_results_list([
+            ("dummy_Bad", "FAIL")])
+        new_id = suite.handle_local_result(
+            job.id, directory,
+            lambda log_entry, log_in_subdir=False: None)
+        self.assertIsNotNone(new_id)
+        shutil.rmtree(directory)
+
+
+    def test_generate_report_status_code_success_with_retries(self):
+        global_dir = self._results_directory_from_results_list([
+            ("dummy_Flaky", "FAIL"),
+            ("dummy_Flaky", "GOOD: nonexistent test completed successfully")])
+        status_code = test_runner_utils.generate_report(
+            global_dir, just_status_code=True)
+        self.assertEquals(status_code, 0)
+        shutil.rmtree(global_dir)
+
+
+    def test_generate_report_status_code_failure_with_retries(self):
+        global_dir = self._results_directory_from_results_list([
+            ("dummy_Good", "GOOD: nonexistent test completed successfully"),
+            ("dummy_Bad", "FAIL"),
+            ("dummy_Bad", "FAIL")])
+        status_code = test_runner_utils.generate_report(
+            global_dir, just_status_code=True)
+        self.assertNotEquals(status_code, 0)
+        shutil.rmtree(global_dir)
 
 
     def test_get_predicate_for_test_arg(self):
@@ -302,9 +337,18 @@ class TestRunnerUnittests(mox.MoxTestBase):
         for control_file in suite_control_files:
             test_runner_utils.run_job(
                     mox.ContainsAttributeValue('control_file', control_file),
-                    remote, autotest_path, results_dir, fast_mode,id_digits,
-                    ssh_verbosity, ssh_options,args, False,
-                    False, {}).AndReturn((0, '/fake/dir'))
+                    remote,
+                    autotest_path,
+                    results_dir,
+                    fast_mode,
+                    id_digits,
+                    ssh_verbosity,
+                    ssh_options,
+                    mox.StrContains(args),
+                    False,
+                    False,
+                    {},
+            ).AndReturn((0, '/fake/dir'))
         self.mox.ReplayAll()
         test_runner_utils.perform_local_run(
                 afe, autotest_path, ['suite:'+suite_name], remote, fast_mode,

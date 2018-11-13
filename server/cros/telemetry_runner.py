@@ -24,7 +24,11 @@ WARNING_STATUS = 'WARNING'
 FAILED_STATUS = 'FAILED'
 
 # A list of telemetry tests that cannot run on dut.
-ON_DUT_BLACKLIST = ['system_health.memory_desktop']
+ON_DUT_BLACKLIST = [
+    'loading.desktop',              # crbug/882299
+    'rendering.desktop',            # crbug/882291
+    'system_health.memory_desktop', # crbug/874386
+]
 
 class TelemetryResult(object):
     """Class to represent the results of a telemetry run.
@@ -373,8 +377,8 @@ class TelemetryRunner(object):
         @param args: additional list of arguments to pass to the telemetry
                      execution script.
 
-         @returns A TelemetryResult instance with the results of this telemetry
-                  execution.
+        @returns A TelemetryResult instance with the results of this telemetry
+                 execution.
         """
         script = os.path.join(DUT_CHROME_ROOT,
                               TELEMETRY_RUN_GPU_TESTS_SCRIPT)
@@ -390,6 +394,10 @@ class TelemetryRunner(object):
         cmd.append(test)
         cmd = ' '.join(cmd)
         stdout, stderr, exit_code = self._run_cmd(cmd)
+
+        if exit_code:
+            raise error.TestFail('Gpu Integration Test: %s'
+                                 ' failed to run.' % test)
 
         return TelemetryResult(exit_code=exit_code, stdout=stdout,
                                stderr=stderr)

@@ -10,8 +10,15 @@ import os
 import unittest
 
 import common
+from autotest_lib.frontend.afe.json_rpc import proxy
 from autotest_lib.server.lib import status_history
 from autotest_lib.site_utils import lab_inventory
+
+
+# _FAKE_TIME - an arbitrary but plausible time_t value.
+# You can make your own with `date +%s`.
+
+_FAKE_TIME = 1537457599
 
 
 class _FakeHost(object):
@@ -19,6 +26,12 @@ class _FakeHost(object):
 
     def __init__(self, hostname):
         self.hostname = hostname
+
+
+class _FakeHostEvent(object):
+    def __init__(self, time):
+        self.start_time = time
+        self.end_time = time + 1
 
 
 class _FakeHostHistory(object):
@@ -30,10 +43,18 @@ class _FakeHostHistory(object):
         self.host_pool = pool
         self.status = status
         self.host = _FakeHost(hostname)
+        self.hostname = hostname
+        self.start_time = _FAKE_TIME
+        self.end_time = _FAKE_TIME + 20
+        self.fake_task = _FakeHostEvent(_FAKE_TIME + 5)
+        self.exception = None
 
     def last_diagnosis(self):
         """Return the recorded diagnosis."""
-        return self.status, None
+        if self.exception:
+            raise self.exception
+        else:
+            return self.status, self.fake_task
 
 
 class _FakeHostLocation(object):
@@ -59,6 +80,43 @@ _WORKING = status_history.WORKING
 _UNUSED = status_history.UNUSED
 _BROKEN = status_history.BROKEN
 _UNKNOWN = status_history.UNKNOWN
+
+
+class GetStatusTestCase(unittest.TestCase):
+    """Tests for `_get_diagnosis()`."""
+
+    def _get_diagnosis_status(self, history):
+        return lab_inventory._get_diagnosis(history).status
+
+    def test_working_and_in_range(self):
+        """Test WORKING when task times are in the history range."""
+        history = _FakeHostHistory('', '', _WORKING)
+        history.fake_task = _FakeHostEvent(history.start_time + 1)
+        self.assertEqual(self._get_diagnosis_status(history), _WORKING)
+
+    def test_broken_and_in_range(self):
+        """Test BROKEN when task times are in the history range."""
+        history = _FakeHostHistory('', '', _BROKEN)
+        history.fake_task = _FakeHostEvent(history.start_time + 1)
+        self.assertEqual(self._get_diagnosis_status(history), _BROKEN)
+
+    def test_broken_and_straddles(self):
+        """Test BROKEN when task time straddles the history start point."""
+        history = _FakeHostHistory('', '', _BROKEN)
+        history.fake_task = _FakeHostEvent(history.start_time - 1)
+        self.assertEqual(self._get_diagnosis_status(history), _BROKEN)
+
+    def test_broken_and_out_of_range(self):
+        """Test BROKEN when task times are before the history range."""
+        history = _FakeHostHistory('', '', _BROKEN)
+        history.fake_task = _FakeHostEvent(history.start_time - 2)
+        self.assertEqual(self._get_diagnosis_status(history), _UNUSED)
+
+    def test_exception(self):
+        """Test exceptions raised by `last_diagnosis()`."""
+        history = _FakeHostHistory('', '', _BROKEN)
+        history.exception = proxy.JSONRPCException('exception for testing')
+        self.assertIsNone(self._get_diagnosis_status(history))
 
 
 class HostSetInventoryTestCase(unittest.TestCase):

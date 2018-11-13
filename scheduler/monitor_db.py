@@ -287,8 +287,8 @@ def _autoserv_command_line(machines, extra_args, job=None, queue_entry=None,
     @param machines - string - A machine or comma separated list of machines
             for the (-m) flag.
     @param extra_args - list - Additional arguments to pass to autoserv.
-    @param job - Job object - If supplied, -u owner, -l name, --test-retry,
-            and client -c or server -s parameters will be added.
+    @param job - Job object - If supplied, -u owner, -l name and client -c or
+            server -s parameters will be added.
     @param queue_entry - A HostQueueEntry object - If supplied and no Job
             object was supplied, this will be used to lookup the Job object.
     """
@@ -758,14 +758,21 @@ class Dispatcher(object):
                     queue_entry__id=queue_entry.id,
                     is_complete=False)
             if special_tasks.count() == 0:
-                logging.error('Unrecovered Resetting host queue entry: %s. '
-                              'Setting status to Queued.', str(queue_entry))
+                logging.error('Unrecovered Resetting host queue entry: %s. ',
+                              str(queue_entry))
                 # Essentially this host queue entry was set to be Verifying
                 # however no special task exists for entry. This occurs if the
                 # scheduler dies between changing the status and creating the
                 # special task. By setting it to queued, the job can restart
                 # from the beginning and proceed correctly. This is much more
                 # preferable than having monitor_db not launching.
+                logging.info('Setting host status for %s to Ready',
+                             str(queue_entry.host))
+                # Let's at least run a cleanup/reset before reusing this DUT.
+                queue_entry.host.update_field('dirty', 1)
+                queue_entry.host.set_status(models.Host.Status.READY)
+                logging.info('Setting status for HQE %s to Queued.',
+                             str(queue_entry))
                 queue_entry.set_status('Queued')
 
 

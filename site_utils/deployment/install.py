@@ -18,14 +18,14 @@ Newly deployed DUTs may be in a somewhat anomalous state:
     _are_ in the database should be locked.  Either way, the DUTs
     cannot be scheduled to run tests.
   * The servos for the DUTs need not be configured with the proper
-    board.
+    overlay.
 
 More broadly, it's not expected that the DUT will be working at the
 start of this operation.  If the DUT isn't working at the end of the
 operation, an error will be reported.
 
 The script performs the following functions:
-  * Configure the servo for the target board, and test that the
+  * Configure the servo for the target overlay, and test that the
     servo is generally in good order.
   * For the full deployment case, install dev-signed RO firmware
     from the designated stable test image for the DUTs.
@@ -39,7 +39,7 @@ The script imposes these preconditions:
   * Every servo host is up and running, and accessible via SSH.
   * There is a known, working test image that can be staged and
     installed on the target DUTs via servo.
-  * Every DUT has the same board.
+  * Every DUT has the same board and model.
   * For the full deployment case, every DUT must be in dev mode,
     and configured to allow boot from USB with ctrl+U.
 
@@ -77,6 +77,7 @@ from autotest_lib.server.hosts import afe_store
 from autotest_lib.server.hosts import servo_host
 from autotest_lib.site_utils.deployment import cmdvalidate
 from autotest_lib.site_utils.stable_images import build_data
+from autotest_lib.utils import labellib
 
 
 _LOG_FORMAT = '%(asctime)s | %(levelname)-10s | %(message)s'
@@ -97,7 +98,11 @@ _LOCK_REASON_NEW_HOST = 'Repairing or deploying a new host'
 _ReportResult = namedtuple('_ReportResult', ['hostname', 'message'])
 
 
-class _NoAFEServoPortError(Exception):
+class InstallFailedError(Exception):
+    """Generic error raised explicitly in this module."""
+
+
+class _NoAFEServoPortError(InstallFailedError):
     """Exception when there is no servo port stored in the AFE."""
 
 
@@ -259,8 +264,22 @@ def _create_host(hostname, afe, afe_host):
             'afe_host': afe_host,
             'host_info_store': afe_store.AfeStore(hostname, afe),
     }
-    servo_args = hosts.CrosHost.get_servo_arguments({})
-    return hosts.create_host(machine_dict, servo_args=servo_args)
+    host = hosts.create_host(machine_dict)
+    # Stopping `servod` on the servo host will force `repair()` to
+    # restart it.  We want that restart for a few reasons:
+    #   + `servod` caches knowledge about the image on the USB stick.
+    #     We want to clear the cache to force the USB stick to be
+    #     re-imaged unconditionally.
+    #   + If there's a problem with servod that verify and repair
+    #     can't find, this provides a UI through which `servod` can
+    #     be restarted.
+    servo = servo_host.ServoHost(
+            **servo_host.get_servo_args_for_host(host))
+    servo.run('stop servod PORT=%d' % servo.servo_port,
+              ignore_status=True)
+    servo.repair()
+    host.set_servo_host(servo)
+    return host
 
 
 def _try_lock_host(afe_host):
@@ -423,10 +442,40 @@ def _get_afe_host(afe, hostname, host_attrs, arguments):
         afe_host = afe.create_host(hostname,
                                    locked=True,
                                    lock_reason=_LOCK_REASON_NEW_HOST)
-        afe_host.add_labels([constants.Labels.BOARD_PREFIX + arguments.board])
         _update_host_attributes(afe, hostname, host_attrs)
+
+    # Correct board/model label is critical to installation. Always ensure user
+    # supplied board/model matches the AFE information.
+    _ensure_label_in_afe(afe_host, 'board', arguments.board)
+    _ensure_label_in_afe(afe_host, 'model', arguments.model)
+
     afe_host = afe.get_hosts([hostname])[0]
     return afe_host, unlock_on_failure
+
+
+def _ensure_label_in_afe(afe_host, label_name, label_value):
+    """Add the given board label, only if one doesn't already exist.
+
+    @params label_name  name of the label, e.g. 'board', 'model', etc.
+    @params label_value value of the label.
+
+    @raises InstallFailedError if supplied board  is different from existing
+            board in AFE.
+    """
+    if not label_value:
+        return
+
+    labels = labellib.LabelsMapping(afe_host.labels)
+    if label_name not in labels:
+        afe_host.add_labels(['%s:%s' % (label_name, label_value)])
+        return
+
+    existing_value = labels[label_name]
+    if label_value != existing_value:
+        raise InstallFailedError(
+                'provided %s %s does not match the %s %s for host %s' %
+                (label_name, label_value, label_name, existing_value,
+                 afe_host.hostname))
 
 
 def _install_firmware(host):

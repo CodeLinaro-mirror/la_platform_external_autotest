@@ -17,8 +17,6 @@ import string
 import time
 import threading
 
-import powerlog
-
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros.power import power_telemetry_utils
 from autotest_lib.server.cros.power import power_dashboard
@@ -114,7 +112,10 @@ class SweetberryThread(threading.Thread):
             next_loop_start_timestamp = start_timestamp + loop * self._interval
             current_timestamp = time.time()
             this_loop_duration = next_loop_start_timestamp - current_timestamp
-            powerlog.main(self._argv + ['--seconds', str(this_loop_duration)])
+            args = ['powerlog']
+            args.extend(self._argv)
+            args.extend(['--seconds', str(this_loop_duration)])
+            os.system(' '.join(args))
         logging.debug('Sweetberry stops.')
 
 
@@ -174,6 +175,7 @@ class PowerTelemetryLogger(object):
     def start_measurement(self):
         """Start power telemetry devices."""
         logging.info('%s starts.', self.__class__.__name__)
+        self._start_ts = time.time()
         self._sweetberry_thread.start()
 
     def end_measurement(self, debug_file_path):
@@ -251,7 +253,7 @@ class PowerTelemetryLogger(object):
                     custom_test_events[event]['ts'] = float(match.group(1))
 
         events_ts = {
-            'start': 0,
+            'start': self._start_ts,
             'end': time.time(),
         }
         for event in events_ts:
@@ -260,6 +262,8 @@ class PowerTelemetryLogger(object):
             events_ts[event] = custom_test_events[event].get(
                     'ts', events_ts[event])
             events_ts[event] += self._interval / 2.0
+
+        self._start_ts = events_ts['start']
 
         for sweetberry_file in os.listdir(self._logdir):
             if sweetberry_file.startswith('sweetberry'):
@@ -327,6 +331,6 @@ class PowerTelemetryLogger(object):
 
         pdash = power_dashboard.PowerTelemetryLoggerDashboard(
                 logger=logger, testname=self._tagged_testname, host=self._host,
-                resultsdir=self._logdir, uploadurl=DASHBOARD_UPLOAD_URL,
-                note=self._note)
+                start_ts=self._start_ts, resultsdir=self._logdir,
+                uploadurl=DASHBOARD_UPLOAD_URL, note=self._note)
         pdash.upload()

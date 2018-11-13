@@ -69,16 +69,14 @@ _MONTHLY = 'monthly'
 # Dump of server db only
 _SERVER_DB = 'server_db'
 
-# Dump type which can be used for replica creation
-_REPLICATION = 'replication'
-
 # Contrary to a conventional mysql dump which takes O(hours) on large databases,
 # a host dump is the cheapest form of backup possible. We dump the output of a
 # of a mysql command showing all hosts and their pool labels to a text file that
 # is backed up to google storage.
 _ONLY_HOSTS = 'only_hosts'
 _ONLY_SHARDS = 'only_shards'
-_SCHEDULER_TYPES = [_SERVER_DB, _ONLY_HOSTS, _ONLY_SHARDS, _DAILY, _WEEKLY, _MONTHLY]
+_SCHEDULER_TYPES = [_SERVER_DB, _ONLY_HOSTS, _ONLY_SHARDS, _REPLICATION,
+                    _DAILY, _WEEKLY, _MONTHLY]
 
 class BackupError(Exception):
   """Raised for error occurred during backup."""
@@ -140,7 +138,7 @@ class MySqlArchiver(object):
         extra_dump_args = ''
         for entry in IGNORE_TABLES:
             extra_dump_args += '--ignore-table=%s ' % entry
-        if self._type == _REPLICATION:
+        if self._type in [_WEEKLY, _MONTHLY]:
             extra_dump_args += '--dump-slave '
 
         if not self._db:

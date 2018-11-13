@@ -8,6 +8,7 @@ import re
 import shutil
 import time
 from autotest_lib.client.bin import utils
+from autotest_lib.client.bin.input.input_device import InputDevice
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros import upstart
 
@@ -93,6 +94,18 @@ def has_powercap_support():
         Boolean, True if powercap supported, False otherwise.
     """
     return os.path.isdir('/sys/devices/virtual/powercap/intel-rapl/')
+
+
+def has_lid():
+    """
+    Checks whether the device has lid.
+
+    @return: Returns True if the device has a lid, False otherwise.
+    """
+    INPUT_DEVICE_LIST = "/dev/input/event*"
+
+    return any(InputDevice(node).is_lid() for node in
+               glob.glob(INPUT_DEVICE_LIST))
 
 
 def _call_dbus_method(destination, path, interface, method_name, args):
@@ -294,12 +307,14 @@ class Backlight(object):
 
         attributes:
         """
-        cmd = "mosys psu type"
-        result = utils.system_output(cmd, ignore_status=True).strip()
-        self._can_control_bl = not result == "AC_only"
-
-        self._init_level = self.get_level()
+        self._init_level = None
         self.default_brightness_percent = default_brightness_percent
+
+        self._can_control_bl = True
+        try:
+            self._init_level = self.get_level()
+        except error.TestFail:
+            self._can_control_bl = False
 
         logging.debug("device can_control_bl: %s", self._can_control_bl)
         if not self._can_control_bl:
@@ -404,7 +419,8 @@ class Backlight(object):
 
     def restore(self):
         """Restore backlight to initial level when instance created."""
-        self.set_level(self._init_level)
+        if self._init_level is not None:
+            self.set_level(self._init_level)
 
 
 class KbdBacklightException(Exception):
@@ -574,7 +590,7 @@ def set_display_power(power_val):
         raise DisplayException('Invalid display power setting: %d' % power_val)
     _call_dbus_method(destination='org.chromium.DisplayService',
                       path='/org/chromium/DisplayService',
-                      interface='org.chomium.DisplayServiceInterface',
+                      interface='org.chromium.DisplayServiceInterface',
                       method_name='SetPower',
                       args='int32:%d' % power_val)
 

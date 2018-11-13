@@ -313,6 +313,7 @@ class StorageLabel(base_label.StringPrefixLabel):
              * `storage:hdd` when internal device is hard disk drive
              * `storage:mmc` when internal device is mmc drive
              * `storage:nvme` when internal device is NVMe drive
+             * `storage:ufs` when internal device is ufs drive
              * None          When internal device is something else or
                              when we are unable to determine the type
     """
@@ -367,6 +368,9 @@ class StorageLabel(base_label.StringPrefixLabel):
             link_str = link.stdout.strip()
             if 'usb' in link_str:
                 return False
+            elif 'ufs' in link_str:
+              self.type_str = 'ufs'
+              return True
 
             # Read rotation to determine if the internal device is ssd or hdd.
             rotate_cmd = str('cat /sys/block/%s/queue/rotational'
@@ -406,7 +410,7 @@ class ServoLabel(base_label.BaseLabel):
         @returns True if a servo host is detected, False otherwise.
         """
         servo_host_hostname = None
-        servo_args, _ = servo_host._get_standard_servo_args(host)
+        servo_args = servo_host.get_servo_args_for_host(host)
         if servo_args:
             servo_host_hostname = servo_args.get(servo_host.SERVO_HOST_ATTR)
         return (servo_host_hostname is not None
@@ -558,7 +562,7 @@ class LucidSleepLabel(base_label.BaseLabel):
     # TODO(kevcheng): See if we can determine if this label is applicable a
     # better way (crbug.com/592146).
     _NAME = 'lucidsleep'
-    LUCID_SLEEP_BOARDS = ['samus', 'lulu']
+    LUCID_SLEEP_BOARDS = ['poppy']
 
     def exists(self, host):
         board = host.get_board().replace(ds_constants.BOARD_PREFIX, '')

@@ -28,7 +28,7 @@ def run(machine):
         client_cert=site_eap_certs.client_cert_1,
         client_key=site_eap_certs.client_private_key_1,
         wpa_mode=xmlrpc_security_types.WPAConfig.MODE_PURE_WPA2,
-        use_ft=True)
+        ft_mode=xmlrpc_security_types.WPAConfig.FT_MODE_PURE)
     host = hosts.create_host(machine)
     job.run_test('network_WiFi_RoamFT',
                  tag=NAME.split('.')[1],

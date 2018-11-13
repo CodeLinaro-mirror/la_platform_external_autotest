@@ -53,7 +53,7 @@ class RandomMACAddressTestBase(wifi_cell_test_base.WiFiCellTestBase):
 
         @param num_scans: The number of scans to perform.
         """
-        for i in range(num_scans):
+        for _ in range(num_scans):
             # Request scan through shill rather than iw because iw won't
             # set the random MAC flag in the scan request netlink packet.
             self.context.client.shill.request_scan()
@@ -81,7 +81,7 @@ class RandomMACAddressTestBase(wifi_cell_test_base.WiFiCellTestBase):
         # Get all the frames in chronological order.
         frames = tcpdump_analyzer.get_frames(
                 results[0].local_pcap_path,
-                tcpdump_analyzer.WLAN_PROBE_REQ_ACCEPTOR,
-                bad_fcs='discard')
+                tcpdump_analyzer.WLAN_PROBE_REQ_ACCEPTOR, reject_bad_fcs=True,
+                reject_low_signal=True)
 
         return [frame for frame in frames if self._frame_matches_ssid(frame)]

@@ -23,7 +23,7 @@ def run(machine):
         psk='chromeos',
         wpa_mode=xmlrpc_security_types.WPAConfig.MODE_PURE_WPA2,
         wpa2_ciphers=[xmlrpc_security_types.WPAConfig.CIPHER_CCMP],
-        use_ft=True)
+        ft_mode=xmlrpc_security_types.WPAConfig.FT_MODE_PURE)
     host = hosts.create_host(machine)
     job.run_test('network_WiFi_RoamFT',
                  tag=NAME.split('.')[1],

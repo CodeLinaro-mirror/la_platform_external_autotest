@@ -3,16 +3,14 @@
 import logging
 from contextlib import closing
 
-import common
-
 from autotest_lib.client.bin import local_host
 from autotest_lib.client.bin import utils
+from autotest_lib.client.common_lib import deprecation
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros.dynamic_suite import constants
 from autotest_lib.server.hosts import adb_host
-from autotest_lib.server.hosts import base_classes
 from autotest_lib.server.hosts import cros_host
 from autotest_lib.server.hosts import host_info
 from autotest_lib.server.hosts import jetstream_host
@@ -23,8 +21,6 @@ from autotest_lib.server.hosts import ssh_host
 
 
 CONFIG = global_config.global_config
-
-SSH_ENGINE = CONFIG.get_config_value('AUTOSERV', 'ssh_engine', type=str)
 
 # Default ssh options used in creating a host.
 DEFAULT_SSH_USER = 'root'
@@ -47,6 +43,9 @@ OS_HOST_DICT = {'android': adb_host.ADBHost,
                 'cros' : cros_host.CrosHost,
                 'jetstream': jetstream_host.JetstreamHost,
                 'moblab': moblab_host.MoblabHost}
+
+# Timeout for early connectivity check to the host, in seconds.
+_CONNECTIVITY_CHECK_TIMEOUT_S = 10
 
 
 def _get_host_arguments(machine):
@@ -115,10 +114,10 @@ def _detect_host(connectivity_class, hostname, **args):
     @returns: Class type of the first host class that returns True to the
               check_host method.
     """
-    # TODO crbug.com/302026 (sbasi) - adjust this pathway for ADBHost in
-    # the future should a host require verify/repair.
     with closing(connectivity_class(hostname, **args)) as host:
         for host_module in host_types:
+            logging.info('Attempting to autodetect if host is of type %s',
+                         host_module.__name__)
             if host_module.check_host(host, timeout=10):
                 return host_module
 
@@ -137,14 +136,24 @@ def _choose_connectivity_class(hostname, ssh_port):
     """
     if (hostname == 'localhost' and ssh_port == DEFAULT_SSH_PORT):
         return local_host.LocalHost
-    # by default assume we're using SSH support
-    elif SSH_ENGINE == 'raw_ssh':
-        return ssh_host.SSHHost
     else:
-        raise error.AutoservError("Unknown SSH engine %s. Please verify the "
-                                  "value of the configuration key 'ssh_engine' "
-                                  "on autotest's global_config.ini file." %
-                                  SSH_ENGINE)
+        return ssh_host.SSHHost
+
+
+def _verify_connectivity(connectivity_class, hostname, **args):
+    """Verify connectivity to the host.
+
+    Any interaction with an unreachable host is guaranteed to fail later. By
+    checking connectivity first, duplicate errors / timeouts can be avoided.
+    """
+    if connectivity_class == local_host.LocalHost:
+        return True
+
+    assert connectivity_class == ssh_host.SSHHost
+    with closing(ssh_host.SSHHost(hostname, **args)) as host:
+        host.run('test :', timeout=_CONNECTIVITY_CHECK_TIMEOUT_S,
+                 ssh_failure_retry_ok=False,
+                 ignore_timeout=False)
 
 
 # TODO(kevcheng): Update the creation method so it's not a research project
@@ -162,14 +171,19 @@ def create_host(machine, host_class=None, connectivity_class=None, **args):
                     from the autoserv runtime or the AFE.
     @param host_class: Host class to use, if None, will attempt to detect
                        the correct class.
-    @param connectivity_class: Connectivity class to use, if None will decide
-                               based off of hostname and config settings.
+    @param connectivity_class: DEPRECATED. Connectivity class is determined
+                               internally.
     @param args: Args that will be passed to the constructor of
                  the new host class.
 
     @returns: A host object which is an instance of the newly created
               host class.
     """
+    # Argument deprecated
+    if connectivity_class is not None:
+        deprecation.warn('server.create_hosts:connectivity_class')
+        connectivity_class = None
+
     detected_args = _get_host_arguments(machine)
     hostname = detected_args.pop('hostname')
     afe_host = detected_args['afe_host']
@@ -183,13 +197,29 @@ def create_host(machine, host_class=None, connectivity_class=None, **args):
             host_os = label[len(full_os_prefix):]
             break
 
-    if not connectivity_class:
-        connectivity_class = _choose_connectivity_class(hostname, args['port'])
+    connectivity_class = _choose_connectivity_class(hostname, args['port'])
     # TODO(kevcheng): get rid of the host detection using host attributes.
     host_class = (host_class
                   or OS_HOST_DICT.get(afe_host.attributes.get('os_type'))
-                  or OS_HOST_DICT.get(host_os)
-                  or _detect_host(connectivity_class, hostname, **args))
+                  or OS_HOST_DICT.get(host_os))
+
+    if host_class is None:
+        # TODO(pprabhu) If we fail to verify connectivity, we skip the costly
+        # host autodetection logic. We should ideally just error out in this
+        # case, but there are a couple problems:
+        # - VMs can take a while to boot up post provision, so SSH connections
+        #   to moblab vms may not be available for ~2 minutes. This requires
+        #   extended timeout in _verify_connectivity() so we don't get speed
+        #   benefits from bailing early.
+        # - We need to make sure stopping here does not block repair flows.
+        try:
+            _verify_connectivity(connectivity_class, hostname, **args)
+            host_class = _detect_host(connectivity_class, hostname, **args)
+        except error.AutoservRunError:
+            logging.warning('Failed to verify connectivity to host.'
+                            ' Skipping host auto detection logic.')
+            host_class = cros_host.CrosHost
+            logging.debug('Defaulting to CrosHost.')
 
     # create a custom host class for this machine and return an instance of it
     classes = (host_class, connectivity_class)
@@ -201,7 +231,6 @@ def create_host(machine, host_class=None, connectivity_class=None, **args):
         host_instance.job_start()
         _started_hostnames.add(hostname)
 
-    base_classes.send_creation_metric(host_instance, context='factory')
     return host_instance
 
 
