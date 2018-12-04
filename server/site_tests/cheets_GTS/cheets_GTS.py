@@ -23,7 +23,7 @@ from autotest_lib.server.cros import tradefed_test
 # Maximum default time allowed for each individual GTS module.
 _GTS_TIMEOUT_SECONDS = 3600
 _PARTNER_GTS_BUCKET = 'gs://chromeos-partner-gts/'
-_PARTNER_GTS_LOCATION = _PARTNER_GTS_BUCKET + 'gts-6.0_r1-4868992.zip'
+_PARTNER_GTS_LOCATION = _PARTNER_GTS_BUCKET + 'gts-6.0_r2-5069183.zip'
 _PARTNER_GTS_AUTHKEY = _PARTNER_GTS_BUCKET + 'gts-arc.json'
 
 
@@ -31,8 +31,7 @@ class cheets_GTS(tradefed_test.TradefedTest):
     """Sets up tradefed to run GTS tests."""
     version = 1
 
-    # TODO(teravest): Remove octopus once the bulk of failing tests are fixed.
-    _BOARD_RETRY = {'betty': 0, 'octopus': 0}
+    _BOARD_RETRY = {'betty': 0}
     _CHANNEL_RETRY = {'dev': 5, 'beta': 5, 'stable': 5}
     _SHARD_CMD = '--shard-count'
 
