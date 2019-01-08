@@ -31,6 +31,7 @@ suite:arc-cts-perbuild
 suite:arc-cts-qual
 suite:arc-cts-stable
 suite:arc-cts-terra
+suite:arc-cts-test
 suite:arc-gts
 suite:arc-gts-perbuild
 suite:arc-gts-qual
@@ -89,6 +90,7 @@ suite:crosbolt_arc_perf_perbuild
 suite:crosbolt_perf_nightly
 suite:crosbolt_perf_perbuild
 suite:crosbolt_perf_weekly
+suite:cups_weekly
 suite:dummy
 suite:dummy_server
 suite:dummy_server_nossp
