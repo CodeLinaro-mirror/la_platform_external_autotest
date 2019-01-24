@@ -24,8 +24,8 @@ _CTS_TIMEOUT_SECONDS = 3600
 # Public download locations for android cts bundles.
 _DL_CTS = 'https://dl.google.com/dl/android/cts/'
 _CTS_URI = {
-    'arm': _DL_CTS + 'android-cts-7.1_r22-linux_x86-arm.zip',
-    'x86': _DL_CTS + 'android-cts-7.1_r22-linux_x86-x86.zip',
+    'arm': _DL_CTS + 'android-cts-7.1_r23-linux_x86-arm.zip',
+    'x86': _DL_CTS + 'android-cts-7.1_r23-linux_x86-x86.zip',
     'media': _DL_CTS + 'android-cts-media-1.4.zip',
 }
 
@@ -34,9 +34,8 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
     """Sets up tradefed to run CTS tests."""
     version = 1
 
-    # TODO(bmgordon): Remove kahlee once the bulk of failing tests are fixed.
-    _BOARD_RETRY = {'betty': 0, 'kahlee': 0}
-    _CHANNEL_RETRY = {'dev': 5, 'beta': 5, 'stable': 5}
+    _BOARD_RETRY = {'betty': 0}
+    _CHANNEL_RETRY = {'dev': 9, 'beta': 9, 'stable': 9}
     _SHARD_CMD = '--shards'
     # TODO(pwang): b/110966363, remove it once scarlet is fixed.
     _NEED_DEVICE_INFO_BOARDS = ['scarlet']

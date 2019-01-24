@@ -3,11 +3,12 @@
 # found in the LICENSE file.
 
 import collections
+import json
 import logging
 import numpy
 import os
+import re
 import time
-import json
 
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
@@ -500,11 +501,19 @@ class power_LoadTest(arc.ArcTest):
                                        units='minutes',
                                        higher_is_better=True)
 
+        minutes_battery_life_tested = keyvals['minutes_battery_life_tested']
+
+        # Avoid polluting the keyvals with non-core domains.
+        # - Minor checkpoints. (start with underscore)
+        # - Individual cpu / gpu frequency buckets. (regex '[cg]pu_\d{3,}')
+        matcher = re.compile(r'_.*|.*_[cg]pu_\d{3,}_.*')
+        core_keyvals = {k: v for k, v in keyvals.iteritems()
+                        if not matcher.match(k)}
         if not self._gaia_login:
-            keyvals = dict(map(lambda (key, value):
-                               ('INVALID_' + str(key), value), keyvals.items()))
+          core_keyvals = {'INVALID_%s' % str(k): v for k, v in
+                          core_keyvals.iteritems()}
         else:
-            for key, value in keyvals.iteritems():
+            for key, value in core_keyvals.iteritems():
                 if key.startswith('percent_cpuidle') and \
                    key.endswith('C0_time'):
                     self.output_perf_value(description=key,
@@ -512,10 +521,14 @@ class power_LoadTest(arc.ArcTest):
                                            units='percent',
                                            higher_is_better=False)
 
-        self.write_perf_keyval(keyvals)
+        self.write_perf_keyval(core_keyvals)
         for log in self._meas_logs:
             log.save_results(self.resultsdir)
         self._checkpoint_logger.save_checkpoint_data(self.resultsdir)
+
+        if minutes_battery_life_tested * 60 < self._loop_time :
+            logging.info('Data is less than 1 loop, skip sending to dashboard.')
+            return
         pdash = power_dashboard.PowerLoggerDashboard( \
                 self._plog, self.tagged_testname, self.resultsdir)
         pdash.upload()
@@ -757,18 +770,34 @@ class power_LoadTest(arc.ArcTest):
         if self._tasks != '':
             return
 
-        sections = {
-            'browsing' : (0, 0.6),
-            'email' : (0.6, 0.8),
-            'document' : (0.8, 0.9),
-            'video' : (0.9, 1),
-        }
+        sections = [
+            ('browsing', (0, 0.6)),
+            ('email', (0.6, 0.8)),
+            ('document', (0.8, 0.9)),
+            ('video', (0.9, 1)),
+        ]
 
-        duration = end - start
+        # Use start time from extension if found by look for google.com start.
+        goog_str = loop_str+ '_web_page_www.google.com'
+        for item, start_extension, _ in self._task_tracker:
+            if item == goog_str:
+                if start_extension >= start:
+                    start = start_extension
+                    break
+                logging.warn('Timestamp from extension (%.2f) is earlier than'
+                             'timestamp from autotest (%.2f).',
+                             start_extension, start)
 
-        for section, fractions in sections.iteritems():
+        # Use default loop duration for incomplete loop.
+        duration = max(end - start, self._loop_time)
+
+        for section, fractions in sections:
             s_start, s_end = (start + duration * fraction
                               for fraction in fractions)
+            if s_start > end:
+                break
+            if s_end > end:
+                s_end = end
             self._checkpoint_logger.checkpoint(section, s_start, s_end)
             loop_section = '_' + loop_str + '_' + section
             self._checkpoint_logger.checkpoint(loop_section, s_start, s_end)

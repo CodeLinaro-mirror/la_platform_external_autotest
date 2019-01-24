@@ -943,8 +943,10 @@ class GraphicsKernelMemory(object):
         'memory': ['/sys/class/misc/mali0/device/memory',
                    '/sys/class/misc/mali0/device/gpu_memory'],
     }
-    mediatek_fields = {}  # TODO(crosbug.com/p/58189) add nodes
-    # TODO Add memory nodes once the GPU patches landed.
+    mediatek_fields = {}
+    # TODO(crosbug.com/p/58189) Add mediatek GPU memory nodes
+    qualcomm_fields = {}
+    # TODO(b/119269602) Add qualcomm GPU memory nodes once GPU patches land
     rockchip_fields = {}
     tegra_fields = {
         'memory': ['/sys/kernel/debug/memblock/memory'],
@@ -963,6 +965,7 @@ class GraphicsKernelMemory(object):
         'exynos5': exynos_fields,
         'i915': i915_fields,
         'mediatek': mediatek_fields,
+        'qualcomm': qualcomm_fields,
         'rockchip': rockchip_fields,
         'tegra': tegra_fields,
         'virtio': virtio_fields,
@@ -1242,9 +1245,11 @@ _DRI_DEBUG_FILE_PATH_0 = "/sys/kernel/debug/dri/0/state"
 _DRI_DEBUG_FILE_PATH_1 = "/sys/kernel/debug/dri/1/state"
 
 # The DRI debug file will have a lot of information, including the position and
-# sizes of each plane, in lines starting with "crtc-pos="; many of them will be
-# zeros, this regex is used to filter those out.
-_CRTC_POS_PATTERN = re.compile(r'crtc-pos=(?!0x0\+0\+0)')
+# sizes of each plane. Some planes might be disabled but have some lingering
+# crtc-pos information, those are skipped.
+_CRTC_PLANE_START_PATTERN = re.compile(r'plane\[')
+_CRTC_DISABLED_PLANE = re.compile(r'crtc=\(null\)')
+_CRTC_POS_AND_SIZE_PATTERN = re.compile(r'crtc-pos=(?!0x0\+0\+0)')
 
 def get_num_hardware_overlays():
     """
@@ -1266,7 +1271,18 @@ def get_num_hardware_overlays():
 
     filetext = open(file_path).read()
     logging.debug(filetext)
-    matches = re.findall(_CRTC_POS_PATTERN, filetext)
+
+    matches = []
+    # Split the debug output by planes, skip the disabled ones and extract those
+    # with correct position and size information.
+    planes = re.split(_CRTC_PLANE_START_PATTERN, filetext)
+    for plane in planes:
+        if len(plane) == 0:
+            continue;
+        if len(re.findall(_CRTC_DISABLED_PLANE, plane)) > 0:
+            continue;
+
+        matches.append(re.findall(_CRTC_POS_AND_SIZE_PATTERN, plane))
 
     # TODO(crbug.com/865112): return also the sizes/locations.
     return len(matches)

@@ -35,7 +35,7 @@ session_manager,root,root,No,No,No,No,No
 rsyslogd,syslog,syslog,No,Yes,Yes,No,No
 dbus-daemon,messagebus,messagebus,No,No,Yes,No,No
 wpa_supplicant,wpa,wpa,No,No,Yes,Yes,No
-shill,root,root,No,No,No,No,No
+shill,shill,shill,No,No,Yes,Yes,No
 chapsd,chaps,chronos-access,No,No,Yes,Yes,No
 cryptohomed,root,root,No,No,No,No,No
 powerd,power,power,No,No,Yes,No,No
@@ -104,3 +104,10 @@ bugreportd,657360,656367,Yes,Yes,Yes,No,No
 logd,656396,656396,Yes,Yes,Yes,No,No
 servicemanager,656360,656360,Yes,Yes,Yes,No,No
 surfaceflinger,656360,656363,Yes,Yes,Yes,No,No
+
+# Chrome OS one-off init scripts.
+# These are small setup scripts that don't spawn daemons and are short lived.
+activate_date.s,root,root,No,No,No,No,No
+crx-import.sh,root,root,No,No,No,No,No
+lockbox-cache.s,root,root,No,No,No,No,No
+powerd-pre-star,root,root,No,No,No,No,No

@@ -1,6 +1,8 @@
 GtsAccountsHostTestCases: [all]
+GtsAppTestCases: [all]
 GtsDexModuleRegistrationTestCases: [all]
 GtsSampleDeviceTestCases: [all]
 GtsSampleDynamicConfigTestCases: [all]
 GtsSampleHostTestCases: [all]
+GtsSmartBatteryDeviceTestCases: [N]
 GtsSuspendAppsTestCases: [all]
