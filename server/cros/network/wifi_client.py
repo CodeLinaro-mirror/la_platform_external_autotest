@@ -228,6 +228,11 @@ class WiFiClient(site_linux_system.LinuxSystem):
         """@return Name of kernel module in use by this interface."""
         return self._interface.module_name
 
+    @property
+    def parent_device_name(self):
+        """
+        @return Path of the parent device for the net device"""
+        return self._interface.parent_device_name
 
     @property
     def wifi_if(self):
@@ -257,7 +262,6 @@ class WiFiClient(site_linux_system.LinuxSystem):
     def wifi_phy_name(self):
         """@return wiphy name (e.g., 'phy0') or None"""
         return self._interface.wiphy_name
-
 
     @property
     def wifi_signal_level(self):
@@ -1344,17 +1348,17 @@ class WiFiClient(site_linux_system.LinuxSystem):
         return True
 
 
-    def set_dhcp_property(self, dhcp_prop_name, dhcp_prop_value):
-        """Sets the given DHCP_Property to the value provided.
+    def set_manager_property(self, prop_name, prop_value):
+        """Sets the given manager property to the value provided.
 
-        @param dhcp_prop_name: the dhcp_property to be set
-        @param dhcp_prop_value: value to assign to the dhcp_prop_name
+        @param prop_name: the property to be set
+        @param prop_value: value to assign to the prop_name
         @return a context manager for the setting
 
         """
         return TemporaryManagerDBusProperty(self._shill_proxy,
-                                            dhcp_prop_name,
-                                            dhcp_prop_value)
+                                            prop_name,
+                                            prop_value)
 
 
 class TemporaryDeviceDBusProperty:

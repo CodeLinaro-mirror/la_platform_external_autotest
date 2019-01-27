@@ -69,6 +69,31 @@
     "dashboard_test_name": "cheets_StartAndroid"
   },
   {
+    "autotest_name": "cheets_CTS_.*CtsDeqpTestCases$",
+    "master_name": "ChromeOS_Graphics",
+    "dashboard_test_name": "cheets_CTS"
+  },
+  {
+    "autotest_name": "cheets_CTS_.*CtsGraphicsTestCases$",
+    "master_name": "ChromeOS_Graphics",
+    "dashboard_test_name": "cheets_CTS"
+  },
+  {
+    "autotest_name": "cheets_CTS_.*CtsGraphics2TestCases$",
+    "master_name": "ChromeOS_Graphics",
+    "dashboard_test_name": "cheets_CTS"
+  },
+  {
+    "autotest_name": "cheets_CTS_.*CtsSkQPTestCases$",
+    "master_name": "ChromeOS_Graphics",
+    "dashboard_test_name": "cheets_CTS"
+  },
+  {
+    "autotest_name": "cheets_CTS_.*CtsViewTestCases$",
+    "master_name": "ChromeOS_Graphics",
+    "dashboard_test_name": "cheets_CTS"
+  },
+  {
     "autotest_name": "enterprise_CFM_Perf.meet_app",
     "master_name": "ChromeOS_Enterprise"
   },
@@ -562,6 +587,11 @@
     "master_name": "ChromeOSTastInformationalChrome"
   },
   {
+    "autotest_name": "telemetry_Benchmarks.backdrop_filter.rendering.desktop",
+    "master_name": "ChromeOSPerf",
+    "dashboard_test_name": "backdrop_filter.rendering.desktop"
+  },
+  {
     "autotest_name": "telemetry_Benchmarks.blink_perf.image_decoder",
     "master_name": "ChromeOSPerf",
     "dashboard_test_name": "blink_perf.image_decoder"
@@ -651,6 +681,10 @@
   },
   {
     "autotest_name": "video_JDAPerf.power",
+    "master_name": "ChromeOSVideo"
+  },
+  {
+    "autotest_name": "video_JEAPerf",
     "master_name": "ChromeOSVideo"
   },
   {

@@ -24,6 +24,8 @@ SKYLAB_SUITE_USER = 'skylab_suite_runner'
 SKYLAB_LUCI_TAG = 'luci_project:chromeos'
 SKYLAB_DRONE_SWARMING_WORKER = '/opt/infra-tools/skylab_swarming_worker'
 
+QUOTA_ACCOUNT_TAG_FORMAT = 'qs_account:%s'
+
 SUITE_WAIT_SLEEP_INTERVAL_SECONDS = 30
 
 # See #5 in crbug.com/873886 for more details.
@@ -114,9 +116,9 @@ def _run_suite(test_specs, suite_handler, dry_run=False):
     """Make a new suite."""
     suite_id = os.environ.get('SWARMING_TASK_ID')
     _schedule_test_specs(test_specs, suite_handler, suite_id, dry_run)
+    suite_handler.set_suite_id(suite_id)
 
     if suite_id is not None and suite_handler.should_wait():
-        suite_handler.set_suite_id(suite_id)
         _wait_for_results(suite_handler, dry_run=dry_run)
 
 
@@ -210,6 +212,9 @@ def _run_swarming_cmd_with_fallback(cmds, dimensions, test_spec, suite_id,
     if suite_id is not None:
         tags += ['parent_task_id:%s' % suite_id]
 
+    if test_spec.quota_account is not None:
+        tags += [QUOTA_ACCOUNT_TAG_FORMAT % test_spec.quota_account]
+
     provision_expiration_secs = _get_provision_expiration_secs(
             test_spec, is_provision)
     all_expiration_secs = [
@@ -266,10 +271,13 @@ def _schedule_test(test_spec, suite_id=None,
         test_spec.test.name = 'Echo ' + test_spec.test.name
 
     dimensions = {'pool': swarming_lib.SKYLAB_DRONE_POOL,
-                  'label-pool': swarming_lib.SWARMING_DUT_POOL_MAP.get(
+                  'label-pool': swarming_lib.to_swarming_pool_label(
                           test_spec.pool),
                   'label-board': test_spec.board,
                   'dut_state': swarming_lib.SWARMING_DUT_READY_STATUS}
+    if test_spec.model is not None:
+        dimensions['label-model'] = test_spec.model
+
     for dep in test_spec.test.dependencies:
         if dep in _NOT_SUPPORTED_DEPENDENCIES:
             logging.warning('Dependency %s is not supported in skylab', dep)

@@ -24,8 +24,8 @@ _CTS_TIMEOUT_SECONDS = 3600
 # Public download locations for android cts bundles.
 _DL_CTS = 'https://dl.google.com/dl/android/cts/'
 _CTS_URI = {
-    'arm': _DL_CTS + 'android-cts-7.1_r23-linux_x86-arm.zip',
-    'x86': _DL_CTS + 'android-cts-7.1_r23-linux_x86-x86.zip',
+    'arm': _DL_CTS + 'android-cts-7.1_r24-linux_x86-arm.zip',
+    'x86': _DL_CTS + 'android-cts-7.1_r24-linux_x86-x86.zip',
     'media': _DL_CTS + 'android-cts-media-1.4.zip',
 }
 
@@ -38,7 +38,7 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
     _CHANNEL_RETRY = {'dev': 9, 'beta': 9, 'stable': 9}
     _SHARD_CMD = '--shards'
     # TODO(pwang): b/110966363, remove it once scarlet is fixed.
-    _NEED_DEVICE_INFO_BOARDS = ['scarlet']
+    _NEED_DEVICE_INFO_BOARDS = ['scarlet', 'veyron_tiger']
 
     def _tradefed_retry_command(self, template, session_id):
         """Build tradefed 'retry' command from template."""

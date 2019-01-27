@@ -7,7 +7,6 @@ import json
 import logging
 import numpy
 import os
-import re
 import time
 
 from autotest_lib.client.bin import utils
@@ -53,7 +52,7 @@ class power_LoadTest(arc.ArcTest):
                  wifi_pw='', wifi_timeout=60, tasks='',
                  volume_level=10, mic_gain=10, low_batt_margin_p=2,
                  ac_ok=False, log_mem_bandwidth=False, gaia_login=None,
-                 force_discharge=False):
+                 force_discharge=False, pdash_note=''):
         """
         percent_initial_charge_min: min battery charge at start of test
         check_network: check that Ethernet interface is not running
@@ -81,6 +80,7 @@ class power_LoadTest(arc.ArcTest):
             (default) then boolean is determined from URL.
         force_discharge: boolean of whether to tell ec to discharge battery even
             when the charger is plugged in.
+        pdash_note: note of the current run to send to power dashboard.
         """
         self._backlight = None
         self._services = None
@@ -112,6 +112,7 @@ class power_LoadTest(arc.ArcTest):
         self._wait_time = 60
         self._stats = collections.defaultdict(list)
         self._force_discharge = force_discharge
+        self._pdash_note = pdash_note
 
         if not power_utils.has_battery():
             if ac_ok and (power_utils.has_powercap_support() or
@@ -216,18 +217,10 @@ class power_LoadTest(arc.ArcTest):
         self._statomatic = power_status.StatoMatic()
 
         self._power_status.refresh()
-        help_output = utils.system_output('check_powerd_config --help')
-        if 'low_battery_shutdown' in help_output:
-          logging.info('Have low_battery_shutdown option')
-          self._sys_low_batt_p = float(utils.system_output(
-                  'check_powerd_config --low_battery_shutdown_percent'))
-          self._sys_low_batt_s = int(utils.system_output(
-                  'check_powerd_config --low_battery_shutdown_time'))
-        else:
-          # TODO(dchan) Once M57 in stable, remove this option and function.
-          logging.info('No low_battery_shutdown option')
-          (self._sys_low_batt_p, self._sys_low_batt_s) = \
-              self._get_sys_low_batt_values_from_log()
+        self._sys_low_batt_p = float(utils.system_output(
+                 'check_powerd_config --low_battery_shutdown_percent'))
+        self._sys_low_batt_s = int(utils.system_output(
+                 'check_powerd_config --low_battery_shutdown_time'))
 
         if self._sys_low_batt_p and self._sys_low_batt_s:
             raise error.TestError(
@@ -504,11 +497,7 @@ class power_LoadTest(arc.ArcTest):
         minutes_battery_life_tested = keyvals['minutes_battery_life_tested']
 
         # Avoid polluting the keyvals with non-core domains.
-        # - Minor checkpoints. (start with underscore)
-        # - Individual cpu / gpu frequency buckets. (regex '[cg]pu_\d{3,}')
-        matcher = re.compile(r'_.*|.*_[cg]pu_\d{3,}_.*')
-        core_keyvals = {k: v for k, v in keyvals.iteritems()
-                        if not matcher.match(k)}
+        core_keyvals = power_utils.get_core_keyvals(keyvals)
         if not self._gaia_login:
           core_keyvals = {'INVALID_%s' % str(k): v for k, v in
                           core_keyvals.iteritems()}
@@ -530,13 +519,16 @@ class power_LoadTest(arc.ArcTest):
             logging.info('Data is less than 1 loop, skip sending to dashboard.')
             return
         pdash = power_dashboard.PowerLoggerDashboard( \
-                self._plog, self.tagged_testname, self.resultsdir)
+                self._plog, self.tagged_testname, self.resultsdir,
+                note=self._pdash_note)
         pdash.upload()
         cdash = power_dashboard.CPUStatsLoggerDashboard( \
-                self._clog, self.tagged_testname, self.resultsdir)
+                self._clog, self.tagged_testname, self.resultsdir,
+                note=self._pdash_note)
         cdash.upload()
         tdash = power_dashboard.TempLoggerDashboard( \
-                self._tlog, self.tagged_testname, self.resultsdir)
+                self._tlog, self.tagged_testname, self.resultsdir,
+                note=self._pdash_note)
         tdash.upload()
 
 
@@ -633,34 +625,6 @@ class power_LoadTest(arc.ArcTest):
         else:
             logging.info('Setting lightbar to %s', level)
             self._tmp_keyvals['level_lightbar_current'] = level
-
-
-    def _get_sys_low_batt_values_from_log(self):
-        """Determine the low battery values for device and return.
-
-        2012/11/01: power manager (powerd.cc) parses parameters in filesystem
-          and outputs a log message like:
-
-           [1101/173837:INFO:powerd.cc(258)] Using low battery time threshold
-                     of 0 secs and using low battery percent threshold of 3.5
-
-           It currently checks to make sure that only one of these values is
-           defined.
-
-        Returns:
-          Tuple of (percent, seconds)
-            percent: float of low battery percentage
-            seconds: float of low battery seconds
-
-        """
-        split_re = 'threshold of'
-
-        powerd_log = '/var/log/power_manager/powerd.LATEST'
-        cmd = 'grep "low battery time" %s' % powerd_log
-        line = utils.system_output(cmd)
-        secs = float(line.split(split_re)[1].split()[0])
-        percent = float(line.split(split_re)[2].split()[0])
-        return (percent, secs)
 
 
     def _has_light_sensor(self):

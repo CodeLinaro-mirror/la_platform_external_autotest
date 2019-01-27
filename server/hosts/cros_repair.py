@@ -443,7 +443,7 @@ class _ResetRepairAction(hosts.RepairAction):
                 # If the DUT is up, we want to declare success, even if
                 # log gathering fails for some reason.  So, if there's
                 # a failure, just log it and move on.
-                logging.exception('Unexpected failure in log '
+                logging.exception('Non-critical failure in log '
                                   'collection during %s.',
                                   self.tag)
             return
@@ -709,7 +709,7 @@ def create_cros_repair_strategy():
     """Return a `RepairStrategy` for a `CrosHost`."""
     verify_dag = _cros_verify_dag()
     repair_actions = _cros_repair_actions()
-    return hosts.RepairStrategy(verify_dag, repair_actions)
+    return hosts.RepairStrategy(verify_dag, repair_actions, 'cros')
 
 
 def _moblab_verify_dag():
@@ -758,7 +758,7 @@ def create_moblab_repair_strategy():
     """
     verify_dag = _moblab_verify_dag()
     repair_actions = _moblab_repair_actions()
-    return hosts.RepairStrategy(verify_dag, repair_actions)
+    return hosts.RepairStrategy(verify_dag, repair_actions, 'moblab')
 
 
 def _jetstream_repair_actions():
@@ -803,7 +803,7 @@ def create_jetstream_repair_strategy():
     """
     verify_dag = _jetstream_verify_dag()
     repair_actions = _jetstream_repair_actions()
-    return hosts.RepairStrategy(verify_dag, repair_actions)
+    return hosts.RepairStrategy(verify_dag, repair_actions, 'jetstream')
 
 
 # TODO(pprabhu) Move this to a better place. I have no idea what that place

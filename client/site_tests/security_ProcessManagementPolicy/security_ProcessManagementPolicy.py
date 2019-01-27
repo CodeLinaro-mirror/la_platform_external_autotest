@@ -24,8 +24,9 @@ class security_ProcessManagementPolicy(test.test):
     }
 
     def __init__(self, *args, **kwargs):
-        if utils.get_kernel_version() == "3.8.11":
-            raise error.TestNAError('Test is n/a for kernel 3.8.11')
+        version = utils.get_kernel_version()
+        if version == "3.8.11" or version == "3.10.18":
+            raise error.TestNAError('Test is n/a for kernels older than 3.14')
         super(security_ProcessManagementPolicy,
             self).__init__(*args, **kwargs)
         self._failure = False
@@ -94,6 +95,10 @@ class security_ProcessManagementPolicy(test.test):
         self._test_setuid("cros-disks", "chronos", True, False)
         # Make sure 'shill' can't setuid() to 'chronos'
         self._test_setuid("shill", "chronos", True, False)
+        # Make sure 'openvpn' can't setuid() to 'root'
+        self._test_setuid("openvpn", "root", True, False)
+        # Make sure 'ipsec' can't setuid() to 'root'
+        self._test_setuid("ipsec", "root", True, False)
 
         # Make the test fail if any unexpected behaviour got detected. Note
         # that the error log output that will be included in the failure
