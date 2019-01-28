@@ -48,6 +48,7 @@ class network_WiFi_RoamFT(wifi_cell_test_base.WiFiCellTestBase):
 
     version = 1
     TIMEOUT_SECONDS = 15
+    GLOBAL_FT_PROPERTY = "WiFi.GlobalFTEnabled"
 
     def dut_sees_bss(self, bssid):
         """
@@ -72,7 +73,7 @@ class network_WiFi_RoamFT(wifi_cell_test_base.WiFiCellTestBase):
         """
         self._security_config = additional_params
 
-    def run_once(self,host):
+    def test_body(self):
         """Test body."""
 
         if self._security_config.ft_mode == \
@@ -97,8 +98,15 @@ class network_WiFi_RoamFT(wifi_cell_test_base.WiFiCellTestBase):
                        r0kh='%s %s %s' % (mac1, id1, key0),
                        r1kh='%s %s %s' % (mac1, mac1, key1),
                        use_bridge=True)
-        router1_conf = hostap_config.HostapConfig(channel=48,
-                       mode=hostap_config.HostapConfig.MODE_11A,
+        n_caps = [hostap_config.HostapConfig.N_CAPABILITY_HT40_PLUS]
+        ac_caps = [hostap_config.HostapConfig.AC_CAPABILITY_SHORT_GI_80]
+        channel_width_80_mhz = hostap_config.HostapConfig.VHT_CHANNEL_WIDTH_80
+        router1_conf = hostap_config.HostapConfig(channel=157,
+                       mode=hostap_config.HostapConfig.MODE_11AC_PURE,
+                       n_capabilities=n_caps,
+                       ac_capabilities=ac_caps,
+                       vht_channel_width=channel_width_80_mhz,
+                       vht_center_channel=155,
                        security_config=self._security_config,
                        bssid=mac1,
                        mdid=mdid,
@@ -187,6 +195,22 @@ class network_WiFi_RoamFT(wifi_cell_test_base.WiFiCellTestBase):
             if not self.context.client.wait_for_roam(
                    roam_to_bssid, timeout_seconds=self.TIMEOUT_SECONDS):
                 raise error.TestFail('Failed to roam.')
+
+        self.context.client.shill.disconnect(router_ssid)
+        self.context.router.deconfig()
+
+    def run_once(self,host):
+        """Set global FT switch and call test_body"""
+
+        with self.context.client.set_manager_property(self.GLOBAL_FT_PROPERTY,
+                                                      True):
+            self.test_body()
+        if self._security_config.ft_mode == \
+            xmlrpc_security_types.WPAConfig.FT_MODE_MIXED:
+            logging.info("Disable FT on client and try again.")
+            with self.context.client.set_manager_property(
+                    self.GLOBAL_FT_PROPERTY, False):
+                self.test_body()
 
     def cleanup(self):
         """Cleanup function."""

@@ -20,13 +20,14 @@ class power_Standby(test.test):
     _percent_min_charge = 10
     _min_sample_hours = 0.1
 
-    def initialize(self):
+    def initialize(self, pdash_note=''):
         """Reset force discharge state."""
         self._force_discharge_enabled = False
+        self._pdash_note = pdash_note
 
     def run_once(self, test_hours=None, sample_hours=None,
                  max_milliwatts_standby=500, ac_ok=False,
-                 force_discharge=False, suspend_state=''):
+                 force_discharge=False, suspend_state='', bypass_check=False):
         """Put DUT to suspend state for |sample_hours| and measure power."""
         if not power_utils.has_battery():
             raise error.TestNAError('Skipping test because DUT has no battery.')
@@ -38,7 +39,7 @@ class power_Standby(test.test):
         # If we're measuring < 6min of standby then the S0 time is not
         # negligible. Note, reasonable rule of thumb is S0 idle is ~10-20 times
         # standby power.
-        if sample_hours < self._min_sample_hours:
+        if sample_hours < self._min_sample_hours and not bypass_check:
             raise error.TestFail('Must standby more than %.2f hours.' % \
                                  sample_hours)
 
@@ -89,7 +90,7 @@ class power_Standby(test.test):
             actual_hours = (after_suspend_secs - before_suspend_secs) / 3600.0
             percent_diff = math.fabs((actual_hours - sample_hours) / (
                     (actual_hours + sample_hours) / 2) * 100)
-            if percent_diff > 2:
+            if percent_diff > 2 and not bypass_check:
                 err = 'Requested standby time and actual varied by %.2f%%.' \
                     % percent_diff
                 raise error.TestFail(err)
@@ -112,7 +113,7 @@ class power_Standby(test.test):
         power_telemetry_utils.end_measurement(end_ts)
         charge_end = power_stats.battery[0].charge_now
         total_charge_used = charge_start - charge_end
-        if total_charge_used <= 0:
+        if total_charge_used <= 0 and not bypass_check:
             raise error.TestError('Charge used is suspect.')
 
         voltage_end = power_stats.battery[0].voltage_now
@@ -135,7 +136,8 @@ class power_Standby(test.test):
         self.write_perf_keyval(results)
         pdash = power_dashboard.SimplePowerLoggerDashboard(
                 test_hours * 3600., results['w_energy_rate'],
-                self.tagged_testname, start_ts, self.resultsdir)
+                self.tagged_testname, start_ts, self.resultsdir,
+                note=self._pdash_note)
         pdash.upload()
 
         self.output_perf_value(description='hours_standby_time',
