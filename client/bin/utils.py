@@ -967,6 +967,34 @@ def get_storage_error_msg(disk_name, reason):
     return msg
 
 
+_IOSTAT_FIELDS = ('transfers_per_s', 'read_kb_per_s', 'written_kb_per_s',
+                  'read_kb', 'written_kb')
+_IOSTAT_RE = re.compile('ALL' + len(_IOSTAT_FIELDS) * r'\s+([\d\.]+)')
+
+def get_storage_statistics(device=None):
+    """
+    Fetches statistics for a storage device.
+
+    Using iostat(1) it retrieves statistics for a device since last boot.  See
+    the man page for iostat(1) for details on the different fields.
+
+    @param device: Path to a block device. Defaults to the device where root
+            is mounted.
+
+    @returns a dict mapping each field to its statistic.
+
+    @raises ValueError: If the output from iostat(1) can not be parsed.
+    """
+    if device is None:
+        device = get_root_device()
+    cmd = 'iostat -d -k -g ALL -H %s' % device
+    output = utils.system_output(cmd, ignore_status=True)
+    match = _IOSTAT_RE.search(output)
+    if not match:
+        raise ValueError('Unable to get iostat for %s' % device)
+    return dict(zip(_IOSTAT_FIELDS, map(float, match.groups())))
+
+
 def load_module(module_name, params=None):
     # Checks if a module has already been loaded
     if module_is_loaded(module_name):
@@ -1906,27 +1934,20 @@ def get_cpu_max_frequency():
     """
     max_frequency = -1
     paths = utils._get_cpufreq_paths('cpuinfo_max_freq')
+    if not paths:
+        raise ValueError('Could not find max freq; is cpufreq supported?')
     for path in paths:
-        # Convert from kHz to Hz.
-        frequency = 1000 * _get_float_from_file(path, 0, None, None)
+        try:
+            # Convert from kHz to Hz.
+            frequency = 1000 * _get_float_from_file(path, 0, None, None)
+        # CPUs may come and go. A missing entry or two aren't critical.
+        except IOError:
+            continue
         max_frequency = max(frequency, max_frequency)
     # Sanity check.
-    assert max_frequency > 1e8, 'Unreasonably low CPU frequency.'
+    assert max_frequency > 1e8, ('Unreasonably low CPU frequency: %.1f' %
+            max_frequency)
     return max_frequency
-
-
-def get_cpu_min_frequency():
-    """
-    Returns the smallest of the minimum CPU core frequencies.
-    """
-    min_frequency = 1e20
-    paths = utils._get_cpufreq_paths('cpuinfo_min_freq')
-    for path in paths:
-        frequency = _get_float_from_file(path, 0, None, None)
-        min_frequency = min(frequency, min_frequency)
-    # Sanity check.
-    assert min_frequency > 1e8, 'Unreasonably low CPU frequency.'
-    return min_frequency
 
 
 def get_cpu_model():

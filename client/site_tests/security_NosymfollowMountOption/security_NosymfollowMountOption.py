@@ -24,8 +24,8 @@ class security_NosymfollowMountOption(test.test):
         # TODO(mortonm): add a function to utils to do this kernel version
         # check and raise NAError.
         version = utils.get_kernel_version()
-        if version == "3.8.11" or version == "3.10.18":
-            raise error.TestNAError('Test is n/a for kernels older than 3.14')
+        if version == "3.8.11":
+            raise error.TestNAError('Test is n/a for kernels older than 3.10')
         super(security_NosymfollowMountOption,
             self).__init__(*args, **kwargs)
         self._failure = False
@@ -118,23 +118,30 @@ class security_NosymfollowMountOption(test.test):
         finally:
             self.umount()
 
-    def run_once(self):
+    def run_once(self, test_selinux_interaction):
         """
         Runs the test, mounting filesystems and checking symlink traversal
         behavior.
         """
         self.mount_and_test_with_string("nosymfollow", True)
-        self.mount_and_test_with_string("nosymfollow,"
-                                        "context=u:object_r:tmpfs:s0,"
-                                        "fscontext=u:object_r:tmpfs:s0", True)
-        self.mount_and_test_with_string("context=u:object_r:tmpfs:s0,"
-                                        "nosymfollow,"
-                                        "fscontext=u:object_r:tmpfs:s0", True)
-        self.mount_and_test_with_string("context=u:object_r:tmpfs:s0,"
-                                        "fscontext=u:object_r:tmpfs:s0,"
-                                        "nosymfollow", True)
         self.mount_and_test_with_string("nodev,noexec,nosuid,nosymfollow", True)
         self.mount_and_test_with_string("nodev,noexec,nosuid", False)
+
+        if test_selinux_interaction:
+            if not os.path.exists('/etc/selinux'):
+                raise error.TestNAError('Test is n/a if selinux is not enabled')
+            self.mount_and_test_with_string("nosymfollow,"
+                                            "context=u:object_r:tmpfs:s0,"
+                                            "fscontext=u:object_r:tmpfs:s0",
+                                            True)
+            self.mount_and_test_with_string("context=u:object_r:tmpfs:s0,"
+                                            "nosymfollow,"
+                                            "fscontext=u:object_r:tmpfs:s0",
+                                            True)
+            self.mount_and_test_with_string("context=u:object_r:tmpfs:s0,"
+                                            "fscontext=u:object_r:tmpfs:s0,"
+                                            "nosymfollow",
+                                            True)
 
         # Make the test fail if any unexpected behaviour got detected. Note
         # that the error log output that will be included in the failure

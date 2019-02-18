@@ -15,7 +15,10 @@
 import logging
 import os
 
+from autotest_lib.client.common_lib import error
+from autotest_lib.server import hosts
 from autotest_lib.server import utils
+from autotest_lib.server.cros import camerabox_utils
 from autotest_lib.server.cros import tradefed_test
 
 # Maximum default time allowed for each individual CTS module.
@@ -39,6 +42,8 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
     _SHARD_CMD = '--shards'
     # TODO(pwang): b/110966363, remove it once scarlet is fixed.
     _NEED_DEVICE_INFO_BOARDS = ['scarlet', 'veyron_tiger']
+    _SCENE_URI = ('https://storage.googleapis.com'
+                  '/chromiumos-test-assets-public/camerabox/scene.pdf')
 
     def _tradefed_retry_command(self, template, session_id):
         """Build tradefed 'retry' command from template."""
@@ -100,12 +105,59 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
 
     def _should_skip_test(self, bundle):
         """Some tests are expected to fail and are skipped."""
-        # newbie and novato are x86 VMs without binary translation. Skip the ARM
-        # tests.
-        no_ARM_ABI_test_boards = ('newbie', 'novato', 'novato-arc64')
+        # novato* are x86 VMs without binary translation. Skip the ARM tests.
+        no_ARM_ABI_test_boards = ('novato', 'novato-arc64')
         if self._get_board_name() in no_ARM_ABI_test_boards and bundle == 'arm':
             return True
         return False
+
+    def initialize_camerabox(self, camera_facing, cmdline_args):
+        """Configure DUT and chart running in camerabox environment.
+        @param camera_facing: the facing of the DUT used in testing
+                              (e.g. 'front', 'back').
+        """
+        chart_address = camerabox_utils.get_chart_address(
+                [h.hostname for h in self._hosts], cmdline_args)
+        if chart_address is None:
+            raise error.TestFail(
+                    'Error: missing option --args="chart=<CHART IP>"')
+        chart_hosts = [hosts.create_host(ip) for ip in chart_address]
+
+        self.chart_fixtures = [
+                camerabox_utils.ChartFixture(h, self._SCENE_URI)
+                for h in chart_hosts
+        ]
+        self.dut_fixtures = [
+                camerabox_utils.DUTFixture(self, h, camera_facing)
+                for h in self._hosts
+        ]
+
+        for chart in self.chart_fixtures:
+            chart.initialize()
+
+        for dut in self.dut_fixtures:
+            dut.initialize()
+
+    def initialize(self,
+                   camera_facing=None,
+                   bundle=None,
+                   uri=None,
+                   host=None,
+                   hosts=None,
+                   max_retry=None,
+                   retry_manual_tests=False,
+                   warn_on_test_retry=True,
+                   cmdline_args=None):
+        super(cheets_CTS_N, self).initialize(
+                bundle=bundle,
+                uri=uri,
+                host=host,
+                hosts=hosts,
+                max_retry=max_retry,
+                retry_manual_tests=retry_manual_tests,
+                warn_on_test_retry=warn_on_test_retry)
+        if camera_facing:
+            self.initialize_camerabox(camera_facing, cmdline_args)
 
     def run_once(self,
                  test_name,
@@ -161,3 +213,19 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
             cts_uri=_CTS_URI,
             login_precondition_commands=login_precondition_commands,
             precondition_commands=precondition_commands)
+
+    def cleanup_camerabox(self):
+        """Cleanup configuration on DUT and chart tablet for running in
+        camerabox environment.
+        """
+        for dut in self.dut_fixtures:
+            dut.cleanup()
+
+        for chart in self.chart_fixtures:
+            chart.cleanup()
+
+    def cleanup(self):
+        if hasattr(self, 'dut_fixtures'):
+            self.cleanup_camerabox()
+
+        super(cheets_CTS_N, self).cleanup()

@@ -1218,10 +1218,17 @@ def _get_cpufreq_paths(filename, host=None):
     Returns a list of paths to the governors.
     """
     run_func = host.run if host else run
-    cmd = 'ls /sys/devices/system/cpu/cpu*/cpufreq/' + filename
+    glob = '/sys/devices/system/cpu/cpu*/cpufreq/' + filename
+    # Simple glob expansion; note that CPUs may come and go, causing these
+    # paths to change at any time.
+    cmd = 'echo ' + glob
     try:
-        paths = run_func(cmd, verbose=False).stdout.splitlines()
+        paths = run_func(cmd, verbose=False).stdout.split()
     except error.CmdError:
+        return []
+    # If the glob result equals itself, then we likely didn't match any real
+    # paths (assuming 'cpu*' is not a real path).
+    if paths == [glob]:
         return []
     return paths
 
@@ -1979,6 +1986,7 @@ def host_is_in_lab_zone(hostname):
     host_parts = hostname.split('.')
     dns_zone = CONFIG.get_config_value('CLIENT', 'dns_zone', default=None)
     fqdn = '%s.%s' % (host_parts[0], dns_zone)
+    logging.debug('Checking if host %s is in lab zone.', fqdn)
     try:
         socket.gethostbyname(fqdn)
         return True

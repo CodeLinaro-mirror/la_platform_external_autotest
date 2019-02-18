@@ -20,13 +20,13 @@ class security_ProcessManagementPolicy(test.test):
     _WHITELIST_DICT = {
         "cros-disks": set(("avfs", "fuse-drivefs", "fuse-exfat",
                                     "fuse-sshfs", "nobody", "ntfs-3g")),
-        "shill": set(("dhcp", "ipsec", "openvpn", "syslog", "nobody", "root")),
+        "shill": set(("dhcp", "ipsec", "openvpn", "syslog", "nobody")),
     }
 
     def __init__(self, *args, **kwargs):
         version = utils.get_kernel_version()
-        if version == "3.8.11" or version == "3.10.18":
-            raise error.TestNAError('Test is n/a for kernels older than 3.14')
+        if version == "3.8.11":
+            raise error.TestNAError('Test is n/a for kernels older than 3.10')
         super(security_ProcessManagementPolicy,
             self).__init__(*args, **kwargs)
         self._failure = False
