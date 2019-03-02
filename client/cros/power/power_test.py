@@ -16,10 +16,11 @@ class power_Test(test.test):
     """Optional base class power related tests."""
     version = 1
 
-    def initialize(self, seconds_period=20.):
+    def initialize(self, seconds_period=20., pdash_note=''):
         """Perform necessary initialization prior to power test run.
 
         @param seconds_period: float of probing interval in seconds.
+        @param pdash_note: note of the current run to send to power dashboard.
 
         @var backlight: power_utils.Backlight object.
         @var keyvals: dictionary of result keyvals.
@@ -69,6 +70,8 @@ class power_Test(test.test):
                 checkpoint_logger=self._checkpoint_logger)
 
         self._meas_logs = [self._plog, self._tlog, self._clog]
+
+        self._pdash_note = pdash_note
 
     def warmup(self, warmup_time=30):
         """Warm up.
@@ -137,7 +140,9 @@ class power_Test(test.test):
         keyvals.update(self._psr.get_keyvals())
 
         self.keyvals.update(keyvals)
-        self.write_perf_keyval(self.keyvals)
+
+        core_keyvals = power_utils.get_core_keyvals(self.keyvals)
+        self.write_perf_keyval(core_keyvals)
 
     def _publish_dashboard(self):
         """Report results to chromeperf & power dashboard."""
@@ -158,13 +163,16 @@ class power_Test(test.test):
 
         # publish to power dashboard
         pdash = power_dashboard.PowerLoggerDashboard(
-            self._plog, self.tagged_testname, self.resultsdir)
+            self._plog, self.tagged_testname, self.resultsdir,
+            note=self._pdash_note)
         pdash.upload()
         cdash = power_dashboard.CPUStatsLoggerDashboard(
-            self._clog, self.tagged_testname, self.resultsdir)
+            self._clog, self.tagged_testname, self.resultsdir,
+            note=self._pdash_note)
         cdash.upload()
         tdash = power_dashboard.TempLoggerDashboard(
-            self._tlog, self.tagged_testname, self.resultsdir)
+            self._tlog, self.tagged_testname, self.resultsdir,
+            note=self._pdash_note)
         tdash.upload()
 
     def _save_results(self):

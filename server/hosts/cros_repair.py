@@ -443,13 +443,13 @@ class _ResetRepairAction(hosts.RepairAction):
                 # If the DUT is up, we want to declare success, even if
                 # log gathering fails for some reason.  So, if there's
                 # a failure, just log it and move on.
-                logging.exception('Unexpected failure in log '
+                logging.exception('Non-critical failure in log '
                                   'collection during %s.',
                                   self.tag)
             return
         raise hosts.AutoservRepairError(
                 'Host %s is still offline after %s.' %
-                (host.hostname, self.tag))
+                (host.hostname, self.tag), 'failed_to_boot_after_' + self.tag)
 
 
 class ServoSysRqRepair(_ResetRepairAction):
@@ -472,7 +472,8 @@ class ServoSysRqRepair(_ResetRepairAction):
                 host.servo.sysrq_x()
             except error.TestFail, ex:
                 raise hosts.AutoservRepairError(
-                      'cannot press sysrq-x: %s.' % str(ex))
+                      'cannot press sysrq-x: %s.' % str(ex),
+                      'cannot_press_sysrq_x')
             # less than 5 seconds between presses.
             time.sleep(2.0)
         self._check_reset_success(host)
@@ -709,7 +710,7 @@ def create_cros_repair_strategy():
     """Return a `RepairStrategy` for a `CrosHost`."""
     verify_dag = _cros_verify_dag()
     repair_actions = _cros_repair_actions()
-    return hosts.RepairStrategy(verify_dag, repair_actions)
+    return hosts.RepairStrategy(verify_dag, repair_actions, 'cros')
 
 
 def _moblab_verify_dag():
@@ -758,7 +759,7 @@ def create_moblab_repair_strategy():
     """
     verify_dag = _moblab_verify_dag()
     repair_actions = _moblab_repair_actions()
-    return hosts.RepairStrategy(verify_dag, repair_actions)
+    return hosts.RepairStrategy(verify_dag, repair_actions, 'moblab')
 
 
 def _jetstream_repair_actions():
@@ -803,7 +804,7 @@ def create_jetstream_repair_strategy():
     """
     verify_dag = _jetstream_verify_dag()
     repair_actions = _jetstream_repair_actions()
-    return hosts.RepairStrategy(verify_dag, repair_actions)
+    return hosts.RepairStrategy(verify_dag, repair_actions, 'jetstream')
 
 
 # TODO(pprabhu) Move this to a better place. I have no idea what that place

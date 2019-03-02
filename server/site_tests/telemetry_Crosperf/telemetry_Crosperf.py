@@ -68,7 +68,7 @@ def _run_in_background(host, cmd, stdout, stderr, timeout):
     @param host: A host object representing where the command runs.
     @param cmd: The command to run.
 
-    @return The result of launching this command, which conatins pid info.
+    @return The result of launching this command, which contains pid info.
     """
     background_cmd = _RUN_BACKGROUND_TEMPLATE % {'cmd': cmd}
     logging.info('BACKGROUND CMD: %s', background_cmd)
@@ -94,7 +94,10 @@ def _kill_perf(host):
 
     @param host: A host object representing the DUT.
     """
-    kill_cmd = 'killall -INT perf'
+    # Note that here -2 equals -INT. ChromeOS release image cannot recognize
+    # -INT, so we need to specify it here.
+    kill_cmd = 'killall -2 perf'
+    logging.info('Killing perf using: %s', kill_cmd)
     host.run(kill_cmd, ignore_status=True).exit_status
 
 
@@ -209,6 +212,11 @@ class telemetry_Crosperf(test.test):
 
         # Decide whether the test will run locally or by a remote server.
         if args.get('run_local', 'false').lower() == 'true':
+            # We do not use local run for collecting profiles, will raise an
+            # error for this situation.
+            if profiler_args:
+                raise RuntimeError('Profiling with run_local set to true is no '
+                                   'longer supported.')
             # The telemetry scripts will run on DUT.
             _ensure_deps(dut, test_name)
             format_string = ('python %s --browser=system '

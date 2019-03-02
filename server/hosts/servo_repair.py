@@ -84,21 +84,15 @@ class _ConfigVerifier(hosts.Verifier):
                     '%s is %s; it should be %s' % (attr, val, expected_val))
 
 
-    def _get_configs(self, host):
+    def _get_config(self, host):
         """
-        Return all the config files to check.
+        Return the config file to check.
 
         @param host     Host object.
 
-        @return The list of config files to check.
+        @return The config file to check.
         """
-        # TODO(jrbarnette):  Testing `CONFIG_FILE` without a port number
-        # is a legacy.  Ideally, we would force all servos in the lab to
-        # update, and then remove this case.
-        config_list = ['%s_%d' % (self.CONFIG_FILE, host.servo_port)]
-        if host.servo_port == host.DEFAULT_PORT:
-            config_list.append(self.CONFIG_FILE)
-        return config_list
+        return '%s_%d' % (self.CONFIG_FILE, host.servo_port)
 
     @property
     def description(self):
@@ -129,14 +123,16 @@ class _SerialConfigVerifier(_ConfigVerifier):
         # not set.
         if host.servo_serial is None:
             return
-        for config in self._get_configs(host):
-            serialval = self._get_config_val(host, config, self.ATTR)
-            if serialval is not None:
-                self._validate_attr(host, serialval, host.servo_serial,
-                                    self.ATTR, config)
-                return
-        msg = 'Servo serial is unconfigured; should be %s' % host.servo_serial
-        raise hosts.AutoservVerifyError(msg)
+        config = self._get_config(host)
+        serialval = self._get_config_val(host, config, self.ATTR)
+        if serialval is None:
+            raise hosts.AutoservVerifyError(
+                    'Servo serial is unconfigured; should be %s'
+                    % host.servo_serial
+            )
+
+        self._validate_attr(host, serialval, host.servo_serial, self.ATTR,
+                            config)
 
 
 
@@ -162,16 +158,16 @@ class _BoardConfigVerifier(_ConfigVerifier):
         """
         if not host.is_cros_host():
             return
-        for config in self._get_configs(host):
-            boardval = self._get_config_val(host, config, self.ATTR)
-            if boardval is not None:
-                self._validate_attr(host, boardval, host.servo_board, self.ATTR,
-                                    config)
-                return
-        msg = 'Servo board is unconfigured'
-        if host.servo_board is not None:
-            msg += '; should be %s' % host.servo_board
-        raise hosts.AutoservVerifyError(msg)
+        config = self._get_config(host)
+        boardval = self._get_config_val(host, config, self.ATTR)
+        if boardval is None:
+            msg = 'Servo board is unconfigured'
+            if host.servo_board is not None:
+                msg += '; should be %s' % host.servo_board
+            raise hosts.AutoservVerifyError(msg)
+
+        self._validate_attr(host, boardval, host.servo_board, self.ATTR,
+                            config)
 
 
 class _ServodJobVerifier(hosts.Verifier):
@@ -263,7 +259,8 @@ class _RestartServod(hosts.RepairAction):
         if not host.is_cros_host():
             raise hosts.AutoservRepairError(
                     'Can\'t restart servod: not running '
-                    'embedded Chrome OS.')
+                    'embedded Chrome OS.',
+                    'servo_not_applicable_to_non_cros_host')
         host.run('stop servod PORT=%d || true' % host.servo_port)
         serial = 'SERIAL=%s' % host.servo_serial if host.servo_serial else ''
         model = 'MODEL=%s' % host.servo_model if host.servo_model else ''
@@ -309,14 +306,16 @@ class _ServoRebootRepair(repair_utils.RebootRepair):
     def repair(self, host):
         if host.is_localhost() or not host.is_cros_host():
             raise hosts.AutoservRepairError(
-                'Target servo is not a test lab servo')
+                'Target servo is not a test lab servo',
+                'servo_not_applicable_to_host_outside_lab')
         host.update_image(wait_for_update=True)
         afe = frontend_wrappers.RetryingAFE(timeout_min=5, delay_sec=10)
         dut_list = host.get_attached_duts(afe)
         if len(dut_list) > 1:
             raise hosts.AutoservRepairError(
                     'Repairing labstation with > 1 host not supported.'
-                    ' See crbug.com/843358')
+                    ' See crbug.com/843358',
+                    'can_not_repair_labstation_with_multiple_hosts')
         else:
             super(_ServoRebootRepair, self).repair(host)
 
@@ -378,4 +377,4 @@ def create_servo_repair_strategy():
         (_ServoRebootRepair, 'servo_reboot', ['servo_ssh'], servod_deps),
         (_DutRebootRepair, 'dut_reboot', ['servod'], ['lid_open']),
     ]
-    return hosts.RepairStrategy(verify_dag, repair_actions)
+    return hosts.RepairStrategy(verify_dag, repair_actions, 'servo')

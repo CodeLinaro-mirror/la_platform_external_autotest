@@ -595,21 +595,22 @@ def hash(hashtype, input=None):
 
     @param input: Optional input string that will be used to update the hash.
     """
+    # pylint: disable=redefined-builtin
     if hashtype not in ['md5', 'sha1']:
         raise ValueError("Unsupported hash type: %s" % hashtype)
 
     try:
-        hash = hashlib.new(hashtype)
+        computed_hash = hashlib.new(hashtype)
     except NameError:
         if hashtype == 'md5':
-            hash = md5.new()
+            computed_hash = md5.new()
         elif hashtype == 'sha1':
-            hash = sha.new()
+            computed_hash = sha.new()
 
     if input:
-        hash.update(input)
+        computed_hash.update(input)
 
-    return hash
+    return computed_hash
 
 
 def get_file(src, dest, permissions=None):
@@ -1088,18 +1089,18 @@ def system_output_parallel(commands, timeout=None, ignore_status=False,
     return out
 
 
-def strip_unicode(input):
-    if type(input) == list:
-        return [strip_unicode(i) for i in input]
-    elif type(input) == dict:
+def strip_unicode(input_obj):
+    if type(input_obj) == list:
+        return [strip_unicode(i) for i in input_obj]
+    elif type(input_obj) == dict:
         output = {}
-        for key in input.keys():
-            output[str(key)] = strip_unicode(input[key])
+        for key in input_obj.keys():
+            output[str(key)] = strip_unicode(input_obj[key])
         return output
-    elif type(input) == unicode:
-        return str(input)
+    elif type(input_obj) == unicode:
+        return str(input_obj)
     else:
-        return input
+        return input_obj
 
 
 def get_cpu_percentage(function, *args, **dargs):
@@ -1217,10 +1218,17 @@ def _get_cpufreq_paths(filename, host=None):
     Returns a list of paths to the governors.
     """
     run_func = host.run if host else run
-    cmd = 'ls /sys/devices/system/cpu/cpu*/cpufreq/' + filename
+    glob = '/sys/devices/system/cpu/cpu*/cpufreq/' + filename
+    # Simple glob expansion; note that CPUs may come and go, causing these
+    # paths to change at any time.
+    cmd = 'echo ' + glob
     try:
-        paths = run_func(cmd, verbose=False).stdout.splitlines()
+        paths = run_func(cmd, verbose=False).stdout.split()
     except error.CmdError:
+        return []
+    # If the glob result equals itself, then we likely didn't match any real
+    # paths (assuming 'cpu*' is not a real path).
+    if paths == [glob]:
         return []
     return paths
 
@@ -1724,15 +1732,15 @@ def args_to_dict(args):
         dictionary
     """
     arg_re = re.compile(r'(\w+)[:=](.*)$')
-    dict = {}
+    args_dict = {}
     for arg in args:
         match = arg_re.match(arg)
         if match:
-            dict[match.group(1).lower()] = match.group(2)
+            args_dict[match.group(1).lower()] = match.group(2)
         else:
             logging.warning("args_to_dict: argument '%s' doesn't match "
                             "'%s' pattern. Ignored.", arg, arg_re.pattern)
-    return dict
+    return args_dict
 
 
 def get_unused_port():
@@ -1978,6 +1986,7 @@ def host_is_in_lab_zone(hostname):
     host_parts = hostname.split('.')
     dns_zone = CONFIG.get_config_value('CLIENT', 'dns_zone', default=None)
     fqdn = '%s.%s' % (host_parts[0], dns_zone)
+    logging.debug('Checking if host %s is in lab zone.', fqdn)
     try:
         socket.gethostbyname(fqdn)
         return True

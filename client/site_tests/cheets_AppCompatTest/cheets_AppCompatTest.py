@@ -4,11 +4,11 @@
 
 import logging
 import os
-import time
 
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import arc
+from autotest_lib.client.cros.graphics import graphics_utils
 
 
 class cheets_AppCompatTest(arc.ArcTest):
@@ -41,6 +41,7 @@ class cheets_AppCompatTest(arc.ArcTest):
 
         super(cheets_AppCompatTest, self).initialize(
             disable_arc_opt_in=False, extra_browser_args=browser_args,
+            disable_app_sync=True, disable_play_auto_install=True,
             username='crosarcappcompat@gmail.com',
             password='appcompatautotest')
 
@@ -123,10 +124,11 @@ class cheets_AppCompatTest(arc.ArcTest):
             arc.adb_shell('rm -r %s' % screenshot, ignore_status=True)
 
 
-    def _save_logcat(self):
+    def _save_logcat(self, iteration):
         """Saves the logcat for the test run to the resultsdir."""
+        self._logcat = 'logcat%d.txt' % iteration
         arc.adb_cmd('logcat -d > %s' % os.path.join(self.resultsdir,
-                                                    'logcat.txt'))
+                                                    self._logcat))
 
 
     def _parse_results(self):
@@ -143,13 +145,13 @@ class cheets_AppCompatTest(arc.ArcTest):
                   self._pkg_name, self._app_version, passed, failed, nt,
                   blocked, skipped, ft))
         logging.info(result)
-        if int(failed) > 0:
-            raise error.TestFail(result)
+        pass_status = int(failed) == 0 and int(passed) > 0
+        return pass_status, result
 
 
     def _get_log_entry_count(self, entry):
         """Get the total number of times a string appears in logcat."""
-        logcat = os.path.join(self.resultsdir, 'logcat.txt')
+        logcat = os.path.join(self.resultsdir, self._logcat)
         return utils.run('grep "%s" %s | grep -c "%s"' %
                         (self._LOG_TAG, logcat, entry),
                          ignore_status=True).stdout.strip()
@@ -157,7 +159,7 @@ class cheets_AppCompatTest(arc.ArcTest):
 
     def _get_failed_test_cases(self):
         """Get the list of test cases that failed from logcat."""
-        logcat = os.path.join(self.resultsdir, 'logcat.txt')
+        logcat = os.path.join(self.resultsdir, self._logcat)
         failed_tests = []
         failed_tests_list = utils.run('grep "%s" %s | grep ",FAIL,"' %
                             (self._LOG_TAG, logcat),
@@ -172,20 +174,9 @@ class cheets_AppCompatTest(arc.ArcTest):
         arc.adb_cmd('logcat -G 16M')
 
 
-    def _wait_for_play_store_ready(self):
-        """
-        Wait for the Play Store to update.
-
-        When you log into a device for the first time Play Store will
-        sometimes restart itself to update if it is in the background. This
-        brings it back to the front repeatedly.
-
-        """
-        count = 0
-        while count < 50:
-            arc.adb_shell('am start %s' % self._PLAY_STORE_ACTIVITY)
-            time.sleep(3)
-            count += 1
+    def _clear_logcat_buffer(self):
+        """Clear logcat buffer between runs."""
+        arc.adb_cmd('logcat -c')
 
 
     def _get_app_version(self):
@@ -195,14 +186,37 @@ class cheets_AppCompatTest(arc.ArcTest):
                                           self._pkg_name)
 
 
-    def run_once(self):
+    def _take_screenshot(self, name):
+        try:
+            graphics_utils.take_screenshot(self.resultsdir, name)
+        except:
+            logging.info('Failed to take screenshot')
+
+
+    def run_once(self, retries=3):
         self._increase_logcat_buffer()
-        self._wait_for_play_store_ready()
         self._copy_resources_to_dut()
         self._grant_storage_permission()
-        self._start_test()
-        self._get_app_version()
-        self._capture_bugreport()
-        self._grab_screenshots()
-        self._save_logcat()
-        self._parse_results()
+
+        for trial in range(retries):
+            logging.info('Iteration %d: Trying to launch play store' % trial)
+
+            # Bring Play Store to front.
+            arc.adb_shell('am start %s' % self._PLAY_STORE_ACTIVITY)
+            self._take_screenshot('test_start')
+            self._start_test()
+            logging.info('Iteration %d: Test finished' % trial)
+            self._take_screenshot('test_end')
+            self._get_app_version()
+            self._capture_bugreport()
+            self._grab_screenshots()
+            self._save_logcat(trial)
+            passed, result = self._parse_results()
+            if passed:
+                return
+            elif trial + 1 >= retries:
+                raise error.TestFail(result)
+
+            # Kill playstore and clear logcat for next iteration.
+            arc.adb_shell('am force-stop %s' % self._PLAY_STORE_ACTIVITY)
+            self._clear_logcat_buffer()

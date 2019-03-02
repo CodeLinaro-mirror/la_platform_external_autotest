@@ -40,13 +40,13 @@ PERF_DAILY_RUN_TESTS = (
     'blink_perf.image_decoder',
     'cros_tab_switching.typical_24',
     'dromaeo',
+    'media.desktop',
     'memory.desktop',
     'smoothness.tough_pinch_zoom_cases',
     'webrtc',
 )
 
 PERF_WEEKLY_RUN_TESTS = (
-    'system_health.memory_desktop',
 )
 
 ALL_TESTS = (PERF_PER_BUILD_TESTS +
