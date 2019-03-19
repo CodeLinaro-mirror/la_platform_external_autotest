@@ -4,7 +4,9 @@
 
 import logging, os, re
 
+from autotest_lib.client.common_lib.cros import arc_common
 from autotest_lib.client.common_lib.cros import arc_util
+from autotest_lib.client.common_lib.cros import assistant_util
 from autotest_lib.client.cros import constants
 from autotest_lib.client.bin import utils
 from telemetry.core import cros_interface, exceptions, util
@@ -59,7 +61,10 @@ class Chrome(object):
                  disable_app_sync=False,
                  disable_play_auto_install=False,
                  disable_locale_sync=True,
-                 init_network_controller=False, login_delay=0):
+                 enable_assistant=False,
+                 enterprise_arc_test=False,
+                 init_network_controller=False,
+                 login_delay=0):
         """
         Constructor of telemetry wrapper.
 
@@ -102,6 +107,7 @@ class Chrome(object):
         @param disable_play_auto_install:
             Adds --arc-disable-play-auto-install to browser args and this
             disables ARC Play Auto Install flow. By default it is enabled.
+        @param enterprise_arc_test: Skips opt_in causing enterprise tests to fail
         @param disable_locale_sync:
             Adds --arc-disable-locale-sync to browser args and this
             disables locale sync between Chrome and Android container. In case
@@ -112,6 +118,8 @@ class Chrome(object):
             disabled.
         @param login_delay: Time for idle in login screen to simulate the time
                             required for password typing.
+        @param enable_assistant: For tests that require to enable Google
+                                  Assistant service. Default is False.
         """
         self._autotest_ext_path = None
 
@@ -210,8 +218,16 @@ class Chrome(object):
                         if arc_util.should_start_arc(arc_mode):
                             arc_util.enable_play_store(self.autotest_ext, True)
                     else:
-                        arc_util.opt_in(self.browser, self.autotest_ext)
+                        if not enterprise_arc_test:
+                            wait_for_provisioning = \
+                                    arc_mode != arc_common.ARC_MODE_ENABLED_ASYNC
+                            arc_util.opt_in(
+                                    browser = self.browser,
+                                    autotest_ext = self.autotest_ext,
+                                    wait_for_provisioning = wait_for_provisioning)
                     arc_util.post_processing_after_browser(self)
+                if enable_assistant:
+                    assistant_util.enable_assistant(self.autotest_ext)
                 break
             except exceptions.LoginException as e:
                 logging.error('Timed out logging in, tries=%d, error=%s',
