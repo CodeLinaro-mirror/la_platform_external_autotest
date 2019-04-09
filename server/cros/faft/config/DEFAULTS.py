@@ -60,9 +60,6 @@ class Values(object):
     # Delay between keypresses in firmware screen
     confirm_screen = 3
 
-    # Only True on Alex/ZGB which needs a transition state to enter dev mode.
-    need_dev_transition = False
-
     # Delay between passing firmware screen and text mode warning screen
     legacy_text_screen = 20
 
@@ -123,3 +120,6 @@ class Values(object):
 
     # True if the lid can wake the system from a powered off state
     lid_wake_from_power_off = True
+
+    # True if AP can access the EC flash while Chrome OS is running
+    ap_access_ec_flash = True
