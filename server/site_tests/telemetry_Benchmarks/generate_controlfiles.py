@@ -43,6 +43,7 @@ PERF_DAILY_RUN_TESTS = (
     'media.desktop',
     'memory.desktop',
     'smoothness.tough_pinch_zoom_cases',
+    'system_health.memory_desktop',
     'webrtc',
 )
 
@@ -56,6 +57,7 @@ ALL_TESTS = (PERF_PER_BUILD_TESTS +
 EXTRA_ARGS_MAP = {
     'loading.desktop': '--story-tag-filter=typical',
     'rendering.desktop': '--story-tag-filter=top_real_world_desktop',
+    'system_health.memory_desktop': '--pageset-repeat=1',
 }
 
 DEFAULT_YEAR = str(datetime.now().year)

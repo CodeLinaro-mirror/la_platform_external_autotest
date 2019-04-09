@@ -102,6 +102,7 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
     WEB_PORT = 8080
     WEB_HOST = 'http://localhost:%d' % WEB_PORT
     CHROME_POLICY_PAGE = 'chrome://policy'
+    CHROME_VERSION_PAGE = 'chrome://version'
 
 
     def initialize(self, **kwargs):
@@ -117,7 +118,8 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
 
     def _initialize_enterprise_policy_test(
             self, case='', env='dm-fake', dms_name=None,
-            username=USERNAME, password=PASSWORD, gaia_id=GAIA_ID, **kwargs):
+            username=USERNAME, password=PASSWORD, gaia_id=GAIA_ID,
+            set_auto_logout=None, **kwargs):
         """
         Initialize test parameters and fake DM Server.
 
@@ -138,9 +140,11 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
         self.username = username
         self.password = password
         self.gaia_id = gaia_id
+        self.set_auto_logout = set_auto_logout
         self.dms_name = dms_name
         self.dms_is_fake = (env == 'dm-fake')
         self.arc_enabled = False
+        self.version = None
         self._enforce_variable_restrictions()
 
         # Install protobufs and add import path.
@@ -158,6 +162,9 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
         # Get enterprise directory of shared resources.
         client_dir = os.path.dirname(os.path.dirname(self.bindir))
         self.enterprise_dir = os.path.join(client_dir, 'cros/enterprise')
+
+        if self.set_auto_logout is not None:
+            self._auto_logout = self.set_auto_logout
 
         # Log the test context parameters.
         logging.info('Test Context Parameters:')
@@ -302,6 +309,7 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
         # Skip policy check upon request or if we enroll but don't log in.
         skip_policy_value_verification = (
                 skip_policy_value_verification or not auto_login)
+
         if not skip_policy_value_verification:
             self.verify_policy_stats(user_policies, suggested_user_policies,
                                      device_policies)
@@ -324,7 +332,7 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
         @param setup_arc: whether to run setup_arc in arc.Arctest.
         @param use_clouddpc_test: bool, run_clouddpc_test() or not.
         '''
-        _APP_FILENAME = 'arc_test_release_signed.apk'
+        _APP_FILENAME = 'autotest-deps-cloudpctest-0.4.apk'
         _DEP_PACKAGE = 'CloudDPCTest-apks'
         _PKG_NAME = 'com.google.android.apps.work.clouddpc.e2etests'
 
@@ -534,20 +542,17 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
 
         """
         table_index = policy_tab.EvaluateJavaScript("""
-            var table_index = -1
-            var tables = document.getElementsByClassName(
-                'policy-table-section');
-            for (var i = 1; i < tables.length; i++) {
-                var description = tables[i].querySelector('.table-description')
-                if (description !== null) {
-                    var table_id = description.innerText.split(': ').pop();
-                    if (table_id === '%s') {
-                        table_index = i;
-                        break;
-                    }
+        var table_id = -1;
+        var section = document.getElementsByClassName('policy-table');
+        for (var i = 0; i < section.length; i++) {
+            var temp_name = section[i]
+                .getElementsByClassName('id')[0].innerText;
+            if (temp_name === "%s")
+                { var table_id = i;
+                  break ;
                 }
-            }
-            table_index;
+           };
+        table_id;
             """ % ext_id)
         if table_index == -1:
             raise error.TestError(
@@ -580,7 +585,6 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
 
         """
         policy_tab = self.navigate_to_url(self.CHROME_POLICY_PAGE)
-
         for id in extension_policies.keys():
             table = self._get_extension_policy_table(policy_tab, id)
             download_url = extension_policies[id]['download_url']
@@ -601,7 +605,6 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
                 self._compare_values(policy_name, expected_value, value_shown)
 
         policy_tab.Close()
-
 
     def _get_policy_stats_shown(self, policy_tab, policy_name,
                                 table_index=0):
@@ -624,59 +627,61 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
                   and 'source'.
         """
         stats = {'name': policy_name}
-
         row_values = policy_tab.EvaluateJavaScript('''
-            var section = document.getElementsByClassName(
-                    "policy-table-section")[%s];
-            var table = section.getElementsByTagName('table')[0];
-            rowValues = {};
-            for (var i = 1, row; row = table.rows[i]; i++) {
-                if (row.className !== 'expanded-value-container') {
-                    var name_div = row.getElementsByClassName('name elide')[0];
-                    if (typeof name_div === 'undefined') {
-                        continue;
-                    }
-                    var name_links = name_div.getElementsByClassName(
-                            'name-link');
-                    var name = (name_links.length > 0) ?
-                            name_links[0].textContent : name_div.textContent;
-                    rowValues['name'] = name;
-                    if (name === '%s') {
-                        stat_names = ['value', 'status', 'level',
-                                      'scope', 'source'];
-                        stat_names.forEach(function(entry) {
-                            var entry_div = row.getElementsByClassName(
-                                    entry)[0];
-                            if (typeof entry_div !== 'undefined') {
-                                rowValues[entry] = entry_div.textContent;
-                            }
-                        });
-                        break;
-                    }
-               }
-            }
-            rowValues;
+        var rowValues = {};
+        var section = document.getElementsByClassName('policy-table')[%s];
+        table = section.getElementsByClassName('main')[0];
+        var pol_rows = table.getElementsByClassName('policy-data');
+        for (i = 0; i < pol_rows.length; i++) {
+            if (window.getComputedStyle(pol_rows[i]).display === "none")
+                { break ;}
+            var pol_name = pol_rows[i]
+                .getElementsByClassName('policy row')[0]
+                .getElementsByClassName('name')[0].innerText;
+            if (pol_name === '%s'){
+                var pol_data = pol_rows[i]
+                    .getElementsByClassName('policy row')[0];
+                var value_data = pol_rows[i]
+                    .getElementsByClassName('value row')[0];
+                rowValues["value"] = value_data
+                    .getElementsByClassName('value')[0].innerText;
+                var column_titles = ["name", "source",
+                                     "scope", "level", "messages"];
+                column_titles.forEach(function(entry) {
+                    var entry_div = pol_data.getElementsByClassName(entry)[0];
+                    rowValues[entry] = entry_div.innerText});
+           };
+        };
+        rowValues;
         ''' % (table_index, policy_name))
 
-        entries = ['value', 'status', 'level', 'scope', 'source']
+        entries = ["name", "value", "source", "scope", "level", "messages"]
+
+        # New Policy Parser returns empty, rather than 'Not Set.'. This is
+        # a fix to make it compatible with the rest of the parsing code rather
+        # than a larger re-write.
+        if not row_values:
+            for entry in entries:
+                row_values[entry] = ''
+            row_values['messages'] = 'Not set.'
 
         logging.debug('Policy %s row: %s', policy_name, row_values)
         key_diff = set(entries) - set(row_values.keys())
         if key_diff:
             raise error.TestError(
-                    'Could not get policy info for %s. '
-                    'Missing columns: %s.' % (policy_name, key_diff))
+                'Could not get policy info for %s. '
+                'Missing columns: %s.' % (policy_name, key_diff))
 
         for v in entries:
             stats[v] = row_values[v].encode('ascii', 'ignore')
 
-        if stats['status'] == 'Not set.':
+        if stats['messages'] == 'Not set.':
             for v in entries:
                 stats[v] = None
-        else: stats['value'] = decode_json_string(stats['value'])
+        else:
+            stats['value'] = decode_json_string(stats['value'])
 
         return stats
-
 
     def _get_policy_value_from_new_tab(self, policy_name):
         """Get the policy value for |policy_name| from the Policies page.
@@ -691,6 +696,19 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
         values = self._get_policy_stats_from_new_tab([policy_name])
         return values[policy_name]['value']
 
+    def _get_chrome_version_from_browser(self):
+        """Get the Chrome Version from the ://version page.
+
+        @returns: Version as shown on ://version page.
+        """
+        tab = self.navigate_to_url(self.CHROME_VERSION_PAGE)
+        table_name = 'inner'
+        version_box = 'version'
+        version_row = 0
+        return tab.EvaluateJavaScript(
+            "document.getElementById('{}').rows[{}]\
+            .getElementsByClassName('{}')[0].innerText"
+            .format(table_name, version_row, version_box))
 
     def _get_policy_values_from_new_tab(self, policy_names):
         """Get the policy values of the given policies.
@@ -706,8 +724,8 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
         values = {}
         tab = self.navigate_to_url(self.CHROME_POLICY_PAGE)
         for policy_name in policy_names:
-          values[policy_name] = (
-                  self._get_policy_stats_shown(tab, policy_name)['value'])
+            values[policy_name] = (
+                self._get_policy_stats_shown(tab, policy_name)['value'])
         tab.Close()
 
         return values
@@ -813,7 +831,7 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
             err_str = 'Incorrect '+stat+' for '+name+': expected %s, got %s!'
             shown = stats[name][stat]
             # If policy is not set, there are no stats to match.
-            if stats[name]['status'] == None:
+            if stats[name]['messages'] is None:
                 if not shown == None:
                     raise error.TestError(err_str % (None, shown))
                 else:

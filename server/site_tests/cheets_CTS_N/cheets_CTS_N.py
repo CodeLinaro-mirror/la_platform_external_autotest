@@ -28,8 +28,8 @@ _CTS_TIMEOUT_SECONDS = 3600
 # Public download locations for android cts bundles.
 _DL_CTS = 'https://dl.google.com/dl/android/cts/'
 _CTS_URI = {
-    'arm': _DL_CTS + 'android-cts-7.1_r25-linux_x86-arm.zip',
-    'x86': _DL_CTS + 'android-cts-7.1_r25-linux_x86-x86.zip',
+    'arm': _DL_CTS + 'android-cts-7.1_r26-linux_x86-arm.zip',
+    'x86': _DL_CTS + 'android-cts-7.1_r26-linux_x86-x86.zip',
     'media': _DL_CTS + 'android-cts-media-1.4.zip',
 }
 
@@ -147,6 +147,7 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
                    host=None,
                    hosts=None,
                    max_retry=None,
+                   load_waivers=True,
                    retry_manual_tests=False,
                    warn_on_test_retry=True,
                    cmdline_args=None):
@@ -156,6 +157,7 @@ class cheets_CTS_N(tradefed_test.TradefedTest):
                 host=host,
                 hosts=hosts,
                 max_retry=max_retry,
+                load_waivers=load_waivers,
                 retry_manual_tests=retry_manual_tests,
                 warn_on_test_retry=warn_on_test_retry)
         if camera_facing:

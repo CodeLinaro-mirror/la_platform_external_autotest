@@ -89,7 +89,7 @@ def _parse_args():
   parser.add_argument(
       '--force-firmware',
       action='store_true',
-      help='Force firmware installation via chromeos-installfirmware.',
+      help='Force firmware isntallation via chromeos-installfirmware.',
   )
 
   return parser.parse_args()
