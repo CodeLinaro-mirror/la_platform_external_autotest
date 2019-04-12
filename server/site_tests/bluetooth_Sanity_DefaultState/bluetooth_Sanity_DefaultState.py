@@ -8,6 +8,8 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros.bluetooth import bluetooth_socket
 from autotest_lib.server.cros.bluetooth import bluetooth_test
 
+DEVICE_ADDRESS = '01:02:03:04:05:06'
+ADDRESS_TYPE = 0
 
 class bluetooth_Sanity_DefaultState(bluetooth_test.BluetoothTest):
     """
@@ -62,6 +64,14 @@ class bluetooth_Sanity_DefaultState(bluetooth_test.BluetoothTest):
         if flags & bluetooth_socket.HCI_RAW:
             strs.append("RAW")
         logging.debug(msg + ' [HCI]: %s', " ".join(strs))
+
+    def cleanup(self):
+        """ Test specific cleanup
+            Remove any devices added to whitelist
+        """
+        self.device.remove_device(DEVICE_ADDRESS, ADDRESS_TYPE)
+        super(bluetooth_Sanity_DefaultState, self).cleanup()
+
 
     def compare_property(self, bluez_property, mgmt_setting, current_settings):
         """ Compare bluez property value and Kernel property
@@ -138,13 +148,14 @@ class bluetooth_Sanity_DefaultState(bluetooth_test.BluetoothTest):
         if not current_settings & bluetooth_socket.MGMT_SETTING_PAIRABLE:
             raise error.TestFail('Bluetooth adapter is not pairable')
 
-        # If the kernel supports the BR/EDR whitelist, the adapter should _not_
-        # be generically connectable; if it doesn't, it should be.
-        if supports_add_device:
-            if current_settings & bluetooth_socket.MGMT_SETTING_CONNECTABLE:
-                raise error.TestFail('Bluetooth adapter is connectable')
-        elif not current_settings & bluetooth_socket.MGMT_SETTING_CONNECTABLE:
-            raise error.TestFail('Bluetooth adapter is not connectable')
+        # If the kernel does not supports the BR/EDR whitelist, the adapter
+        # should be generically connectable;
+        # if it doesn't, then it depends on previous settings.
+        if not supports_add_device:
+            if not current_settings & bluetooth_socket.MGMT_SETTING_CONNECTABLE:
+                raise error.TestFail('Bluetooth adapter is not connectable '
+                                     'though kernel does not support '
+                                     'BR/EDR whitelist')
 
         # Verify that the Bluetooth Daemon sees the same state as the kernel
         # and that it's not discovering.
@@ -183,27 +194,40 @@ class bluetooth_Sanity_DefaultState(bluetooth_test.BluetoothTest):
             raise error.TestFail('HCI INQUIRY flag does not match kernel while '
                                  'powered on')
 
-        # If the kernel supports the BR/EDR whitelist, the adapter isn't
-        # supposed to be generically connectable, so should _not_ be in PSCAN
-        # mode yet. If it doesn't, it should be. This matches the management
-        # API "connectable" setting so far.
-        if supports_add_device:
-            if flags & bluetooth_socket.HCI_PSCAN:
-                raise error.TestFail('HCI PSCAN flag does not match kernel '
-                                     'while powered on')
-        elif not flags & bluetooth_socket.HCI_PSCAN:
-            raise error.TestFail('HCI PSCAN flag does not match kernel '
-                                 'while powered on')
+        # If the kernel does not supports the BR/EDR whitelist, the adapter
+        # should generically connectable, so should it should be in PSCAN
+        # mode. This matches the management API "connectable" setting so far.
+        if not supports_add_device:
+            if not flags & bluetooth_socket.HCI_PSCAN:
+                raise error.TestFail('HCI PSCAN flag not set though kernel'
+                                     'does not supports BR/EDR whitelist')
 
         # Now we can examine the differences. Try adding and removing a device
         # from the kernel BR/EDR whitelist. The management API "connectable"
         # setting should remain off, but we should be able to see the PSCAN
         # flag come and go.
         if supports_add_device:
+            # If PSCAN is currently on then device is CONNECTABLE
+            # or a previous add device which was not removed.
+            # Turn on and off DISCOVERABLE to turn off CONNECTABLE and
+            # PSCAN
+            if flags & bluetooth_socket.HCI_PSCAN:
+                if not (current_settings &
+                        bluetooth_socket.MGMT_SETTING_CONNECTABLE):
+                    raise error.TestFail('PSCAN on but device not CONNECTABLE')
+                logging.debug('Toggle Discoverable to turn off CONNECTABLE')
+                self.device.set_discoverable(True)
+                self.device.set_discoverable(False)
+                current_settings = self.device.read_info()[4]
+                flags = self.device.get_dev_info()[3]
+                self._log_flags('Discoverability Toggled', flags)
+                if flags & bluetooth_socket.HCI_PSCAN:
+                    raise error.TestFail('PSCAN on after toggling DISCOVERABLE')
+
             previous_settings = current_settings
             previous_flags = flags
 
-            self.device.add_device('01:02:03:04:05:06', 0, 1)
+            self.device.add_device(DEVICE_ADDRESS, ADDRESS_TYPE, 1)
 
             current_settings = self.device.read_info()[4]
             self._log_settings("After add device", current_settings)
@@ -212,13 +236,15 @@ class bluetooth_Sanity_DefaultState(bluetooth_test.BluetoothTest):
             self._log_flags('After add device', flags)
 
             if current_settings != previous_settings:
+                self._log_settings("previous settings", previous_settings)
+                self._log_settings("current settings", current_settings)
                 raise error.TestFail(
                     'Bluetooth adapter settings changed after add device')
             if not flags & bluetooth_socket.HCI_PSCAN:
                 raise error.TestFail('HCI PSCAN flag not set after add device')
 
             # Remove the device again, and make sure the PSCAN flag goes away.
-            self.device.remove_device('01:02:03:04:05:06', 0)
+            self.device.remove_device(DEVICE_ADDRESS, ADDRESS_TYPE)
 
             current_settings = self.device.read_info()[4]
             self._log_settings("After remove device", current_settings)
@@ -230,7 +256,7 @@ class bluetooth_Sanity_DefaultState(bluetooth_test.BluetoothTest):
                 raise error.TestFail(
                     'Bluetooth adapter settings changed after remove device')
             if flags & bluetooth_socket.HCI_PSCAN:
-                raise error.TestFail('HCI PSCAN flag set after add device')
+                raise error.TestFail('HCI PSCAN flag set after remove device')
 
         # Finally power off the adapter again, and verify that the adapter has
         # returned to powered down.
