@@ -24,7 +24,7 @@ from autotest_lib.server.cros.faft.config.config import Config as FAFTConfig
 
 
 # Number of seconds for program EC/BIOS to time out.
-FIRMWARE_PROGRAM_TIMEOUT_SEC = 600
+FIRMWARE_PROGRAM_TIMEOUT_SEC = 900
 
 class ProgrammerError(Exception):
     """Local exception class wrapper."""
@@ -270,8 +270,6 @@ class FlashECProgrammer(_BaseProgrammer):
         port = self._servo._servo_host.servo_port
         self._program_cmd = ('flash_ec --chip=%s --image=%s --port=%d' %
                              (self._ec_chip, image, port))
-        if self._servo_version == 'servo_v4_with_ccd_cr50':
-            self._program_cmd += ' --raiden'
         if self._ec_chip == 'stm32':
             self._program_cmd += ' --bitbang_rate=57600'
         self._program_cmd += ' --verify'
