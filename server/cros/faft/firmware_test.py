@@ -226,7 +226,7 @@ class FirmwareTest(FAFTBase):
         if hasattr(self, 'cr50'):
             system_info['cr50_version'] = self.servo.get('cr50_version')
 
-        logging.info('System info:\n' + pprint.pformat(system_info))
+        logging.info('System info:\n%s', pprint.pformat(system_info))
         self.write_attr_keyval(system_info)
 
     def invalidate_firmware_setup(self):
@@ -646,14 +646,7 @@ class FirmwareTest(FAFTBase):
 
         @param enable: True if asserting write protect pin. Otherwise, False.
         """
-        try:
-            self.servo.set('fw_wp_state', 'force_on' if enable else 'force_off')
-        except:
-            # TODO(waihong): Remove this fallback when all servos have the
-            # above new fw_wp_state control.
-            self.servo.set('fw_wp_vref', self.faft_config.wp_voltage)
-            self.servo.set('fw_wp_en', 'on')
-            self.servo.set('fw_wp', 'on' if enable else 'off')
+        self.servo.set('fw_wp_state', 'force_on' if enable else 'force_off')
 
     def set_ec_write_protect_and_reboot(self, enable):
         """Set EC write protect status and reboot to take effect.
@@ -713,6 +706,10 @@ class FirmwareTest(FAFTBase):
         self._old_wpsw_boot = self.checkers.crossystem_checker(
                                    {'wpsw_boot': '1'}, suppress_logging=True)
         if not (ec_wp == self._old_wpsw_cur == self._old_wpsw_boot):
+            if not self.faft_config.ap_access_ec_flash:
+                raise error.TestNAError(
+                        "Cannot change EC write-protect for this device")
+
             logging.info('The test required EC is %swrite-protected. Reboot '
                          'and flip the state.', '' if ec_wp else 'not ')
             self.switcher.mode_aware_reboot(
@@ -900,10 +897,6 @@ class FirmwareTest(FAFTBase):
 
     def _setup_gbb_flags(self):
         """Setup the GBB flags for FAFT test."""
-        if self.faft_config.gbb_version < 1.1:
-            logging.info('Skip modifying GBB on versions older than 1.1.')
-            return
-
         if self.check_setup_done('gbb_flags'):
             return
 
