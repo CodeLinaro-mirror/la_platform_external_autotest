@@ -12,7 +12,6 @@ class Values(object):
     has_lid = True
     lid_wake_from_power_off = False
     spi_voltage = 'pp3300'
-    wp_voltage = 'pp3300'
     # Not a Chrome EC, do not expect keyboard via EC
     chrome_ec = False
     ec_capability = []
@@ -20,3 +19,8 @@ class Values(object):
     # Temporary until switch to power button
     rec_button_dev_switch = True
     smm_store = False
+    # The EC image is stored in the AP SPI chip, so flashrom -p ec won't work.
+    ap_access_ec_flash = False
+    # Depthcharge USB stack can drop keys that come in too fast and get stuck
+    # exiting developer mode if the delay for confirmation screen is too short.
+    confirm_screen = 11
