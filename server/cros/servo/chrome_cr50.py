@@ -85,8 +85,15 @@ class ChromeCr50(chrome_ec.ChromeConsole):
     GET_CAP_TRIES = 3
 
 
-    def __init__(self, servo):
+    def __init__(self, servo, faft_config):
+        """Initializes a ChromeCr50 object.
+
+        Args:
+          servo: A Servo object.
+          faft_config: A Config object.
+        """
         super(ChromeCr50, self).__init__(servo, 'cr50_uart')
+        self.faft_config = faft_config
 
 
     def wake_cr50(self):
@@ -145,6 +152,22 @@ class ChromeCr50(chrome_ec.ChromeConsole):
             if cap_setting != 'Default':
                 is_reset = False
         return in_factory_mode, is_reset
+
+
+    def password_is_reset(self):
+        """Returns True if the password is cleared"""
+        return self.get_ccd_info()['Password'] == 'none'
+
+
+    def ccd_is_reset(self):
+        """Returns True if the ccd is reset
+
+        The password must be cleared, write protect and battery presence must
+        follow battery presence, and all capabilities must be Always
+        """
+        return (self.password_is_reset() and self.wp_is_reset() and
+                self.batt_pres_is_reset() and
+                self.get_cap_overview(self.get_cap_dict())[1])
 
 
     def wp_is_reset(self):
@@ -430,6 +453,12 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         else:
             self._uart_wait_for_reboot(cmd, timeout)
 
+        # On most devices, a Cr50 reset will cause an AP reset. Force this to
+        # happen on devices where the AP is left down.
+        if not self.faft_config.ap_up_after_cr50_reboot:
+            logging.info('Resetting DUT after Cr50 reset')
+            self._servo.get_power_state_controller().reset()
+
 
     def rollback(self, eraseflashinfo=True, chip_bid=None, chip_flags=None):
         """Set the reset counter high enough to force a rollback then reboot
@@ -490,7 +519,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
 
     def using_prod_rw_keys(self):
         """Returns True if the RW keyid is prod"""
-        rv = self.send_safe_command_retry_get_output('sysinfo',
+        rv = self.send_safe_command_get_output('sysinfo',
                 ['RW keyid:.*\(([a-z]+)\)'])
         logging.info(rv)
         return rv[0][1] == 'prod'
@@ -550,9 +579,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         if self.using_ccd():
             return self._servo.get('ccd_state') == 'on'
         else:
-            result = self.send_command_retry_get_output('gpioget',
-                    ['(0|1)[ \S]*CCD_MODE_L'])
-            return not bool(int(result[0][1]))
+            return not bool(self.gpioget('CCD_MODE_L'))
 
 
     @servo_v4_command
@@ -786,6 +813,8 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         For testlab enable/disable you must press the power button 5 times
         spaced between 100msec and 5 seconds apart.
         """
+        ap_on_before = self.ap_is_on()
+
         end_time = time.time() + unlock_timeout
 
         logging.info('Pressing power button for %ds to unlock the console.',
@@ -796,6 +825,17 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         while time.time() < end_time:
             self._servo.power_short_press()
             time.sleep(1)
+
+        # If the last power button press left the AP powered off, and it was on
+        # before, turn it back on.
+        time.sleep(self.faft_config.shutdown)
+        ap_on_after = self.ap_is_on()
+        logging.debug('During run_pp, AP %s -> %s',
+                'on' if ap_on_before else 'off',
+                'on' if ap_on_after else 'off')
+        if ap_on_before and not ap_on_after:
+            self._servo.power_short_press()
+            logging.debug('Pressing PP to turn back on')
 
 
     def gettime(self):
@@ -869,3 +909,88 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         logging.debug(result)
 
         return result.lower() == 'enabled'
+
+    def ap_is_on(self):
+        """Get the power state of the AP.
+
+        Returns True if the AP is on; False otherwise.
+        """
+        # Look for a line like 'AP: on' or 'AP: off'. 'debouncing' or 'unknown'
+        # may appear transiently. 'debouncing' should transition to 'on' or
+        # 'off' within 1 second, and 'unknown' should do so within 20 seconds.
+        ap_state = ''
+        max_tries = 20
+        tries = 0
+        while not (ap_state == 'on' or ap_state == 'off') and tries < max_tries:
+            ap_state = self.send_command_get_output('ccdstate',
+                                                    [r'\bAP:\s*(\w+)\b'])[0][1]
+            tries += 1
+            time.sleep(1)
+
+        if ap_state == 'on':
+            return True
+        elif ap_state == 'off':
+            return False
+        else:
+            raise error.TestFail('Read unusable AP state from ccdstate: "%s"',
+                                 ap_state)
+
+    def gpioget(self, signal_name):
+        """Get the current state of the signal
+
+        Returns:
+            an integer 1 or 0 based on the gpioget value
+        """
+        result = self.send_command_retry_get_output('gpioget',
+                ['(0|1)[ \S]*%s' % signal_name])
+        return int(result[0][1])
+
+    def batt_pres_is_reset(self):
+        """Returns True if batt pres is reset to always follow batt pres"""
+        follow_bp, _, follow_bp_atboot, _ = self.get_batt_pres_state()
+        return follow_bp and follow_bp_atboot
+
+    def get_batt_pres_state(self):
+        """Returns a tuple of the current battery presence state.
+
+        The atboot setting cannot really be determined now if it is set to
+        follow battery presence. It is likely to remain the same after reboot,
+        but who knows. If the third element of the tuple is True, the last
+        element will not be that useful
+
+        Returns:
+            (True if current state is to follow batt presence,
+             True if battery is connected,
+             True if current state is to follow batt presence atboot,
+             True if battery is connected atboot)
+        """
+        # bpforce is added in 4.16. If the image doesn't have the command, cr50
+        # always follows battery presence. In these images 'gpioget BATT_PRES_L'
+        # accurately represents the battery presence state, because it can't be
+        # overidden.
+        if not self.has_command('bpforce'):
+            batt_pres = not bool(self.gpioget('BATT_PRES_L'))
+            return (True, batt_pres, True, batt_pres)
+
+        # The bpforce command is very similar to the wp command. It just
+        # substitutes 'connected' for 'enabled' and 'disconnected' for
+        # 'disabled'.
+        rv = self.send_command_get_output('bpforce',
+                ['batt pres: (forced )?(con|dis).*at boot: (forced )?'
+                 '(follow|discon|con)'])[0]
+        _, forced, connected, _, atboot = rv
+        logging.info(rv)
+        return (not forced, connected == 'con', atboot == 'follow',
+                atboot == 'con')
+
+    def set_batt_pres_state(self, state, atboot):
+        """Override the battery presence state.
+
+        Args:
+            state: a string of the battery presence setting: 'connected',
+                  'disconnected', or 'follow_batt_pres'
+            atboot: True if we're overriding battery presence atboot
+        """
+        cmd = 'bpforce %s%s' % (state, ' atboot' if atboot else '')
+        logging.info('running %r', cmd)
+        self.send_command(cmd)

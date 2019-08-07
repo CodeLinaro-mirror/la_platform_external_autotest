@@ -389,7 +389,7 @@ class PDPlanktonDevice(PDConsoleDevice):
         @param port: USB PD port number
         """
         # Instantiate the PD console object
-        super(PDPlanktonDevice, self).__init__(console, 0)
+        super(PDPlanktonDevice, self).__init__(console, port)
         # Indicate this is Plankton device
         self.is_plankton = True
 
@@ -433,8 +433,8 @@ class PDPlanktonDevice(PDConsoleDevice):
         # For each state in the expected state transiton table, build
         # the regexp and search for it in the state transition log.
         for state in states_list:
-            state_regx = r'C{0}\s+[\w]+:\s({1})'.format(self.port,
-                                                        state)
+            state_regx = r'C{0}\s+[\w]+:?\s({1})'.format(self.port,
+                                                         state)
             if re.search(state_regx, console_log) is None:
                 return False
         return True
@@ -448,8 +448,8 @@ class PDPlanktonDevice(PDConsoleDevice):
         @param disc_time_sec: Time in seconds for disconnect period.
         """
         DISC_DELAY = 100
-        disc_cmd = 'fake_disconnect %d  %d' % (DISC_DELAY,
-                                               disc_time_sec * 1000)
+        disc_cmd = 'fakedisconnect %d  %d' % (DISC_DELAY,
+                                              disc_time_sec * 1000)
         self.utils.send_pd_command(disc_cmd)
 
     def drp_disconnect_connect(self, disc_time_sec):
@@ -510,7 +510,7 @@ class PDPlanktonDevice(PDConsoleDevice):
         @returns True if state transitions match, False otherwise
         """
         # Want to grab all output until either SRC_READY or SNK_READY
-        reply_exp = ['(.*)(C\d)\s+[\w]+:\s([\w]+_READY)']
+        reply_exp = ['(.*)(C\d)\s+[\w]+:?\s([\w]+_READY)']
         m = self.utils.send_pd_command_get_output(cmd, reply_exp)
         return self._verify_state_sequence(states_list, m[0][0])
 

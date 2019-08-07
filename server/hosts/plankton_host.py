@@ -14,7 +14,7 @@ from autotest_lib.server.hosts import servo_host
 # Names of the host attributes in the database that represent the values for
 # the servo_host and servo_port for a servo connected to the DUT.
 PLANKTON_HOST_ATTR = 'plankton_host'
-PLANKTON_PORT_ATTR = 'plnakton_port'
+PLANKTON_PORT_ATTR = 'plankton_port'
 
 
 def make_plankton_hostname(dut_hostname):
@@ -47,6 +47,7 @@ class PlanktonHost(servo_host.ServoHost):
         """
         super(PlanktonHost, self)._initialize(plankton_host, plankton_port,
                                               False, None, *args, **dargs)
+        self.connect_servo()
 
 
 def create_plankton_host(plankton_args):

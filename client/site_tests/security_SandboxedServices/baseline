@@ -49,8 +49,7 @@ update_engine,root,root,No,No,No,No,No
 bluetoothd,bluetooth,bluetooth,No,No,Yes,Yes,No
 debugd,root,root,No,Yes,No,No,No
 cras,cras,cras,No,Yes,Yes,Yes,No
-tcsd,tss,root,No,No,Yes,No,No
-cromo,cromo,cromo,No,No,No,No,No
+tcsd,tss,tss,No,No,Yes,No,No
 wimax-manager,root,root,No,No,No,No,No
 mtpd,mtp,mtp,Yes,Yes,Yes,Yes,Yes
 tlsdated,tlsdate,tlsdate,No,No,Yes,No,No
@@ -60,7 +59,7 @@ thermal.sh,root,root,No,No,No,No,No
 daisydog,watchdog,watchdog,Yes,Yes,Yes,Yes,No
 permission_brok,devbroker,root,No,No,Yes,Yes,No
 netfilter-queue,nfqueue,nfqueue,No,No,Yes,No,Yes
-anomaly_collect,root,root,No,No,No,No,No
+anomaly_detecto,root,root,No,No,No,No,No
 attestationd,attestation,attestation,No,No,Yes,Yes,Yes
 periodic_schedu,root,root,No,No,No,No,No
 esif_ufd,root,root,No,No,No,No,No
@@ -116,3 +115,6 @@ activate_date.s,root,root,No,No,No,No,No
 crx-import.sh,root,root,No,No,No,No,No
 lockbox-cache.s,root,root,No,No,No,No,No
 powerd-pre-star,root,root,No,No,No,No,No
+
+# auditd
+auditd,root,root,No,No,No,No,No

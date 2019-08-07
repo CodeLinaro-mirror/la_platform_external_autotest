@@ -128,7 +128,6 @@ class ShillProxy(object):
     SERVICE_PROPERTY_OPENVPN_VERIFY_HASH = 'OpenVPN.VerifyHash'
     SERVICE_PROPERTY_OPENVPN_VERIFY_X509_NAME = 'OpenVPN.VerifyX509Name'
     SERVICE_PROPERTY_OPENVPN_VERIFY_X509_TYPE = 'OpenVPN.VerifyX509Type'
-    SERVICE_PROPERTY_OPENVPN_VPN_DOMAIN = 'VPN.Domain'
 
     # L2TP VPN related properties.
     SERVICE_PROPERTY_L2TP_CA_CERT_PEM = 'L2TPIPsec.CACertPEM'
@@ -185,7 +184,6 @@ class ShillProxy(object):
         SERVICE_PROPERTY_OPENVPN_VERIFY_HASH: dbus.String,
         SERVICE_PROPERTY_OPENVPN_VERIFY_X509_NAME: dbus.String,
         SERVICE_PROPERTY_OPENVPN_VERIFY_X509_TYPE: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_VPN_DOMAIN: dbus.String,
 
         SERVICE_PROPERTY_L2TP_CA_CERT_PEM: dbus.Array,
         SERVICE_PROPERTY_L2TP_CLIENT_CERT_ID: dbus.String,
@@ -198,8 +196,8 @@ class ShillProxy(object):
         SERVICE_PROPERTY_L2TP_XAUTH_USER: dbus.String
     }
 
-    SERVICE_CONNECTED_STATES = ['portal', 'online']
-
+    SERVICE_CONNECTED_STATES = ['portal', 'no-connectivity', 'redirect-found',
+                                'portal-suspected', 'online', 'ready']
     SUPPORTED_WIFI_STATION_TYPES = {'managed': 'managed',
                                     'ibss': 'adhoc',
                                     None: 'managed'}

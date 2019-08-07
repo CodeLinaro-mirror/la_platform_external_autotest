@@ -11,18 +11,21 @@ from skylab_staging import test_push
 
 EXAMPLE_TEST_RESULTS = [
     ('dummy_PassServer', 'GOOD'),
-    ('dummy_Pass.bluetooth', 'GOOD'),
+    ('dummy_PassServer', 'GOOD'),
     ('dummy_Fail.Fail', 'FAIL'),
     ('dummy_Pass.actionable', 'GOOD'),
+    ('dummy_Pass.bluetooth', 'GOOD'),
     ('dummy_Pass', 'GOOD'),
     ('dummy_Fail.Error', 'ERROR'),
-    ('dummy_Fail.Fail', 'FAIL'),
     ('dummy_Fail.Warn', 'WARN'),
     ('dummy_Fail.NAError', 'TEST_NA'),
     ('dummy_Fail.Crash', 'GOOD'),
     ('login_LoginSuccess', 'GOOD'),
-    ('dummy_Fail.Error', 'ERROR'),
     ('provision_AutoUpdate.double', 'GOOD'),
+    ('tast', 'GOOD'),
+    ('tast.example.Pass', 'GOOD'),
+    ('tast.example.Perf', 'GOOD'),
+    ('tast.example.ReconnectDUT', 'GOOD'),
 ]
 
 
@@ -62,3 +65,14 @@ def test_missing_test():
                                             test_push._EXPECTED_TEST_RESULTS)
   assert len(summary) != 0
   assert 'login_LoginSuccess' in summary[1]
+
+
+def test_incorrect_test_count():
+  """Test a test push with a failed test."""
+  available_views = _construct_test_views_list()
+  available_views.append({'test_name': 'dummy_Fail.Fail', 'status': 'FAIL'})
+
+  summary = test_push._verify_and_summarize(available_views,
+                                            test_push._EXPECTED_TEST_RESULTS)
+  assert len(summary) != 0
+  assert 'dummy_Fail.Fail' in summary[1]

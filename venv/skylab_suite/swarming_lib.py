@@ -63,7 +63,6 @@ SKYLAB_HWTEST_PRIORITIES_MAP = {
     'Build': 110,
     'PFQ': 80,
     'CQ': 50,
-    'Super': 49,
 }
 SORTED_SKYLAB_HWTEST_PRIORITY = sorted(
         SKYLAB_HWTEST_PRIORITIES_MAP.items(),
@@ -191,18 +190,6 @@ def get_task_final_state(task):
 
     return state
 
-
-def get_task_dut_name(task_dimensions):
-    """Get the DUT name of running this task.
-
-    @param task_dimensions: a list of dict, e.g. [{'key': k, 'value': v}, ...]
-    """
-    for dimension in task_dimensions:
-        if dimension['key'] == 'dut_name':
-            return dimension['value'][0]
-
-    return ''
-
 def bot_available(bot):
     """Check whether a bot is available.
 
@@ -294,14 +281,42 @@ class Client(object):
         swarming_cmd += ['tasks/list?tags=parent_task_id:%s' % parent_task_id]
         timeout_util = autotest.chromite_load('timeout_util')
         cros_build_lib = autotest.chromite_load('cros_build_lib')
-        with timeout_util.Timeout(60):
-            child_tasks = cros_build_lib.RunCommand(
-                    swarming_cmd, capture_output=True)
-            return json.loads(child_tasks.output)['items']
+
+        def _get_tasks():
+            try:
+                with timeout_util.Timeout(60):
+                    child_tasks = cros_build_lib.RunCommand(swarming_cmd,
+                                                            capture_output=True)
+            except timeout_util.TimeoutError:
+                logging.error('Timeout in loading child task.')
+                return False
+
+            try:
+                return json.loads(child_tasks.output)['items']
+            except ValueError:
+                logging.error('load child task list: stdout:\n%s',
+                              child_tasks.output)
+                logging.error('load child task list: stderr:\n%s',
+                              child_tasks.error)
+                return False
+            except KeyError as e:
+                logging.exception(str(e))
+                return False
+
+        utils = autotest.load('client.common_lib.utils')
+        error_msg_prefix = 'Failed to get child tasks for %s: ' % parent_task_id
+        try:
+            return utils.poll_for_condition(
+                _get_tasks,
+                exception=timeout_util.TimeoutError(
+                        'Timeout in retrying loading child tasks'),
+                timeout=300,
+                sleep_interval=60)
+        except timeout_util.TimeoutError as e:
+            raise errors.SwarmingCallError(error_msg_prefix +  str(e))
 
     def get_basic_swarming_cmd(self, command):
         cmd = [_get_client_path(), command, '--swarming', get_swarming_server()]
         if self._auth_json_path:
             cmd += ['--auth-service-account-json', self._auth_json_path]
         return cmd
-

@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import logging
+import os
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.server import test
@@ -34,6 +35,25 @@ class autoupdate_Rollback(test.test):
                                  "file on the stateful partition.")
 
 
+    def cleanup(self):
+        """Clean up states."""
+        # Delete rollback-version and rollback-happened pref which are
+        # generated during Rollback and Enterprise Rollback.
+        # rollback-version is written when update_engine Rollback D-Bus API is
+        # called. The existence of rollback-version prevents update_engine to
+        # apply payload whose version is the same as rollback-version.
+        # rollback-happened is written when update_engine finished Enterprise
+        # Rollback operation.
+        preserved_prefs_path = ('/mnt/stateful_partition/unencrypted/preserve'
+                                '/update_engine/prefs/')
+        self.host.run('rm %s %s' %
+                      (os.path.join(preserved_prefs_path, 'rollback-version'),
+                       os.path.join(preserved_prefs_path, 'rollback-happened')),
+                      ignore_status=True)
+        # Restart update-engine to pick up new prefs.
+        self.host.run('restart update-engine', ignore_status=True)
+
+
     def run_once(self, host, job_repo_url=None,
                  powerwash_before_rollback=False):
         """Runs the test.
@@ -45,6 +65,8 @@ class autoupdate_Rollback(test.test):
                error.TestFail if any part of the test has failed.
 
         """
+        self.host = host
+
         updater = autoupdate_utils.get_updater_from_repo_url(host, job_repo_url)
 
         initial_kernel, updated_kernel = updater.get_kernel_state()

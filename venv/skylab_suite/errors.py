@@ -13,6 +13,10 @@ class InValidPropertyError(Exception):
     """Raised if a suite's property is not valid."""
 
 
+class SwarmingCallError(Exception):
+    """Raised if a swarming call fails."""
+
+
 class NoAvailableDUTsError(Exception):
     """Raised if there's no available DUTs for provision suite."""
     def __init__(self, board, pool, available_num, required_num):
@@ -24,7 +28,7 @@ class NoAvailableDUTsError(Exception):
                 board, pool, available_num, required_num)
 
     def __str__(self):
-        return ('The available number of DUTs for board %s and pool %s is %d ,'
+        return ('The available number of DUTs for board %s and pool %s is %d, '
                 'which is less than %d, the required number.' % (
                         self.board, self.pool, self.available_num,
                         self.required_num))

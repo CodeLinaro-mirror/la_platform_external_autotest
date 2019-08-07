@@ -231,15 +231,20 @@ def adb_shell(cmd, **kwargs):
     return output
 
 
-def adb_install(apk, auto_grant_permissions=True):
+def adb_install(apk, auto_grant_permissions=True, ignore_status=False):
     """Install an apk into container. You must connect first.
 
     @param apk: Package to install.
     @param auto_grant_permissions: Set to false to not automatically grant all
     permissions. Most tests should not care.
+    @param ignore_status: Set to true to allow the install command to fail,
+    for example if you are installing multiple architectures and only need
+    one to succeed.
     """
     flags = '-g' if auto_grant_permissions else ''
-    return adb_cmd('install -r -t %s %s' % (flags, apk), timeout=60*5)
+    return adb_cmd('install -r -t %s %s' % (flags, apk),
+                   timeout=60*5,
+                   ignore_status=ignore_status)
 
 
 def adb_uninstall(apk):
@@ -335,14 +340,6 @@ def get_sdcard_pid():
     return utils.read_one_line(_SDCARD_PID_PATH)
 
 
-def _get_mount_passthrough_pid_internal(job_name):
-    """Returns the PID of the mount-passthrough daemon job."""
-    job_pid = get_job_pid(job_name)
-    # |job_pid| is the minijail process, the fuse process should be
-    # the only direct child of the minijail process
-    return utils.system_output('pgrep -P %s' % job_pid)
-
-
 def get_mount_passthrough_pid_list():
     """Returns PIDs of ARC mount-passthrough daemon jobs."""
     JOB_NAMES = [ 'arc-myfiles', 'arc-myfiles-default',
@@ -352,7 +349,7 @@ def get_mount_passthrough_pid_list():
     pid_list = []
     for job_name in JOB_NAMES:
         try:
-            pid = _get_mount_passthrough_pid_internal(job_name)
+            pid = get_job_pid(job_name)
             pid_list.append(pid)
         except Exception, e:
             logging.warning('Failed to find PID for %s : %s', job_name, e)
@@ -371,7 +368,8 @@ def is_android_process_running(process_name):
 
     @param process_name: Process name.
     """
-    output = adb_shell('pgrep -c -f %s' % pipes.quote(process_name))
+    output = adb_shell('pgrep -c -f %s' % pipes.quote(process_name),
+                       ignore_status=True)
     return int(output) > 0
 
 
@@ -380,8 +378,9 @@ def check_android_file_exists(filename):
 
     @param filename: File to check.
     """
-    return adb_shell('test -e {} && echo FileExists'.format(
-            pipes.quote(filename))).find("FileExists") >= 0
+    return adb_shell(
+        'test -e {} && echo FileExists'.format(pipes.quote(filename)),
+        ignore_status=True).find("FileExists") >= 0
 
 
 def read_android_file(filename):
@@ -768,9 +767,11 @@ class ArcTest(test.test):
         if apks:
             for apk in apks:
                 logging.info('Installing %s', apk)
-                out = adb_install('%s/%s' % (apk_path, apk))
+                out = adb_install('%s/%s' % (apk_path, apk), ignore_status=True)
                 logging.info('Install apk output: %s', str(out))
-            # Verify if package(s) are installed correctly
+            # Verify if package(s) are installed correctly.  We ignored
+            # individual install statuses above because some tests list apks for
+            # all arches and only need one installed.
             if not full_pkg_names:
                 raise error.TestError('Package names of apks expected')
             for pkg in full_pkg_names:
@@ -897,7 +898,8 @@ class ArcTest(test.test):
                 if not is_package_installed(pkg):
                     raise error.TestError('Package %s was not installed' % pkg)
                 adb_uninstall(pkg)
-        if self.uiautomator:
+        if (self.uiautomator and
+            is_package_installed(self._FULL_PKG_NAME_UIAUTOMATOR)):
             logging.info('Uninstalling %s', self._FULL_PKG_NAME_UIAUTOMATOR)
             adb_uninstall(self._FULL_PKG_NAME_UIAUTOMATOR)
         if self._should_reenable_play_store:
@@ -922,9 +924,10 @@ class ArcTest(test.test):
             all local connections, e.g. uiautomator.
         """
         logging.info('Blocking outbound connection')
-        # ipv6
-        _android_shell('ip6tables -I OUTPUT -j REJECT')
-        _android_shell('ip6tables -I OUTPUT -d ip6-localhost -j ACCEPT')
+        # Disable ipv6 temporarily since tests become flaky if ipv6
+        # outbound traffic is blocked with iptables.
+        _android_shell('sysctl -w net.ipv6.conf.all.disable_ipv6=1')
+        _android_shell('sysctl -w net.ipv6.conf.default.disable_ipv6=1')
         # ipv4
         _android_shell('iptables -I OUTPUT -j REJECT')
         _android_shell('iptables -I OUTPUT -p tcp -s 100.115.92.2 '
@@ -946,9 +949,9 @@ class ArcTest(test.test):
                        '--sport 5555 '
                        '-j ACCEPT')
         _android_shell('iptables -D OUTPUT -j REJECT')
-        # ipv6
-        _android_shell('ip6tables -D OUTPUT -d ip6-localhost -j ACCEPT')
-        _android_shell('ip6tables -D OUTPUT -j REJECT')
+        # Re-enable ipv6.
+        _android_shell('sysctl -w net.ipv6.conf.all.disable_ipv6=0')
+        _android_shell('sysctl -w net.ipv6.conf.default.disable_ipv6=0')
 
     def _add_ui_object_not_found_handler(self):
         """Logs the device dump upon uiautomator.UiObjectNotFoundException."""

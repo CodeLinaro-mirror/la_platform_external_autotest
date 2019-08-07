@@ -523,7 +523,7 @@ def _install_test_image(host, arguments):
                 preparedut.flash_firmware_using_servo(host, repair_image)
             else:
                 logging.debug('Install FW by chromeos-firmwareupdate.')
-                preparedut.install_firmware(host, arguments.force_firmware)
+                preparedut.install_firmware(host)
         except error.AutoservRunError as e:
             logging.exception('Firmware update failed: %s', e)
             msg = '%s failed' % (
@@ -562,6 +562,7 @@ def _install_and_update_afe(afe, hostname, host_attrs, arguments):
         host = _create_host(hostname, afe, afe_host)
         with _create_host_for_installation(host, arguments) as host_to_install:
             _install_test_image(host_to_install, arguments)
+            _update_servo_type_attribute(host_to_install, host)
 
         if arguments.install_test_image and not arguments.dry_run:
             host.labels.update_labels(host)
@@ -893,11 +894,25 @@ def install_duts(arguments):
             gspath = _get_upload_log_path(arguments)
             sys.stderr.write('Logs will be uploaded to %s\n' % (gspath,))
             _upload_logs(arguments.logdir, gspath)
-        except Exception as e:
+        except Exception:
             upload_failure_log_path = os.path.join(arguments.logdir,
                                                    'gs_upload_failure.log')
-            with open(upload_failure_log_path, 'w') as file:
-                traceback.print_exc(limit=None, file=file)
+            with open(upload_failure_log_path, 'w') as file_:
+                traceback.print_exc(limit=None, file=file_)
             sys.stderr.write('Failed to upload logs;'
                              ' failure details are stored in {}.\n'
                              .format(upload_failure_log_path))
+
+
+def _update_servo_type_attribute(host, host_to_update):
+    """Update servo_type attribute for the DUT.
+
+    @param host              A CrOSHost with a initialized servo property.
+    @param host_to_update    A CrOSHost with AfeStore as its host_info_store.
+
+    """
+    info = host_to_update.host_info_store.get()
+    if 'servo_type' not in info.attributes:
+        logging.info("Collecting and adding servo_type attribute.")
+        info.attributes['servo_type'] = host.servo.get_servo_version()
+        host_to_update.host_info_store.commit(info)

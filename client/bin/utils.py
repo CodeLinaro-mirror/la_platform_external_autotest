@@ -1735,7 +1735,7 @@ def wait_for_cool_machine():
     temperature = get_current_temperature_max()
     # We got here with a cold machine, return immediately. This should be the
     # most common case.
-    if temperature < 50:
+    if temperature < 45:
         return True
     logging.info('Got a hot machine of %dC. Sleeping 1 minute.', temperature)
     # A modest wait should cool the machine.
@@ -1756,6 +1756,36 @@ def wait_for_cool_machine():
     logging.warning('Did not cool down (%dC), giving up.', temperature)
     log_process_activity()
     return False
+
+
+def report_temperature(test, keyname):
+    """Report current max observed temperature with given keyname.
+
+    @param test: autotest_lib.client.bin.test.test instance
+    @param keyname: key to be used when reporting perf value.
+    """
+    temperature = get_temperature_input_max()
+    logging.info('%s = %f degree Celsius', keyname, temperature)
+    test.output_perf_value(
+        description=keyname,
+        value=temperature,
+        units='Celsius',
+        higher_is_better=False)
+
+
+def report_temperature_critical(test, keyname):
+    """Report temperature at which we will see throttling with given keyname.
+
+    @param test: autotest_lib.client.bin.test.test instance
+    @param keyname: key to be used when reporting perf value.
+    """
+    temperature = get_temperature_critical()
+    logging.info('%s = %f degree Celsius', keyname, temperature)
+    test.output_perf_value(
+        description=keyname,
+        value=temperature,
+        units='Celsius',
+        higher_is_better=False)
 
 
 # System paths for machine performance state.
