@@ -42,7 +42,7 @@ class cheets_AppCompatTest(arc.ArcTest):
         super(cheets_AppCompatTest, self).initialize(
             disable_arc_opt_in=False, extra_browser_args=browser_args,
             disable_app_sync=True, disable_play_auto_install=True,
-            username='crosarcappcompat@gmail.com',
+            username='crosarcappcomp201904@gmail.com',
             password='appcompatautotest')
 
 
@@ -53,7 +53,7 @@ class cheets_AppCompatTest(arc.ArcTest):
     def cleanup(self):
         arc.adb_cmd('uninstall com.hcl.actframework')
         arc.adb_cmd('uninstall com.hcl.actframework.test')
-        arc.adb_cmd('uninstall %s' % self._pkg_name)
+        arc.adb_cmd('uninstall %s' % self._pkg_name, ignore_status=True)
         arc.adb_shell('rm -f /sdcard/autresources.xml > /dev/null')
         arc.adb_shell('rm -f /sdcard/touchView.txt > /dev/null',
                       ignore_status=True)
@@ -117,7 +117,8 @@ class cheets_AppCompatTest(arc.ArcTest):
 
     def _grab_screenshots(self):
         """Captures screenshots that are created by the UIAutomator tests."""
-        for screenshot in arc.adb_shell('find /sdcard/*.png').splitlines():
+        for screenshot in arc.adb_shell('find /sdcard/*.png',
+                                        ignore_status=True).splitlines():
             logging.debug('Screenshot is %s.', screenshot)
             arc.adb_cmd('pull %s %s' % (screenshot, self.resultsdir),
                         ignore_status=True)

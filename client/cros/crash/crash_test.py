@@ -121,32 +121,6 @@ class CrashTest(test.test):
             del os.environ['OVERRIDE_PAUSE_SENDING']
 
 
-    def _set_force_official(self, is_enabled):
-        """Sets whether or not reports will upload for unofficial versions.
-
-        Normally, crash reports are only uploaded for official build
-        versions.  If the override is set, however, they will also be
-        uploaded for unofficial versions.
-
-        @param is_enabled: True to enable uploading for unofficial versions.
-        """
-        if is_enabled:
-            os.environ['FORCE_OFFICIAL'] = "1"
-        elif os.environ.get('FORCE_OFFICIAL'):
-            del os.environ['FORCE_OFFICIAL']
-
-
-    def _set_mock_developer_mode(self, is_enabled):
-        """Sets whether or not we should pretend we booted in developer mode.
-
-        @param is_enabled: True to pretend we are in developer mode.
-        """
-        if is_enabled:
-            os.environ['MOCK_DEVELOPER_MODE'] = "1"
-        elif os.environ.get('MOCK_DEVELOPER_MODE'):
-            del os.environ['MOCK_DEVELOPER_MODE']
-
-
     def _reset_rate_limiting(self):
         """Reset the count of crash reports sent today.
 
@@ -346,14 +320,12 @@ class CrashTest(test.test):
         return entry
 
 
-    def write_fake_meta(self, name, exec_name, payload, log=None,
-                        complete=True):
+    def write_fake_meta(self, name, exec_name, payload, complete=True):
         """Writes a fake meta entry to the system crash directory.
 
         @param name: Name of file to write.
         @param exec_name: Value for exec_name item.
         @param payload: Value for payload item.
-        @param log: Value for log item.
         @param complete: True to close off the record, otherwise leave it
                 incomplete.
         """
@@ -365,8 +337,6 @@ class CrashTest(test.test):
                     'payload=%s\n'
                     '%s' % (exec_name, payload,
                             last_line))
-        if log:
-            contents = ('log=%s\n' % log) + contents
         return self.write_crash_dir_entry(name, contents)
 
 
@@ -408,9 +378,8 @@ class CrashTest(test.test):
         @param output: output from the script
 
         @returns A dictionary with these values:
-            error_type: an error type, if given
             exec_name: name of executable which crashed
-            image_type: type of image ("dev","force-official",...), if given
+            image_type: type of image ("dev","test",...), if given
             boot_mode: current boot mode ("dev",...), if given
             meta_path: path to the report metadata file
             output: the output from the script, copied
@@ -492,12 +461,6 @@ class CrashTest(test.test):
         else:
             sig = None
 
-        error_type_match = crash_sender_search('Error type: (\S+)', output)
-        if error_type_match:
-            error_type = error_type_match.group(1)
-        else:
-            error_type = None
-
         image_type_match = crash_sender_search('Image type: (\S+)', output)
         if image_type_match:
             image_type = image_type_match.group(1)
@@ -518,7 +481,6 @@ class CrashTest(test.test):
                 'send_attempt': send_attempt,
                 'send_success': send_success,
                 'sig': sig,
-                'error_type': error_type,
                 'image_type': image_type,
                 'boot_mode': boot_mode,
                 'sleep_time': sleep_time,
@@ -591,7 +553,11 @@ class CrashTest(test.test):
         else:
             report_exists = False
         if os.path.exists(self._CRASH_SENDER_RATE_DIR):
-            rate_count = len(os.listdir(self._CRASH_SENDER_RATE_DIR))
+            rate_count = len([
+                name for name in os.listdir(self._CRASH_SENDER_RATE_DIR)
+                if os.path.isfile(os.path.join(self._CRASH_SENDER_RATE_DIR,
+                                               name))
+            ])
         else:
             rate_count = 0
 
@@ -651,11 +617,11 @@ class CrashTest(test.test):
     def hold_crash_lock(self):
         """A context manager to hold the crash sender lock."""
         with open(self._CRASH_SENDER_LOCK_PATH, 'w+') as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            fcntl.lockf(f.fileno(), fcntl.LOCK_EX)
             try:
                 yield
             finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                fcntl.lockf(f.fileno(), fcntl.LOCK_UN)
 
 
     def initialize(self):
@@ -726,10 +692,6 @@ class CrashTest(test.test):
             self._set_child_sending(True)
             self._kill_running_sender()
             self._reset_rate_limiting()
-            # Default to not overriding for unofficial versions.
-            self._set_force_official(False)
-            # Default to not pretending we're in developer mode.
-            self._set_mock_developer_mode(False)
             if clear_spool_first:
                 self._clear_spooled_crashes()
 

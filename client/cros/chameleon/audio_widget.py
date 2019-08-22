@@ -14,9 +14,9 @@ from autotest_lib.client.cros.audio import audio_data
 from autotest_lib.client.cros.audio import audio_test_data
 from autotest_lib.client.cros.audio import cras_configs
 from autotest_lib.client.cros.audio import sox_utils
+from autotest_lib.client.cros.chameleon import audio_test_utils
 from autotest_lib.client.cros.chameleon import chameleon_audio_ids as ids
 from autotest_lib.client.cros.chameleon import chameleon_port_finder
-
 
 _CHAMELEON_FILE_PATH = os.path.join(os.path.dirname(__file__))
 
@@ -277,13 +277,20 @@ class AudioOutputWidget(AudioWidget):
 
         return self._remote_playback_path
 
-    def start_playback(self, blocking=False):
+    def start_playback(self, blocking=False, pinned=False):
         """Starts playing audio specified in previous set_playback_data call.
 
         @param blocking: Blocks this call until playback finishes.
+        @param pinned: Pins the audio to the active output device.
 
         """
-        self.handler.start_playback(self._remote_playback_path, blocking)
+        node_type = None
+        if pinned:
+            node_type = audio_test_utils.cros_port_id_to_cras_node_type(
+                    self.port_id)
+
+        self.handler.start_playback(
+                self._remote_playback_path, blocking, node_type=node_type)
 
     def start_playback_with_path(self, remote_playback_path, blocking=False):
         """Starts playing audio specified in previous set_playback_data call
@@ -544,12 +551,14 @@ class ChameleonOutputWidgetHandler(ChameleonWidgetHandler):
             test_data_for_chameleon.delete()
 
 
-    def start_playback(self, path, blocking=False):
+    def start_playback(self, path, blocking=False, **kargs):
         """Starts playback.
 
         @param path: The path to the file to play on Chameleon.
         @param blocking: Blocks this call until playback finishes.
+        @param kargs: Other arguments that Chameleon doesn't support.
 
+        @raises: NotImplementedError if blocking is True.
         """
         if blocking:
             raise NotImplementedError(
@@ -895,15 +904,16 @@ class CrosOutputWidgetHandler(CrosWidgetHandler):
         return self._audio_facade.set_playback_file(test_data.path)
 
 
-    def start_playback(self, path, blocking=False):
+    def start_playback(self, path, blocking=False, node_type=None):
         """Starts playing audio.
 
         @param path: The path to the file to play on Cros device.
         @param blocking: Blocks this call until playback finishes.
+        @param node_type: A Cras node type defined in cras_utils.CRAS_NODE_TYPES
 
         """
-        self._audio_facade.playback(path, self._DEFAULT_DATA_FORMAT, blocking)
-
+        self._audio_facade.playback(path, self._DEFAULT_DATA_FORMAT, blocking,
+                node_type)
 
     def stop_playback(self):
         """Stops playing audio."""

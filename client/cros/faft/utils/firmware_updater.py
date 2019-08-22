@@ -1,19 +1,15 @@
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-
 """A module to support automatic firmware update.
 
 See FirmwareUpdater object below.
 """
-
+import json
 import os
-import re
 
 from autotest_lib.client.common_lib.cros import chip_utils
-from autotest_lib.client.cros.faft.utils import (common,
-                                                 flashrom_handler,
-                                                 saft_flashrom_util,
+from autotest_lib.client.cros.faft.utils import (flashrom_handler,
                                                  shell_wrapper)
 
 
@@ -42,21 +38,20 @@ class FirmwareUpdater(object):
         self._work_path = os.path.join(self._temp_path, 'work')
         self._bios_path = 'bios.bin'
         self._ec_path = 'ec.bin'
+
         pubkey_path = os.path.join(self._keys_path, 'root_key.vbpubk')
-        self._bios_handler = common.LazyInitHandlerProxy(
-                flashrom_handler.FlashromHandler,
-                saft_flashrom_util,
-                os_if,
+        self._real_bios_handler = flashrom_handler.FlashromHandler(
+                self.os_if,
                 pubkey_path,
                 self._keys_path,
-                'bios')
-        self._ec_handler = common.LazyInitHandlerProxy(
-                flashrom_handler.FlashromHandler,
-                saft_flashrom_util,
-                os_if,
+                'bios',
+        )
+        self._real_ec_handler = flashrom_handler.FlashromHandler(
+                self.os_if,
                 pubkey_path,
                 self._keys_path,
-                'ec')
+                'ec',
+        )
 
         # _detect_image_paths always needs to run during initialization
         # or after extract_shellball is called.
@@ -68,6 +63,45 @@ class FirmwareUpdater(object):
             self._setup_temp_dir()
         else:
             self._detect_image_paths()
+
+    @property
+    def _bios_handler(self):
+        """Return the BIOS flashrom handler, after initializing it if necessary
+
+        @rtype: flashrom_handler.FlashromHandler
+        """
+        if not self._real_bios_handler.initialized:
+            bios_file = os.path.join(self._work_path, self._bios_path)
+            self._real_bios_handler.init(bios_file)
+
+        return self._real_bios_handler
+
+    @property
+    def _ec_handler(self):
+        """Return the EC flashrom handler, after initializing it if necessary.
+        If there's no usable EC flash, this will raise an exception, instead of
+        allowing further attempts to run flashrom commands.
+
+        @rtype: flashrom_handler.FlashromHandler
+        @raise: FirmwareUpdaterError
+        """
+        # Raise an exception early if there's no usable EC flash.
+        if not self._real_ec_handler.is_available():
+            # Can't tell for sure whether it's broken or simply nonexistent.
+            raise FirmwareUpdaterError("No usable EC flash was detected.")
+
+        if not self._real_ec_handler.initialized:
+            ec_file = os.path.join(self._work_path, self._ec_path)
+
+            if os.path.exists(ec_file):
+                self._real_ec_handler.init(ec_file)
+            else:
+                self.os_if.log(
+                        "Shellball EC image missing: %s\n"
+                        "Trying current flash contents instead." % ec_file)
+                self._real_ec_handler.init()
+
+        return self._real_ec_handler
 
     def _setup_temp_dir(self):
         """Setup temporary directory.
@@ -195,91 +229,79 @@ class FirmwareUpdater(object):
             work_path = self._work_path
         self.os_if.run_shell_command(
                 '/usr/share/vboot/bin/resign_firmwarefd.sh '
-                '%s %s %s %s %s %s %s %s' % (
-                    os.path.join(work_path, self._bios_path),
-                    os.path.join(self._temp_path, 'output.bin'),
-                    os.path.join(self._keys_path, 'firmware_data_key.vbprivk'),
-                    os.path.join(self._keys_path, 'firmware.keyblock'),
-                    os.path.join(self._keys_path,
-                                 'dev_firmware_data_key.vbprivk'),
-                    os.path.join(self._keys_path, 'dev_firmware.keyblock'),
-                    os.path.join(self._keys_path, 'kernel_subkey.vbpubk'),
-                    ('%d' % version) if version is not None else ''))
-        self.os_if.copy_file('%s' % os.path.join(self._temp_path, 'output.bin'),
-                             '%s' % os.path.join(
-                                 work_path, self._bios_path))
+                '%s %s %s %s %s %s %s %s' %
+                (os.path.join(work_path, self._bios_path),
+                 os.path.join(self._temp_path, 'output.bin'),
+                 os.path.join(self._keys_path, 'firmware_data_key.vbprivk'),
+                 os.path.join(self._keys_path, 'firmware.keyblock'),
+                 os.path.join(self._keys_path,
+                              'dev_firmware_data_key.vbprivk'),
+                 os.path.join(self._keys_path, 'dev_firmware.keyblock'),
+                 os.path.join(self._keys_path, 'kernel_subkey.vbpubk'),
+                 ('%d' % version) if version is not None else ''))
+        self.os_if.copy_file(
+                '%s' % os.path.join(self._temp_path, 'output.bin'),
+                '%s' % os.path.join(work_path, self._bios_path))
 
-    def _detect_image_paths(self):
-        """Scans shellball to find correct bios and ec image paths."""
-        def _extract_path_from_match(match_result, model):
-          """Extract a path from a matched line of setvars.sh.
+    def _read_manifest(self, shellball=None):
+        """This gets the manifest from the shellball or the extracted directory.
+        If a shellball path is specified, it gets the info by running --manifest
+        on it; otherwise, it reads manifest.json from the extracted work path.
 
-          Args:
-            match_result: Match object: group 1 contains the quoted filename.
-            model: Name of model to use to resolve ${MODEL_DIR} in the filename.
+        @param shellball: Path of the shellball to use the manifest from.
+        @type shellball: str
+        @return: the manifest information, or None
+        @rtype: dict
+        """
 
-          Returns:
-            pathname to firmware file (e.g. 'models/grunt/bios.bin').
-          """
-          pathname = match_result.group(1).replace('"', '')
-          pathname = pathname.replace('${MODEL_DIR}', 'models/' + model)
-          return pathname
+        if shellball:
+            output = self.os_if.run_shell_command_get_output(
+                    'sh %s --manifest' % shellball)
+            manifest_text = '\n'.join(output or [])
+        else:
+            manifest_file = os.path.join(self._work_path, 'manifest.json')
+            manifest_text = self.os_if.read_file(manifest_file)
 
+        if manifest_text:
+            return json.loads(manifest_text)
+        else:
+            # TODO(dgoyette): Perhaps raise an exception for empty manifest?
+            return None
+
+    def _detect_image_paths(self, shellball=None):
+        """Scans shellball manifest to find correct bios and ec image paths.
+        If a shellball path is specified, it gets the info by running --manifest
+        on it; otherwise, it reads manifest.json from the extracted work path.
+
+        @param shellball: Path of the shellball to use the manifest from.
+        @type shellball: str
+        """
         model_result = self.os_if.run_shell_command_get_output(
-            'mosys platform model')
-        if model_result:
-            model = model_result[0]
-            search_path = os.path.join(
-                self._work_path, 'models', model, 'setvars.sh')
-            grep_result = self.os_if.run_shell_command_get_output(
-                'grep IMAGE_MAIN= %s' % search_path)
-            if grep_result:
-                match = re.match('IMAGE_MAIN=(.*)', grep_result[0])
-                if match:
-                  self._bios_path = _extract_path_from_match(match, model)
-            grep_result = self.os_if.run_shell_command_get_output(
-                'grep IMAGE_EC= %s' % search_path)
-            if grep_result:
-                match = re.match('IMAGE_EC=(.*)', grep_result[0])
-                if match:
-                  self._ec_path = _extract_path_from_match(match, model)
+                'mosys platform model')
 
-    def _update_target_fwid(self):
-        """Update target fwid/ecid in the setvars.sh."""
-        model_result = self.os_if.run_shell_command_get_output(
-            'mosys platform model')
-        if model_result:
-            model = model_result[0]
-            setvars_path = os.path.join(
-                self._work_path, 'models', model, 'setvars.sh')
-            if self.os_if.path_exists(setvars_path):
-                ro_fwid, rw_fwid = self.retrieve_fwid()
-                args = ['-i']
-                args.append(
-                    '"s/TARGET_FWID=\\".*\\"/TARGET_FWID=\\"%s\\"/g"'
-                    % rw_fwid)
-                args.append(setvars_path)
-                cmd = 'sed %s' % ' '.join(args)
-                self.os_if.run_shell_command(cmd)
+        if not model_result:
+            return
 
-                args = ['-i']
-                args.append(
-                    '"s/TARGET_RO_FWID=\\".*\\"/TARGET_RO_FWID=\\"%s\\"/g"'
-                    % ro_fwid)
-                args.append(setvars_path)
-                cmd = 'sed %s' % ' '.join(args)
-                self.os_if.run_shell_command(cmd)
+        model_name = model_result[0]
 
-                # Only update ECID if an EC image is found
-                if self.get_ec_relative_path():
-                    ecid = self.retrieve_ecid()
-                    args = ['-i']
-                    args.append(
-                        '"s/TARGET_ECID=\\".*\\"/TARGET_ECID=\\"%s\\"/g"'
-                        % ecid)
-                    args.append(setvars_path)
-                    cmd = 'sed %s' % ' '.join(args)
-                    self.os_if.run_shell_command(cmd)
+        if not model_name:
+            return
+
+        manifest = self._read_manifest(shellball)
+
+        if manifest:
+            model_info = manifest.get(model_name)
+            if model_info:
+
+                try:
+                    self._bios_path = model_info['host']['image']
+                except KeyError:
+                    pass
+
+                try:
+                    self._ec_path = model_info['ec']['image']
+                except KeyError:
+                    pass
 
     def extract_shellball(self, append=None):
         """Extract the working shellball.
@@ -288,16 +310,19 @@ class FirmwareUpdater(object):
             append: decide which shellball to use with format
                 chromeos-firmwareupdate-[append]. Use 'chromeos-firmwareupdate'
                 if append is None.
+        Returns:
+            string: the full path of the shellball
         """
         working_shellball = os.path.join(self._temp_path,
                                          'chromeos-firmwareupdate')
         if append:
             working_shellball = working_shellball + '-%s' % append
 
-        self.os_if.run_shell_command('sh %s --sb_extract %s' % (
-                working_shellball, self._work_path))
+        self.os_if.run_shell_command(
+                'sh %s --sb_extract %s' % (working_shellball, self._work_path))
 
-        self._detect_image_paths()
+        self._detect_image_paths(working_shellball)
+        return working_shellball
 
     def repack_shellball(self, append=None):
         """Repack shellball with new fwid.
@@ -308,33 +333,22 @@ class FirmwareUpdater(object):
             append: save the new shellball with a suffix, for example,
                 chromeos-firmwareupdate-[append]. Use 'chromeos-firmwareupdate'
                 if append is None.
+        Returns:
+            string: The full path to the shellball
         """
-        self._update_target_fwid();
 
         working_shellball = os.path.join(self._temp_path,
                                          'chromeos-firmwareupdate')
         if append:
-            self.os_if.copy_file(working_shellball,
-                                 working_shellball + '-%s' % append)
-            working_shellball = working_shellball + '-%s' % append
+            new_shellball = working_shellball + '-%s' % append
+            self.os_if.copy_file(working_shellball, new_shellball)
+            working_shellball = new_shellball
 
-        self.os_if.run_shell_command('sh %s --sb_repack %s' % (
-                working_shellball, self._work_path))
+        self.os_if.run_shell_command(
+                'sh %s --sb_repack %s' % (working_shellball, self._work_path))
 
-        if append:
-            args = ['-i']
-            args.append(
-                    '"s/TARGET_FWID=\\"\\(.*\\)\\"/TARGET_FWID=\\"\\1.%s\\"/g"'
-                    % append)
-            args.append(working_shellball)
-            cmd = 'sed %s' % ' '.join(args)
-            self.os_if.run_shell_command(cmd)
-
-            args = ['-i']
-            args.append('"s/TARGET_UNSTABLE=\\".*\\"/TARGET_UNSTABLE=\\"\\"/g"')
-            args.append(working_shellball)
-            cmd = 'sed %s' % ' '.join(args)
-            self.os_if.run_shell_command(cmd)
+        self._detect_image_paths(working_shellball)
+        return working_shellball
 
     def run_firmwareupdate(self, mode, updater_append=None, options=[]):
         """Do firmwareupdate with updater in temp_dir.
@@ -349,10 +363,12 @@ class FirmwareUpdater(object):
         """
         if updater_append:
             updater = os.path.join(
-                self._temp_path, 'chromeos-firmwareupdate-%s' % updater_append)
+                    self._temp_path,
+                    'chromeos-firmwareupdate-%s' % updater_append)
         else:
             updater = os.path.join(self._temp_path, 'chromeos-firmwareupdate')
-        command = '/bin/sh %s --mode %s %s' % (updater, mode, ' '.join(options))
+        command = '/bin/sh %s --mode %s %s' % (updater, mode,
+                                               ' '.join(options))
 
         if mode == 'bootok':
             # Since CL:459837, bootok is moved to chromeos-setgoodfirmware.
@@ -399,10 +415,8 @@ class FirmwareUpdater(object):
         bios = os.path.join(self._cbfs_work_path, self._bios_path)
         fw = fw_name
         cbfs_extract = '%s %s extract -r FW_MAIN_A -n %s%%s -f %s%%s' % (
-            self.CBFSTOOL,
-            bios,
-            fw,
-            os.path.join(self._cbfs_work_path, fw))
+                self.CBFSTOOL, bios, fw, os.path.join(self._cbfs_work_path,
+                                                      fw))
 
         cmd = cbfs_extract % (extension, extension)
         if self.os_if.run_shell_command_get_status(cmd) != 0:
@@ -435,8 +449,7 @@ class FirmwareUpdater(object):
         """
 
         hexdump_cmd = '%s %s.hash' % (
-            self.HEXDUMP,
-            os.path.join(self._cbfs_work_path, fw_name))
+                self.HEXDUMP, os.path.join(self._cbfs_work_path, fw_name))
         hashblob = self.os_if.run_shell_command_get_output(hexdump_cmd)
         return hashblob
 
@@ -461,45 +474,41 @@ class FirmwareUpdater(object):
 
         bios = os.path.join(self._cbfs_work_path, self._bios_path)
         rm_hash_cmd = '%s %s remove -r FW_MAIN_A,FW_MAIN_B -n %s.hash' % (
-            self.CBFSTOOL, bios, fw_name)
+                self.CBFSTOOL, bios, fw_name)
         rm_bin_cmd = '%s %s remove -r FW_MAIN_A,FW_MAIN_B -n %s%s' % (
-            self.CBFSTOOL, bios, fw_name, extension)
-        expand_cmd = '%s %s expand -r FW_MAIN_A,FW_MAIN_B' % (
-            self.CBFSTOOL, bios)
+                self.CBFSTOOL, bios, fw_name, extension)
+        expand_cmd = '%s %s expand -r FW_MAIN_A,FW_MAIN_B' % (self.CBFSTOOL,
+                                                              bios)
         add_hash_cmd = ('%s %s add -r FW_MAIN_A,FW_MAIN_B -t raw -c none '
                         '-f %s.hash -n %s.hash') % (
-                            self.CBFSTOOL,
-                            bios,
-                            os.path.join(self._cbfs_work_path, fw_name),
-                            fw_name)
+                                self.CBFSTOOL, bios,
+                                os.path.join(self._cbfs_work_path,
+                                             fw_name), fw_name)
         add_bin_cmd = ('%s %s add -r FW_MAIN_A,FW_MAIN_B -t raw -c lzma '
                        '-f %s%s -n %s%s') % (
-                           self.CBFSTOOL,
-                           bios,
-                           os.path.join(self._cbfs_work_path, fw_name),
-                           extension,
-                           fw_name,
-                           extension)
+                               self.CBFSTOOL, bios,
+                               os.path.join(self._cbfs_work_path, fw_name),
+                               extension, fw_name, extension)
         truncate_cmd = '%s %s truncate -r FW_MAIN_A,FW_MAIN_B' % (
-            self.CBFSTOOL, bios)
+                self.CBFSTOOL, bios)
 
         self.os_if.run_shell_command(rm_hash_cmd)
         self.os_if.run_shell_command(rm_bin_cmd)
         try:
             self.os_if.run_shell_command(expand_cmd)
         except shell_wrapper.ShellError:
-            self.os_if.log(('%s may be too old, '
-                            'continuing without "expand" support') %
-                           self.CBFSTOOL)
+            self.os_if.log(
+                    ('%s may be too old, '
+                     'continuing without "expand" support') % self.CBFSTOOL)
 
         self.os_if.run_shell_command(add_hash_cmd)
         self.os_if.run_shell_command(add_bin_cmd)
         try:
             self.os_if.run_shell_command(truncate_cmd)
         except shell_wrapper.ShellError:
-            self.os_if.log(('%s may be too old, '
-                            'continuing without "truncate" support') %
-                           self.CBFSTOOL)
+            self.os_if.log(
+                    ('%s may be too old, '
+                     'continuing without "truncate" support') % self.CBFSTOOL)
 
         return True
 

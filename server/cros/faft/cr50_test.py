@@ -20,6 +20,7 @@ class Cr50Test(FirmwareTest):
     """Base class that sets up helper objects/functions for cr50 tests."""
     version = 1
 
+    RESPONSE_TIMEOUT = 180
     CR50_GS_URL = 'gs://chromeos-localmirror-private/distfiles/chromeos-cr50-%s/'
     CR50_DEBUG_FILE = '*/cr50_dbg_%s.bin'
     CR50_PROD_FILE = 'cr50.%s.bin.prod'
@@ -93,6 +94,11 @@ class Cr50Test(FirmwareTest):
             self._save_original_images(full_args.get('release_path', ''))
             # We successfully saved the device images
             self._saved_state |= self.IMAGES
+        except error.CmdError, e:
+            if restore_cr50_state:
+                if 'One or more URLs matched no objects.' in str(e):
+                    raise error.TestNAError('Need DBG image to run test')
+                raise
         except:
             if restore_cr50_state:
                 raise
@@ -101,6 +107,7 @@ class Cr50Test(FirmwareTest):
     def after_run_once(self):
         """Log which iteration just ran"""
         logging.info('successfully ran iteration %d', self.iteration)
+        self._confirm_dut_is_pingable()
 
 
     def _save_node_locked_dev_image(self, cr50_dev_path):
@@ -258,7 +265,7 @@ class Cr50Test(FirmwareTest):
         return self.rootfs_tool.is_enabled()
 
 
-    def _restore_original_state(self):
+    def _restore_original_image_and_board_id(self):
         """Restore the original cr50 related device state."""
         if not (self._saved_state & self.IMAGES):
             logging.warning('Did not save the original images. Cannot restore '
@@ -355,12 +362,17 @@ class Cr50Test(FirmwareTest):
 
     def _reset_ccd_settings(self):
         """Reset the ccd lock and capability states."""
-        # Clear the password if one was set.
-        if self.cr50.get_ccd_info()['Password'] != 'none':
-            self.servo.set_nocheck('cr50_testlab', 'open')
+        if not self.cr50.ccd_is_reset():
+            # Try to open cr50 and enable testlab mode if it isn't enabled.
+            try:
+                self.fast_open(True)
+            except:
+                # Even if we can't open cr50, do our best to reset the rest of
+                # the system state. Log a warning here.
+                logging.warning('Unable to Open cr50', exc_info=True)
             self.cr50.send_command('ccd reset')
-            if self.cr50.get_ccd_info()['Password'] != 'none':
-                raise error.TestFail('Could not clear password')
+            if not self.cr50.ccd_is_reset():
+                raise error.TestFail('Could not reset ccd')
 
         current_settings = self.cr50.get_cap_dict(info=self.cr50.CAP_SETTING)
         if self.original_ccd_settings != current_settings:
@@ -371,9 +383,9 @@ class Cr50Test(FirmwareTest):
             self.cr50.set_caps(self.original_ccd_settings)
 
         # First try using testlab open to open the device
-        if self.cr50.testlab_is_on() and self.original_ccd_level == 'open':
-            self.servo.set_nocheck('cr50_testlab', 'open')
-        if self.original_ccd_level != self.cr50.get_ccd_level():
+        if self.original_ccd_level == 'open':
+            self.fast_open(True)
+        elif self.original_ccd_level != self.cr50.get_ccd_level():
             self.cr50.set_ccd_level(self.original_ccd_level)
 
 
@@ -412,25 +424,39 @@ class Cr50Test(FirmwareTest):
         logging.info('do_flash_op count: %d', flash_error_count)
 
 
+    def _confirm_dut_is_pingable(self):
+        """Reset the DUT if it doesn't respond to ping"""
+        logging.info('checking dut state')
+
+        self.servo.set('cold_reset', 'off')
+        self.servo.set('warm_reset', 'off')
+        time.sleep(self.cr50.SHORT_WAIT)
+        if not self.cr50.ap_is_on():
+            logging.info('Pressing power button to turn on AP')
+            self.servo.power_short_press()
+
+        end_time = time.time() + self.RESPONSE_TIMEOUT
+        while not self.host.ping_wait_up(
+                self.faft_config.delay_reboot_to_ping):
+            if time.time() > end_time:
+                raise error.TestFail('DUT is unresponsive')
+            self.servo.get_power_state_controller().reset()
+            logging.info('DUT did not respond. Resetting it.')
+
+
     def _restore_cr50_state(self):
         """Restore cr50 state, so the device can be used for further testing"""
         state_mismatch = self._check_original_state()
         if state_mismatch and not self._provision_update:
-            self._restore_original_state()
+            self._restore_original_image_and_board_id()
             if self._raise_error_on_mismatch:
                 raise error.TestError('Unexpected state mismatch during '
                                       'cleanup %s' % state_mismatch)
 
-        # Try to open cr50 and enable testlab mode if it isn't enabled.
-        try:
-            self.fast_open(True)
-        except:
-            # Even if we can't open cr50, do our best to reset the rest of the
-            # system state. Log a warning here.
-            logging.warning('Unable to Open cr50', exc_info=True)
         # Reset the password as the first thing in cleanup. It is important that
         # if some other part of cleanup fails, the password has at least been
         # reset.
+        self.cr50.send_command('ccd testlab open')
         self.cr50.send_command('rddkeepalive disable')
         self.cr50.send_command('ccd reset')
         self.cr50.send_command('wp follow_batt_pres atboot')
@@ -449,8 +475,7 @@ class Cr50Test(FirmwareTest):
         self.clear_fwmp()
 
         # Restore the ccd privilege level
-        if hasattr(self, 'original_ccd_level'):
-            self._reset_ccd_settings()
+        self._reset_ccd_settings()
 
 
     def find_cr50_gs_image(self, filename, image_type=None):
@@ -651,6 +676,11 @@ class Cr50Test(FirmwareTest):
 
     def ccd_open_from_ap(self):
         """Start the open process and press the power button."""
+        # Opening CCD requires power button presses. If those presses would
+        # power off the AP and prevent CCD open from completing, ignore them.
+        if self.faft_config.ec_forwards_short_pp_press:
+            self.stop_powerd()
+
         self._ccd_open_last_len = 0
 
         self._ccd_open_stdout = StringIO.StringIO()

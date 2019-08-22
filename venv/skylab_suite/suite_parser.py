@@ -10,7 +10,6 @@ from __future__ import print_function
 
 import argparse
 import ast
-import sys
 
 from lucifer import autotest
 from skylab_suite import cros_suite
@@ -43,15 +42,6 @@ def make_parser():
         '--build', required=True,
         help='Specify the build to run the suite with.')
     parser.add_argument(
-        '--cheets_build', default=None,
-        help='ChromeOS Android build to be installed on dut.')
-    parser.add_argument(
-        '--firmware_rw_build', default=None,
-        help='Firmware build to be installed in dut RW firmware.')
-    parser.add_argument(
-        '--firmware_ro_build', default=None,
-        help='Firmware build to be installed in dut RO firmware.')
-    parser.add_argument(
         '--test_source_build', default=None,
         help=('Build that contains the test code. It can be the value '
               'of arguments "--build", "--firmware_rw_build" or '
@@ -60,13 +50,14 @@ def make_parser():
     parser.add_argument(
         '--priority', type=int,
         default=swarming_lib.SKYLAB_HWTEST_PRIORITIES_MAP['Default'],
-        choices=[value for name, value in
-                 swarming_lib.SORTED_SKYLAB_HWTEST_PRIORITY],
-        help=('The priority to run the suite. A high value means this suite '
-              'will be executed in a low priority, e.g. being delayed to '
-              'execute. Each numerical value represents: '+ ', '.join([
-                  '(%s: %d)' % (name, value) for name, value in
-                  swarming_lib.SORTED_SKYLAB_HWTEST_PRIORITY])))
+        choices=range(50,256),
+        # The default metavar in this case is a list of 250 numbers.
+        metavar='PRIORITY',
+        help=('The priority (50-255) to run the suite. A high value means '
+              'this suite will be executed in a low priority, e.g. being '
+              'delayed to execute. Some common values: '+ ', '.join([
+                  '%s=%d' % (name, value) for name, value in
+                  swarming_lib.SORTED_SKYLAB_HWTEST_PRIORITY]) + '.'))
     parser.add_argument(
         "--suite_args", type=ast.literal_eval, default=None,
         action="store",
@@ -88,22 +79,10 @@ def make_parser():
         action='store', help="Path to swarming service account json creds. "
         "Specify '' to omit. Otherwise, defaults to bot's default creds.")
 
-    # TODO(ayatane): Make sure no callers pass --use_fallback before removing.
-    parser.add_argument(
-            "--use_fallback", action="store_true", help='Deprecated')
-
-    # Swarming-related parameters.
-    parser.add_argument(
-        '--execution_timeout_seconds', type=int, default=30,
-        help='Seconds to allow a task to complete, once execution beings.')
-
     # logic-related parameters.
     parser.add_argument(
         '--create_and_return', action='store_true',
         help='Create the child jobs of a suite, then finish immediately.')
-    parser.add_argument(
-        '--suite_id', default=None,
-        help='A suite ID, wait for whose child tests to finish.')
     parser.add_argument(
         '--test_retry', default=False, action='store_true',
         help='Enable test-level retry.')
@@ -114,32 +93,25 @@ def make_parser():
         '--timeout_mins', default=90, type=int, action='store',
         help='Maximum minutes to wait for a suite to finish.')
     parser.add_argument(
-        '--passed_mins', default=0, type=int, action='store',
-        help='The minutes that this suite already runs for.')
-    parser.add_argument(
-        '--run_prod_code', action='store_true', default=False,
-        help='Run the test code that lives in prod aka the test '
-        'code currently on the lab servers.')
-    parser.add_argument(
         '--dry_run', action='store_true',
         help=('Used for kicking off a run of suite with fake commands.'))
-    parser.add_argument(
-        '--pre_check', action='store_true',
-        help=('Used for checking whether a same suite is already kicked off'
-              'to Skylab.'))
     parser.add_argument(
         '--do_nothing', action='store_true',
         help=('Used for monitoring purposes, to measure no-op swarming proxy '
               'latency or create a dummy run_suite_skylab run.'))
 
-    # Abort-related parameters.
-    parser.add_argument(
-        '--abort_limit', default=sys.maxint, type=int, action='store',
-        help=('Only abort first N parent tasks which fulfill the search '
-              'requirements.'))
-    parser.add_argument(
-        '--suite_task_ids', nargs='*', default=[],
-        help=('Specify the parent swarming task id to abort.'))
+    # Deprecated arguments.
+    # TODO(akeshet): Remove these after verifying that no callers use them.
+    parser.add_argument('--passed_mins', help=argparse.SUPPRESS)
+    parser.add_argument('--use_fallback', help=argparse.SUPPRESS)
+    parser.add_argument('--cheets_build', help=argparse.SUPPRESS)
+    parser.add_argument('--firmware_rw_build', help=argparse.SUPPRESS)
+    parser.add_argument('--firmware_ro_build', help=argparse.SUPPRESS)
+    parser.add_argument('--run_prod_code', help=argparse.SUPPRESS)
+    parser.add_argument('--execution_timeout_seconds', help=argparse.SUPPRESS)
+    # TODO(akeshet): suite_scheduler uses this argument. Remove it from that
+    # client prior to removing it here.
+    parser.add_argument('--pre_check', help=argparse.SUPPRESS)
 
     return parser
 

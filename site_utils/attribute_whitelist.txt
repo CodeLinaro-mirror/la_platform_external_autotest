@@ -46,6 +46,7 @@ suite:bluestreak-pre-cq
 suite:bluetooth
 suite:bluetooth_chameleon
 suite:bluetooth_qualification
+suite:bluetooth_quicksanity
 suite:bluetooth_sanity
 suite:brillo-bvt
 suite:brillo-presubmit
@@ -90,6 +91,7 @@ suite:dummy
 suite:dummy_server
 suite:dummy_server_nossp
 suite:dummyclientretries
+suite:enroll_retainment
 suite:ent-nightly
 suite:ent-perbuild
 suite:ent-wificell
@@ -114,6 +116,7 @@ suite:faft_ec_au_3
 suite:faft_ec_ryu
 suite:faft_ec_tot
 suite:faft_ec_wp
+suite:faft_infra
 suite:faft_lab
 suite:faft_lv1
 suite:faft_lv2
@@ -125,6 +128,7 @@ suite:faft_normal_ryu
 suite:faft_setup
 suite:faft_smoke
 suite:faft_stress
+suite:faft_wilco
 suite:fingerprint
 suite:gpu_hang
 suite:graphics
@@ -220,6 +224,5 @@ suite:wifi_tdls_cast
 suite:wifi_update_router
 suite:wificell-pre-cq
 suite:wifichaos
-suite:wimax
 suite:youtube_mse_eme
 suite:youtube_page

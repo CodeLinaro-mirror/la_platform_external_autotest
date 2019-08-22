@@ -749,7 +749,7 @@ class FirmwareTest(FAFTBase):
             self.servo.get('cr50_version')
             self.servo.set('cr50_uart_capture', 'on')
             self.cr50_uart_file = os.path.join(self.resultsdir, 'cr50_uart.txt')
-            self.cr50 = chrome_cr50.ChromeCr50(self.servo)
+            self.cr50 = chrome_cr50.ChromeCr50(self.servo, self.faft_config)
         except error.TestFail as e:
             if 'No control named' in str(e):
                 logging.warn('cr50 console not supported.')
@@ -1013,25 +1013,38 @@ class FirmwareTest(FAFTBase):
     def do_blocking_sync(self, device):
         """Run a blocking sync command."""
         logging.info("Blocking sync for %s", device)
+
         if 'mmcblk' in device:
             # For mmc devices, use `mmc status get` command to send an
             # empty command to wait for the disk to be available again.
             self.faft_client.system.run_shell_command('mmc status get %s' %
                                                       device)
         elif 'nvme' in device:
-            # Get a list of NVMe namespace and flush them individually
-            # Assumes the output format from nvme list-ns command will
-            # be something like follows:
+            # For NVMe devices, use `nvme flush` command to commit data
+            # and metadata to non-volatile media.
+
+            # Get a list of NVMe namespaces, and flush them individually.
+            # The output is assumed to be in the following format:
             # [ 0]:0x1
             # [ 1]:0x2
+            list_ns_cmd = "nvme list-ns %s" % device
             available_ns = self.faft_client.system.run_shell_command_get_output(
-                                                  'nvme list-ns %s -a' % device)
+                list_ns_cmd)
+
+            if not available_ns:
+                raise error.TestError(
+                    "Listing namespaces failed (empty output): %s"
+                    % list_ns_cmd)
+
             for ns in available_ns:
                 ns = ns.split(':')[-1]
-                # For NVMe devices, use `nvme flush` command to commit data
-                # and metadata to non-volatile media.
-                self.faft_client.system.run_shell_command(
-                                 'nvme flush %s -n %s' % (device, ns))
+                flush_cmd = 'nvme flush %s -n %s' % (device, ns)
+                flush_rc = self.faft_client.system.run_shell_command_get_status(
+                    flush_cmd)
+                if flush_rc != 0:
+                    raise error.TestError(
+                        "Flushing namespace %s failed (rc=%s): %s"
+                        % (ns, flush_rc, flush_cmd))
         else:
             # For other devices, hdparm sends TUR to check if
             # a device is ready for transfer operation.
@@ -1113,6 +1126,13 @@ class FirmwareTest(FAFTBase):
         if self.servo.get("lid_open") == "no":
             time.sleep(self.faft_config.software_sync)
             self.servo.power_short_press()
+
+    def stop_powerd(self):
+        """Stop the powerd daemon on the AP.
+
+        This will cause the AP to ignore power button presses sent by the EC.
+        """
+        self.faft_client.system.run_shell_command("stop powerd")
 
     def _modify_usb_kernel(self, usb_dev, from_magic, to_magic):
         """Modify the kernel header magic in USB stick.

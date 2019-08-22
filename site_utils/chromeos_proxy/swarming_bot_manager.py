@@ -32,6 +32,10 @@ _shut_down = False
 
 metrics_template = 'chromeos/autotest/swarming/bot_manager/%s'
 
+DEFAULT_SERVICE_ACCOUNT = (
+    '/creds/skylab_swarming_bot/skylab_bot_service_account.json')
+
+
 def _parse_args(args):
     """Parse system arguments."""
     parser = argparse.ArgumentParser(
@@ -56,8 +60,14 @@ def _parse_args(args):
             '-f', '--log_file', dest='log_file',
             help='Path to the log file.')
     parser.add_argument(
+            '--auth_json_path', dest='auth_json_path',
+            default=DEFAULT_SERVICE_ACCOUNT,
+            help='The the auth json file to query swarming instance.')
+    parser.add_argument(
             '-v', '--verbose', dest='verbose', action='store_true',
             help='Verbose mode')
+    # TODO (xixuan): To be deprecated.
+    # Will remove it later after cleaning its callers.
     parser.add_argument(
             '--specify_bot_id', action='store_true',
             help='Specify bot id in retrieving bot codes & staring bots')
@@ -144,7 +154,7 @@ def main(args):
             swarming_bots.parse_range(args.id_range),
             args.working_dir,
             args.swarming_proxy,
-            specify_bot_id=args.specify_bot_id)
+            args.auth_json_path)
     is_prod = False
     retryable = True
     with ts_mon_config.SetupTsMonGlobalState('swarming_bots', indirect=True):

@@ -171,13 +171,8 @@ class Container(object):
                 # container quite frequently, and emitting exceptions here would
                 # cause any invalid containers on a server to block all
                 # ContainerBucket.get_all calls (see crbug/783865).
-                # TODO(kenobi): Containers with invalid ID files are probably
-                # the result of an aborted or failed operation.  There is a
-                # non-zero chance that such containers would contain leftover
-                # state, or themselves be corrupted or invalid.  Should we
-                # provide APIs for checking if a container is in this state?
-                logging.exception('Error loading ID for container %s:',
-                                  self.name)
+                logging.warning('Unable to determine ID for container %s:',
+                                self.name)
                 self._id = None
 
         if not Container._LXC_VERSION:
@@ -369,7 +364,8 @@ class Container(object):
             utils.poll_for_condition(
                 condition=self.is_network_up,
                 timeout=constants.NETWORK_INIT_TIMEOUT,
-                sleep_interval=constants.NETWORK_INIT_CHECK_INTERVAL)
+                sleep_interval=constants.NETWORK_INIT_CHECK_INTERVAL,
+                desc='network is up')
             logging.debug('Network is up after %.2f seconds.',
                           time.time() - start_time)
 
@@ -406,8 +402,8 @@ class Container(object):
         logging.debug('Destroying container %s/%s',
                       self.container_path,
                       self.name)
-        cmd = 'sudo lxc-destroy -P %s -n %s' % (self.container_path,
-                                                self.name)
+        cmd = constants.LXC_DESTROY_CMD % (self.container_path,
+                                           self.name)
         if force:
             cmd += ' -f'
         utils.run(cmd)

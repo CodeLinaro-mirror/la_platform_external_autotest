@@ -164,11 +164,13 @@ class TradefedTest(test.test):
                 self._run_adb_cmd(host, verbose=True, args=('kill-server',))
             except (error.CmdError, AttributeError):
                 pass
-        logging.info('Cleaning up %s.', self._tradefed_install)
-        try:
-            shutil.rmtree(self._tradefed_install)
-        except IOError:
-            pass
+
+        if hasattr(self, '_tradefed_install'):
+            logging.info('Cleaning up %s.', self._tradefed_install)
+            try:
+                shutil.rmtree(self._tradefed_install)
+            except IOError:
+                pass
 
         # Create perf data for Chromeperf.
         for perf in self._perf_results:
@@ -292,29 +294,37 @@ class TradefedTest(test.test):
         @param host: DUT that need to be connected.
         @return boolean indicating if adb connected successfully.
         """
-        # This may fail return failure due to a race condition in adb connect
-        # (b/29370989). If adb is already connected, this command will
-        # immediately return success.
-        host_port = self._get_adb_target(host)
-        result = self._run_adb_cmd(
-            host, args=('connect', host_port), verbose=True, ignore_status=True)
-        if result.exit_status != 0:
-            return False
+        try:
+            # This may fail return failure due to a race condition in adb
+            # connect (b/29370989). If adb is already connected, this command
+            # will immediately return success.
+            host_port = self._get_adb_target(host)
+            result = self._run_adb_cmd(
+                host, args=('connect', host_port), verbose=True,
+                ignore_status=True,
+                timeout=constants.ADB_CONNECT_TIMEOUT_SECONDS)
+            if result.exit_status != 0:
+                return False
 
-        result = self._run_adb_cmd(host, args=('devices',))
-        if not re.search(r'{}\s+(device|unauthorized)'.format(
-                re.escape(host_port)), result.stdout):
-            logging.info('No result found in with pattern: %s',
-                         r'{}\s+(device|unauthorized)'.format(
-                             re.escape(host_port)))
-            return False
+            result = self._run_adb_cmd(host, args=('devices',),
+                timeout=constants.ADB_CONNECT_TIMEOUT_SECONDS)
+            if not re.search(r'{}\s+(device|unauthorized)'.format(
+                    re.escape(host_port)), result.stdout):
+                logging.info('No result found in with pattern: %s',
+                             r'{}\s+(device|unauthorized)'.format(
+                                 re.escape(host_port)))
+                return False
 
-        # Actually test the connection with an adb command as there can be
-        # a race between detecting the connected device and actually being
-        # able to run a commmand with authenticated adb.
-        result = self._run_adb_cmd(
-            host, args=('shell', 'exit'), ignore_status=True)
-        return result.exit_status == 0
+            # Actually test the connection with an adb command as there can be
+            # a race between detecting the connected device and actually being
+            # able to run a commmand with authenticated adb.
+            result = self._run_adb_cmd(
+                host, args=('shell', 'exit'), ignore_status=True,
+                timeout=constants.ADB_CONNECT_TIMEOUT_SECONDS)
+            return result.exit_status == 0
+        except error.CmdTimeoutError as e:
+            logging.warning(e)
+            return False
 
     def _android_shell(self, host, command):
         """Run a command remotely on the device in an android shell
@@ -359,7 +369,6 @@ class TradefedTest(test.test):
         # adbd may take some time to come up. Repeatedly try to connect to adb.
         utils.poll_for_condition(
             lambda: self._try_adb_connect(host),
-            exception=error.TestFail('Error: Failed to set up adb connection'),
             timeout=constants.ADB_READY_TIMEOUT_SECONDS,
             sleep_interval=constants.ADB_POLLING_INTERVAL_SECONDS)
 
@@ -410,16 +419,24 @@ class TradefedTest(test.test):
         pubkey_path = key_path + '.pub'
         self._run_adb_cmd(verbose=True, args=('keygen', pipes.quote(key_path)))
         os.environ['ADB_VENDOR_KEYS'] = key_path
-        # Kill existing adb server to ensure that the env var is picked up.
-        self._run_adb_cmd(verbose=True, args=('kill-server',))
 
-        # TODO(pwang): connect_adb takes 10+ seconds on a single DUT.
-        #              Parallelize it if it becomes a bottleneck.
-        for host in self._hosts:
-            self._connect_adb(host, pubkey_path)
-            self._disable_adb_install_dialog(host)
-            self._wait_for_arc_boot(host)
-        self._verify_arc_hosts()
+        for _ in range(2):
+            try:
+                # Kill existing adb server to ensure that the env var is picked
+                # up, and reset any previous bad state.
+                self._run_adb_cmd(verbose=True, args=('kill-server',))
+
+                # TODO(pwang): connect_adb takes 10+ seconds on a single DUT.
+                #              Parallelize it if it becomes a bottleneck.
+                for host in self._hosts:
+                    self._connect_adb(host, pubkey_path)
+                    self._disable_adb_install_dialog(host)
+                    self._wait_for_arc_boot(host)
+                self._verify_arc_hosts()
+                return
+            except (utils.TimeoutError, error.CmdTimeoutError):
+                logging.error('Failed to set up adb connection. Retrying...')
+        raise error.TestFail('Error: Failed to set up adb connection')
 
     def _safe_makedirs(self, path):
         """Creates a directory at |path| and its ancestors.
@@ -1054,8 +1071,12 @@ class TradefedTest(test.test):
                     # Bluetooth test failures, and then make the implementation
                     # more strict by first running complete restart and reboot
                     # retries and then perform power cycle.
+                    #
+                    # Currently, (steps + 1 == self._max_retry) means that
+                    # hard_reboot is attempted after "this" cycle failed. Then,
+                    # the last remaining 1 step will be run on the rebooted DUT.
                     hard_reboot_on_failure=(self._hard_reboot_on_failure
-                                     and steps == self._max_retry),
+                                     and steps + 1 == self._max_retry),
                     dont_override_profile=keep_media) as current_logins:
                 self._ready_arc()
                 self._calculate_timeout_factor(bundle)

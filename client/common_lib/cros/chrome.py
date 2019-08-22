@@ -58,6 +58,7 @@ class Chrome(object):
                  username=None, password=None, gaia_id=None,
                  arc_mode=None, disable_arc_opt_in=True,
                  disable_arc_opt_in_verification=True,
+                 disable_arc_cpu_restriction=True,
                  disable_app_sync=False,
                  disable_play_auto_install=False,
                  disable_locale_sync=True,
@@ -65,6 +66,7 @@ class Chrome(object):
                  enable_assistant=False,
                  enterprise_arc_test=False,
                  init_network_controller=False,
+                 mute_audio=False,
                  login_delay=0):
         """
         Constructor of telemetry wrapper.
@@ -102,12 +104,20 @@ class Chrome(object):
              for data migration tests where user's home data is already set up
              with opted-in state before login, this option needs to be set to
              False with disable_arc_opt_in=True to make ARC container work.
+        @param disable_arc_cpu_restriction:
+             Adds --disable-arc-cpu-restriction to browser args. This is enabled
+             by default and will make tests run faster and is generally
+             desirable unless a test is actually trying to test performance
+             where ARC is running in the background for some porition of the
+             test.
         @param disable_app_sync:
             Adds --arc-disable-app-sync to browser args and this disables ARC
             app sync flow. By default it is enabled.
         @param disable_play_auto_install:
             Adds --arc-disable-play-auto-install to browser args and this
             disables ARC Play Auto Install flow. By default it is enabled.
+        @param enable_assistant: For tests that require to enable Google
+                                  Assistant service. Default is False.
         @param enterprise_arc_test: Skips opt_in causing enterprise tests to fail
         @param disable_locale_sync:
             Adds --arc-disable-locale-sync to browser args and this
@@ -121,10 +131,9 @@ class Chrome(object):
             Adds --arc-play-store-auto-update=off to browser args and this
             disables Play Store, GMS Core and third-party apps auto-update.
             By default auto-update is off to have stable autotest environment.
+        @param mute_audio: Mute audio.
         @param login_delay: Time for idle in login screen to simulate the time
                             required for password typing.
-        @param enable_assistant: For tests that require to enable Google
-                                  Assistant service. Default is False.
         """
         self._autotest_ext_path = None
 
@@ -146,6 +155,9 @@ class Chrome(object):
             if disable_arc_opt_in and disable_arc_opt_in_verification:
                 finder_options.browser_options.AppendExtraBrowserArgs(
                         ['--disable-arc-opt-in-verification'])
+            if disable_arc_cpu_restriction:
+                finder_options.browser_options.AppendExtraBrowserArgs(
+                        ['--disable-arc-cpu-restriction'])
             if disable_app_sync:
                 finder_options.browser_options.AppendExtraBrowserArgs(
                         ['--arc-disable-app-sync'])
@@ -186,6 +198,7 @@ class Chrome(object):
 
         b_options.auto_login = auto_login
         b_options.gaia_login = gaia_login
+        b_options.mute_audio = mute_audio
         b_options.login_delay = login_delay
 
         if utils.is_arc_available() and not disable_arc_opt_in:

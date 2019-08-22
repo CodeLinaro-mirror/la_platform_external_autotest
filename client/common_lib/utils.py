@@ -2263,6 +2263,41 @@ def parse_chrome_version(version_string):
     return ver, milestone
 
 
+def parse_gs_uri_version(uri):
+    """Pull out major.minor.sub from image URI
+
+    @param uri: A GS URI for a bucket containing ChromeOS build artifacts
+    @return: The build version as a string in the form 'major.minor.sub'
+
+    """
+    return re.sub('.*(R[0-9]+|LATEST)-', '', uri).strip('/')
+
+
+def compare_gs_uri_build_versions(x, y):
+    """Compares two bucket URIs by their version string
+
+    @param x: A GS URI for a bucket containing ChromeOS build artifacts
+    @param y: Another GS URI for a bucket containing ChromeOS build artifacts
+    @return: 1 if x > y, -1 if x < y, and 0 if x == y
+
+    """
+    # Converts a gs uri 'gs://.../R75-<major>.<minor>.<sub>' to
+    # [major, minor, sub]
+    split_version = lambda v: map(lambda s: int(s),
+                                  parse_gs_uri_version(v).split('.'))
+
+    x_version = split_version(x)
+    y_version = split_version(y)
+
+    for a, b in zip(x_version, y_version):
+        if a > b:
+            return 1
+        elif b > a:
+            return -1
+
+    return 0
+
+
 def is_localhost(server):
     """Check if server is equivalent to localhost.
 
@@ -2818,6 +2853,42 @@ def poll_for_condition_ex(condition, timeout=10, sleep_interval=0.1, desc=None):
                             reason=reason)
     logging.error(str(to_raise))
     raise to_raise
+
+
+def shadowroot_query(element, action):
+    """Recursively queries shadowRoot.
+
+    @param element: element to query for.
+    @param action: action to be performed on the element.
+
+    @return JS functions to execute.
+
+    """
+    # /deep/ CSS query has been removed from ShadowDOM. The only way to access
+    # elements now is to recursively query in each shadowRoot.
+    shadowroot_script = """
+    function deepQuerySelectorAll(root, targetQuery) {
+        const elems = Array.prototype.slice.call(
+            root.querySelectorAll(targetQuery[0]));
+        const remaining = targetQuery.slice(1);
+        if (remaining.length === 0) {
+            return elems;
+        }
+
+        let res = [];
+        for (let i = 0; i < elems.length; i++) {
+            if (elems[i].shadowRoot) {
+                res = res.concat(
+                    deepQuerySelectorAll(elems[i].shadowRoot, remaining));
+            }
+        }
+        return res;
+    };
+    var testing_element = deepQuerySelectorAll(document, %s);
+    testing_element[0].%s;
+    """
+    script_to_execute = shadowroot_script % (element, action)
+    return script_to_execute
 
 
 def threaded_return(function):

@@ -1031,7 +1031,8 @@ class BluetoothAdapterTests(test.test):
                 'disconnection_seen_by_adapter': disconnection_seen_by_adapter}
         return all(self.results.values())
 
-    @_test_retry_and_log
+
+    @_test_retry_and_log(False)
     def test_device_is_connected(self, device_address):
         """Test that device address given is currently connected.
 
@@ -1039,8 +1040,8 @@ class BluetoothAdapterTests(test.test):
 
         @returns: True if the device is connected.
                   False otherwise.
-
         """
+
         def _is_connected():
             """Test if device is connected.
 
@@ -1060,13 +1061,55 @@ class BluetoothAdapterTests(test.test):
                         condition=_is_connected,
                         timeout=self.ADAPTER_CONNECTION_TIMEOUT_SECS,
                         sleep_interval=self.ADAPTER_PAIRING_POLLING_SLEEP_SECS,
-                        desc='Waiting for connection to %s' % device_address)
+                        desc='Waiting to check connection to %s' %
+                              device_address)
                 connected = True
             except utils.TimeoutError as e:
                 logging.error('%s: %s', method_name, e)
             except:
                 logging.error('%s: unexpected error', method_name)
         self.results = {'has_device': has_device, 'connected': connected}
+        return all(self.results.values())
+
+
+    @_test_retry_and_log(False)
+    def test_device_is_not_connected(self, device_address):
+        """Test that device address given is NOT currently connected.
+
+        @param device_address: Address of the device.
+
+        @returns: True if the device is NOT connected.
+                  False otherwise.
+
+        """
+
+        def _is_not_connected():
+            """Test if device is not connected.
+
+            @returns: True if device is not connected. False otherwise.
+
+            """
+            return not self.bluetooth_facade.device_is_connected(
+                    device_address)
+
+
+        method_name = 'test_device_is_not_connected'
+        if self.bluetooth_facade.has_device(device_address):
+            try:
+                utils.poll_for_condition(
+                        condition=_is_not_connected,
+                        timeout=self.ADAPTER_CONNECTION_TIMEOUT_SECS,
+                        sleep_interval=self.ADAPTER_PAIRING_POLLING_SLEEP_SECS,
+                        desc='Waiting to check connection to %s' %
+                              device_address)
+                not_connected = True
+            except utils.TimeoutError as e:
+                logging.error('%s: %s', method_name, e)
+            except:
+                logging.error('%s: unexpected error', method_name)
+        else:
+            not_connected = True
+        self.results = {'not_connected': not_connected}
         return all(self.results.values())
 
 
@@ -2053,6 +2096,47 @@ class BluetoothAdapterTests(test.test):
                 'actual_events': map(str, actual_events),
                 'expected_events': map(str, expected_events)}
         return actual_events == expected_events
+
+
+    def is_newer_kernel_version(self, version, minimum_version):
+        """ Check if given kernel version is newer than unsupported version."""
+
+        return utils.compare_versions(version, minimum_version) >= 0
+
+
+    def is_supported_kernel_version(self, kernel_version, minimum_version,
+                                    msg=None):
+        """ Check if kernel version is greater than minimum version.
+
+            Check if given kernel version is greater than or equal to minimum
+            version. Raise TEST_NA if given kernel version is lower than the
+            minimum version.
+
+            Note: Kernel version may have suffixes, so ensure that minimum
+            version should be the smallest version that is permissible.
+            Ex: If minimum version is 3.8.11 then 3.8.11-<random> will
+            pass the check.
+
+            @param kernel_version: kernel version to be checked as a string
+            @param: minimum_version: minimum kernel version requried
+
+            @returns: None
+
+            @raises: TEST_NA if kernel version is not greater than the minimum
+                     version
+        """
+
+        logging.debug('kernel version is {} minimum version'
+                      'is {}'.format(kernel_version,minimum_version))
+
+        if msg is None:
+            msg = 'Test not supported on this kernel version'
+
+        if not self.is_newer_kernel_version(kernel_version, minimum_version):
+            logging.debug('Kernel version check failed. Exiting the test')
+            raise error.TestNAError(msg)
+
+        logging.debug('Kernel version check passed')
 
 
     # -------------------------------------------------------------------

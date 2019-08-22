@@ -45,6 +45,7 @@ from datetime import datetime
 from datetime import timedelta
 import functools
 import getpass
+import json
 import logging
 import os
 import re
@@ -54,6 +55,7 @@ import warnings
 
 import common
 from chromite.lib import buildbot_annotations as annotations
+from chromite.lib import cros_build_lib
 from chromite.lib import gs
 from chromite.lib import osutils
 
@@ -77,6 +79,7 @@ from autotest_lib.frontend.afe import rpc_client_lib
 from autotest_lib.frontend.afe.json_rpc import proxy
 from autotest_lib.server import site_utils
 from autotest_lib.server import utils
+from autotest_lib.server.cros import provision
 from autotest_lib.server.cros.dynamic_suite import constants
 from autotest_lib.server.cros.dynamic_suite import frontend_wrappers
 from autotest_lib.server.cros.dynamic_suite import reporting_utils
@@ -93,6 +96,8 @@ except django_exceptions.ImproperlyConfigured as e:
                       'Please re-run utils/build_externals.py inside[outside] '
                       'of the chroot accordingly.')
     raise
+
+from autotest_lib.site_utils import paygen
 from autotest_lib.site_utils import run_suite_common
 
 CONFIG = global_config.global_config
@@ -103,6 +108,8 @@ _URL_PATTERN = CONFIG.get_config_value('CROS', 'log_url_pattern', type=str)
 _ENABLE_RUN_SUITE_TRAMPOLINE = CONFIG.get_config_value(
         'CROS', 'enable_run_suite_trampoline', type=bool, default=False)
 
+_SKYLAB_TOOL = '/opt/infra-tools/skylab'
+_SKYLAB_SERVICE_ACCOUNT = '/creds/service_accounts/skylab_swarming.json'
 _MIGRATION_CONFIG_FILE = 'migration_config.ini'
 _MIGRATION_CONFIG_BUCKET = 'suite-scheduler.google.com.a.appspot.com'
 _TRAMPOLINE_CONFIG = 'gs://%s/%s' % (_MIGRATION_CONFIG_BUCKET,
@@ -119,6 +126,11 @@ _MIN_RPC_TIMEOUT = 600
 _SEARCH_JOB_MAX_DAYS = 14
 
 _PROVISION_SUITE = 'provision'
+
+# Only special tasks can have a priority lower than 50.
+_SKYLAB_PRIORITY_MIN = 50
+# Mandated by Swarming.
+_SKYLAB_PRIORITY_MAX = 255
 
 
 @functools.total_ordering
@@ -265,6 +277,21 @@ def _get_priority_value(x):
             raise argparse.ArgumentTypeError(
                 'Unknown priority level %s.  Try one of %s.'
                 % (x, ', '.join(priorities.Priority.names)))
+
+
+def skylab_priority_for(afe_priority):
+  """Convert AFE priority to Skylab priority.
+
+  Args:
+    afe_priority: An integer get from _get_priority_value().
+
+  Returns:
+    An integer representing Skylab priority.
+  """
+  skylab_priority = 260 - 3 * int(afe_priority)
+  skylab_priority = min(skylab_priority, _SKYLAB_PRIORITY_MAX)
+  skylab_priority = max(skylab_priority, _SKYLAB_PRIORITY_MIN)
+  return skylab_priority
 
 
 def make_parser():
@@ -1770,12 +1797,7 @@ def _run_suite(options):
             job_created_on, float(options.timeout_mins))
     job_url = reporting_utils.link_job(job_id,
                                        instance_server=instance_server)
-    logging.info('%s Created suite job: %s',
-                 job_timer.format_time(job_timer.job_created_time),
-                 job_url)
-    logging.info(annotations.StepLink(
-        text='Link to suite',
-        url=job_url))
+    _log_create_task(job_timer, job_url, job_id)
 
     if options.create_and_return:
         msg = '--create_and_return was specified, terminating now.'
@@ -2054,11 +2076,32 @@ class _ExceptionHandler(object):
         sys.exit(run_suite_common.RETURN_CODES.INFRA_FAILURE)
 
 
-def _check_if_use_skylab(options):
-    """Detect whether to run suite in skylab."""
+def _log_create_task(job_timer, job_url, job_id):
+    """Logging for task creation."""
+    logging.info('%s Created suite job: %s',
+                 job_timer.format_time(job_timer.job_created_time),
+                 job_url)
+    logging.info(annotations.StepLink(text='Link to suite', url=job_url))
+    # For task id parsing of chromite HWTestStage.
+    logging.info('Created task id: %s', job_id)
+
+
+def _if_run_in_skylab(options):
+    """Detect whether to run suite in skylab.
+
+    Returns:
+        A tuple of (bool, string, string) to indicate
+            (if_use_skylab, override_pool, override_qs_account)
+    """
+    # An autotest job id is a number of at least 9 digits, e.g. 296843118.
+    # A skylab task id is of 16 chars, e.g. 43cabbb4e118ea10.
+    if len(str(options.mock_job_id)) >= 16:
+        # No override info is needed if mock_job_id is specified.
+        return True, '', ''
+
     if not _ENABLE_RUN_SUITE_TRAMPOLINE:
         logging.info('trampoline to skylab is not enabled.')
-        return False
+        return False, '', ''
 
     task_info = 'suite:%s, board:%s, model:%s, pool:%s' % (
             options.name, options.board, options.model, options.pool)
@@ -2076,16 +2119,151 @@ def _check_if_use_skylab(options):
                                        options.name,
                                        options.pool):
             logging.info('Task (%s) Should run in skylab', task_info)
-            return True
+            override_pool, override_qs_account = skylab.get_override_info(
+                    _migration_config,
+                    options.board,
+                    options.model,
+                    options.name,
+                    options.pool)
+            return True, override_pool, override_qs_account
 
     logging.info('Task (%s) Should run in autotest', task_info)
-    return False
+    return False, '', ''
 
 
-def _run_with_skylab(options):
+def _get_skylab_suite_result(child_tasks):
+    """Parse skylab task result to get final result for the suite.
+
+    @param child_tasks: A list of json dict of task result object, whose format
+        is: {
+                'name': ...,
+                'state': ...,
+                'failure': ...
+            }.
+    """
+    _final_suite_states = run_suite_common.get_final_skylab_suite_states()
+    for ct in child_tasks:
+        logging.info('Parsing test %r', ct)
+        state = run_suite_common.get_final_skylab_task_state(ct)
+
+        if (state not in run_suite_common.IGNORED_TEST_STATE and
+            state in _final_suite_states):
+            return _final_suite_states[state][1]
+
+    return run_suite_common.RETURN_CODES.OK
+
+
+def _log_skylab_for_buildbot(stdout):
+    """Output skylab logs to buildbot.
+
+    @param stdout: A string.
+    """
+    logging.info('\n %s Output below this line is for buildbot consumption:',
+                 diagnosis_utils.JobTimer.format_time(datetime.now()))
+    logging.info(stdout)
+
+
+def _run_paygen_with_skylab(options, override_pool, override_qs_account):
+    """Run paygen suites with skylab."""
+    builds = suite_common.make_builds_from_options(options)
+    skylab_tool = os.environ.get('SKYLAB_TOOL') or _SKYLAB_TOOL
+    test_source_build = suite_common.get_test_source_build(builds)
+    pool = ('DUT_POOL_%s' % options.pool.upper()
+            if not override_pool else override_pool)
+    paygen_tests = paygen.get_paygen_tests(test_source_build, options.name)
+    for test in paygen_tests:
+        cmd = [skylab_tool, 'create-test']
+        cmd += paygen.paygen_skylab_args(
+                test, options.name, test_source_build, pool, options.board,
+                options.model, options.timeout_mins,
+                override_qs_account, _SKYLAB_SERVICE_ACCOUNT)
+        job_created_on = time.time()
+        try:
+            res = cros_build_lib.RunCommand(cmd, capture_output=True)
+        except cros_build_lib.RunCommandError as e:
+            logging.error(str(e))
+            return run_suite_common.SuiteResult(
+                    run_suite_common.RETURN_CODES.INFRA_FAILURE)
+
+        logging.info(res.output)
+        job_url = res.output.split()[-1]
+        job_id = job_url.split('id=')[-1]
+        job_timer = diagnosis_utils.JobTimer(
+                job_created_on, float(options.timeout_mins))
+        _log_create_task(job_timer, job_url, job_id)
+
+    return run_suite_common.SuiteResult(run_suite_common.RETURN_CODES.OK)
+
+
+def _run_with_skylab(options, override_pool, override_qs_account):
     """Run suite inside skylab."""
-    # TODO(xixuan): Implement running suite in skylab.
-    return _RETURN_RESULTS['ok']
+    if paygen.is_paygen_suite(options.name):
+        return _run_paygen_with_skylab(options, override_pool,
+                                       override_qs_account)
+
+    builds = suite_common.make_builds_from_options(options)
+    skylab_tool = os.environ.get('SKYLAB_TOOL') or _SKYLAB_TOOL
+    pool = override_pool or options.pool
+    if options.mock_job_id:
+        taskID = options.mock_job_id
+        cmd = [skylab_tool, 'wait-task',
+               '-timeout-mins', str(options.timeout_mins),
+               '-service-account-json', _SKYLAB_SERVICE_ACCOUNT,
+               taskID]
+        try:
+            res = cros_build_lib.RunCommand(cmd, capture_output=True)
+        except cros_build_lib.RunCommandError as e:
+            logging.error(str(e))
+            return run_suite_common.SuiteResult(
+                    run_suite_common.RETURN_CODES.INFRA_FAILURE)
+
+        output = json.loads(res.output)
+        child_tasks = output['child-results']
+        task_stdout = output['stdout']
+
+        return_code = _get_skylab_suite_result(child_tasks)
+        _log_skylab_for_buildbot(task_stdout)
+        return run_suite_common.SuiteResult(return_code)
+    else:
+        cmd = [skylab_tool, 'create-suite',
+               '-board', options.board,
+               '-image', builds[provision.CROS_VERSION_PREFIX],
+               '-pool', pool,
+               '-timeout-mins', str(options.timeout_mins),
+               '-priority', str(skylab_priority_for(options.priority)),
+               '-service-account-json', _SKYLAB_SERVICE_ACCOUNT]
+        if override_qs_account:
+            cmd.extend(['-qs-account', override_qs_account])
+
+        if options.max_retries is not None:
+            cmd.extend(['-max-retries', str(options.max_retries)])
+
+        if options.model is not None:
+            cmd.extend(['-model', options.model])
+
+        tags = ['skylab:run_suite_trampoline']
+        for t in tags:
+            cmd.extend(['-tag', t])
+
+        unsupported_skylab_keyvals = ['datastore_parent_key']
+        if options.job_keyvals is not None:
+            for k, v in options.job_keyvals.iteritems():
+                if k in unsupported_skylab_keyvals:
+                    continue
+
+                cmd.extend(['-keyval', '%s:%s' % (k, v)])
+
+        cmd.extend([options.name])
+        job_created_on = time.time()
+        res = cros_build_lib.RunCommand(cmd, capture_output=True)
+        # TODO (xixuan): The parsing will change with crbug.com/935244.
+        logging.info(res.output)
+        job_url = res.output.split()[-1]
+        job_id = job_url.split('id=')[-1]
+        job_timer = diagnosis_utils.JobTimer(
+                job_created_on, float(options.timeout_mins))
+        _log_create_task(job_timer, job_url, job_id)
+        return run_suite_common.SuiteResult(run_suite_common.RETURN_CODES.OK)
 
 
 def _run_with_autotest(options):
@@ -2130,8 +2308,17 @@ def main():
         result = run_suite_common.SuiteResult(
                 run_suite_common.RETURN_CODES.INVALID_OPTIONS)
     else:
-        if _check_if_use_skylab(options):
-            result = _run_with_skylab(options)
+        try:
+            is_skylab, ovrd_pool, ovrd_qs_account = _if_run_in_skylab(options)
+        except Exception as e:
+            logging.exception(str(e))
+            logging.info('fall back to Autotest due to trampoline errors')
+            is_skylab = False
+            ovrd_pool = ''
+            ovrd_qs_account = ''
+
+        if is_skylab:
+            result = _run_with_skylab(options, ovrd_pool, ovrd_qs_account)
         else:
             result = _run_with_autotest(options)
 

@@ -11,6 +11,7 @@ import shutil
 import signal
 import stat
 import sys
+import tarfile
 import tempfile
 import time
 import unittest
@@ -782,6 +783,25 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
         timestamp_cts_v2_folder = os.path.join(cts_v2_result_folder, timestamp_str)
         timestamp_gts_folder = os.path.join(gts_result_folder, timestamp_str)
 
+        # Build host keyvals set to parse model info.
+        host_info_path = os.path.join(host_folder, 'host_keyvals')
+        dir_to_create = '/'
+        for tdir in host_info_path.split('/'):
+            dir_to_create = os.path.join(dir_to_create, tdir)
+            if not os.path.exists(dir_to_create):
+                os.mkdir(dir_to_create)
+        with open(os.path.join(host_info_path, 'chromeos4-row9-rack11-host22'), 'w') as store_file:
+            store_file.write('labels=board%3Acoral,hw_video_acc_vp9,cros,'+
+                             'hw_jpeg_acc_dec,bluetooth,model%3Arobo360,'+
+                             'accel%3Acros-ec,'+
+                             'sku%3Arobo360_IntelR_CeleronR_CPU_N3450_1_10GHz_4Gb')
+
+        # .autoserv_execute file is needed for the test results package to look
+        # legit.
+        autoserve_path = os.path.join(host_folder, '.autoserv_execute')
+        with open(autoserve_path, 'w') as temp_file:
+            temp_file.write(' ')
+
         # Test results in cts_result_folder with a different time-stamp.
         timestamp_str_2 = '2016.04.28_10.41.44'
         timestamp_cts_folder_2 = os.path.join(cts_result_folder, timestamp_str_2)
@@ -793,7 +813,9 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
 
         path_pattern_pair = [(timestamp_cts_folder, gs_offloader.CTS_RESULT_PATTERN),
                              (timestamp_cts_folder_2, gs_offloader.CTS_RESULT_PATTERN),
+                             (timestamp_cts_folder_2, gs_offloader.CTS_COMPRESSED_RESULT_PATTERN),
                              (timestamp_cts_v2_folder, gs_offloader.CTS_V2_RESULT_PATTERN),
+                             (timestamp_cts_v2_folder, gs_offloader.CTS_V2_COMPRESSED_RESULT_PATTERN),
                              (timestamp_gts_folder, gs_offloader.CTS_V2_RESULT_PATTERN)]
 
         # Create timestamp.zip file_path.
@@ -806,15 +828,29 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
         cts_result_file = os.path.join(timestamp_cts_folder, 'testResult.xml')
         cts_result_file_2 = os.path.join(timestamp_cts_folder_2,
                                          'testResult.xml')
+        cts_result_compressed_file_2 = os.path.join(timestamp_cts_folder_2,
+                                                     'testResult.xml.tgz')
         gts_result_file = os.path.join(timestamp_gts_folder, 'test_result.xml')
         cts_v2_result_file = os.path.join(timestamp_cts_v2_folder,
                                          'test_result.xml')
+        cts_v2_result_compressed_file = os.path.join(timestamp_cts_v2_folder,
+                                         'test_result.xml.tgz')
 
         for file_path in [cts_zip_file, cts_zip_file_2, cts_v2_zip_file,
                           gts_zip_file, cts_result_file, cts_result_file_2,
-                          gts_result_file, cts_v2_result_file]:
-            with open(file_path, 'w') as f:
-                f.write('test')
+                          cts_result_compressed_file_2, gts_result_file,
+                          cts_v2_result_file, cts_v2_result_compressed_file]:
+          if file_path.endswith('tgz'):
+              test_result_file = gs_offloader.CTS_COMPRESSED_RESULT_TYPES[
+                      os.path.basename(file_path)]
+              with open(test_result_file, 'w') as f:
+                  f.write('test')
+              with tarfile.open(file_path, 'w:gz') as tar_file:
+                  tar_file.add(test_result_file)
+              os.remove(test_result_file)
+          else:
+              with open(file_path, 'w') as f:
+                  f.write('test')
 
         return (results_folder, host_folder, path_pattern_pair)
 
@@ -850,6 +886,7 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
         for path, pattern in path_pattern_pair:
             models.test.parse_job_keyval(mox.IgnoreArg()).AndReturn({
                 'build': 'veyron_minnie-cheets-release/R52-8248.0.0',
+                'hostname': 'chromeos4-row9-rack11-host22',
                 'parent_job_id': 'p_id',
                 'suite': 'arc-cts'
             })

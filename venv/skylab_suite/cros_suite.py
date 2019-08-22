@@ -51,9 +51,7 @@ SuiteHandlerSpec = collections.namedtuple(
         [
                 'suite_name',
                 'wait',
-                'suite_id',
                 'timeout_mins',
-                'passed_mins',
                 'test_retry',
                 'max_retries',
                 'provision_num_required',
@@ -77,14 +75,9 @@ TestSpec = collections.namedtuple(
                 'pool',
                 'build',
                 'keyvals',
-                # TODO(akeshet): Determine why this is necessary
-                # (can't this just be specified as its own dimension?) and
-                # delete it if it isn't necessary.
-                'bot_id',
-                'dut_name',
                 'expiration_secs',
                 'grace_period_secs',
-                'execution_timeout_secs',
+                'execution_timeout_mins',
                 'io_timeout_secs',
                 'quota_account',
         ])
@@ -100,13 +93,14 @@ class SuiteHandler(object):
         self._suite_name = specs.suite_name
         self._wait = specs.wait
         self._timeout_mins = specs.timeout_mins
+        # TODO(akeshet): Delete this variable and references to it.
         self._provision_num_required = specs.provision_num_required
         self._test_retry = specs.test_retry
         self._max_retries = specs.max_retries
-        self.passed_mins = specs.passed_mins
 
-        # The swarming task id of the suite that this suite_handler is handling.
-        self._suite_id = specs.suite_id
+        # The swarming task id of the suite that this suite_handler is handling,
+        # which is not yet known at SuiteHandler creation time.
+        self._suite_id = None
         # The swarming task id of current run_suite_skylab process. It could be
         # different from self._suite_id if a suite_id is passed in.
         self._task_id = os.environ.get('SWARMING_TASK_ID')
@@ -219,15 +213,13 @@ class SuiteHandler(object):
         return (len(finished_tasks) == len(self._active_child_tasks)
                 and not self.retried_tasks)
 
-    def _set_successful_provisioned_duts(self):
-        """Set successfully provisioned duts."""
+    def _any_task_succeeded(self):
+        """Determines if any child completed with success."""
         for t in self._active_child_tasks:
             if (swarming_lib.get_task_final_state(t) ==
                 swarming_lib.TASK_COMPLETED_SUCCESS):
-                dut_name = self.get_test_by_task_id(
-                        t['task_id']).test_spec.dut_name
-                if dut_name:
-                    self.successfully_provisioned_duts.add(dut_name)
+                return True
+        return False
 
     def is_provision_successfully_finished(self):
         """Check whether provision succeeds."""
@@ -241,9 +233,8 @@ class SuiteHandler(object):
     def is_finished_waiting(self):
         """Check whether the suite should finish its waiting."""
         if self.is_provision():
-            self._set_successful_provisioned_duts()
-            return (self.is_provision_successfully_finished() or
-                    self._check_all_tasks_finished())
+            if self._any_task_succeeded():
+                return True
 
         return self._check_all_tasks_finished()
 
@@ -360,7 +351,7 @@ class Suite(object):
         tests = self._find_tests(available_bots_num=len(available_bots))
         self.test_specs = self._get_test_specs(tests, available_bots, keyvals)
 
-    def _create_test_spec(self, test, keyvals, bot_id='', dut_name=''):
+    def _create_test_spec(self, test, keyvals):
         return TestSpec(
                 test=test,
                 priority=self.priority,
@@ -368,12 +359,10 @@ class Suite(object):
                 model=self.model,
                 pool=self.pool,
                 build=self.test_source_build,
-                bot_id=bot_id,
-                dut_name=dut_name,
                 keyvals=keyvals,
                 expiration_secs=self.timeout_mins * 60,
                 grace_period_secs=swarming_lib.DEFAULT_TIMEOUT_SECS,
-                execution_timeout_secs=self.timeout_mins * 60,
+                execution_timeout_mins=self.timeout_mins,
                 io_timeout_secs=swarming_lib.DEFAULT_TIMEOUT_SECS,
                 quota_account=self.quota_account,
         )
@@ -427,10 +416,16 @@ class Suite(object):
 class ProvisionSuite(Suite):
     """The class for a CrOS provision suite."""
     EXPIRATION_SECS = swarming_lib.DEFAULT_EXPIRATION_SECS
+    # Create at most this many dummy tasks for provisioning purposes. This is
+    # a somewhat arbitrary choice, and is selected independently of the size
+    # of the device pool. It should be high enough to provide a bit of
+    # protection from 1-off provision flake, but low enough that it doesn't
+    # expand to an entire device pool, which would be undesirable for large
+    # pools like the quotascheduler pool.
+    MAX_TASKS_TO_CREATE = 3
 
     def __init__(self, spec, client):
         super(ProvisionSuite, self).__init__(spec, client)
-        self._num_required = spec.suite_args['num_required']
 
     def _find_tests(self, available_bots_num=0):
         """Fetch the child tests for provision suite."""
@@ -441,25 +436,21 @@ class ProvisionSuite(Suite):
                 self.test_source_build, self.ds)
         dummy_test = suite_common.retrieve_control_data_for_test(
                 cf_getter, 'dummy_Pass')
-        logging.info('Get %d available DUTs for provision.', available_bots_num)
-        if available_bots_num < self._num_required:
-            logging.warning('Not enough available DUTs for provision.')
+        logging.info('Found %d available DUTs for provision.',
+                     available_bots_num)
+        if available_bots_num == 0:
+            logging.warning('0 DUTs available for provision, need at least 1')
             raise errors.NoAvailableDUTsError(
-                    self.board, self.pool, available_bots_num,
-                    self._num_required)
+                    self.board, self.pool, available_bots_num, 1)
 
-        return [dummy_test] * max(self._num_required, available_bots_num)
+        tasks_to_create = min(self.MAX_TASKS_TO_CREATE, available_bots_num)
+        logging.info('Provision suite consists of %d dummy tasks.',
+                     tasks_to_create)
+        return [dummy_test] * tasks_to_create
 
     def _get_test_specs(self, tests, available_bots, keyvals):
         test_specs = []
-        for idx, test in enumerate(tests):
-            if idx < len(available_bots):
-                bot = available_bots[idx]
-                test_specs.append(self._create_test_spec(
-                        test, keyvals, bot_id=bot['bot_id'],
-                        dut_name=swarming_lib.get_task_dut_name(
-                                bot['dimensions'])))
-            else:
-                test_specs.append(self._create_test_spec(test, keyvals))
+        for test in tests:
+            test_specs.append(self._create_test_spec(test, keyvals))
 
         return test_specs
