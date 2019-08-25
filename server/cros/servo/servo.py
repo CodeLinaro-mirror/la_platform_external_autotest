@@ -9,16 +9,26 @@ import ast
 import logging
 import os
 import re
+import socket
 import time
 import xmlrpclib
 
 from autotest_lib.client.common_lib import error
+from autotest_lib.client.common_lib import lsbrelease_utils
 from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros.servo import firmware_programmer
 
 # Time to wait when probing for a usb device, it takes on avg 17 seconds
 # to do a full probe.
 _USB_PROBE_TIMEOUT = 40
+
+
+# Regex to match XMLRPC errors due to a servod control not existing.
+NO_CONTROL_RE = re.compile(r'No control named (\w*\.?\w*)')
+
+class ControlUnavailableError(error.TestFail):
+    """Custom error class to indicate a control is unavailable on servod."""
+    pass
 
 
 def _extract_image_from_tarball(tarball, dest_dir, image_candidates):
@@ -259,6 +269,7 @@ class Servo(object):
 
         @param servo_host: A ServoHost object representing
                            the host running servod.
+        @type servo_host: autotest_lib.server.hosts.servo_host.ServoHost
         @param servo_serial: Serial number of the servo board.
         """
         # TODO(fdeng): crbug.com/298379
@@ -271,13 +282,24 @@ class Servo(object):
         self._uart = _Uart(self)
         self._usb_state = None
         self._programmer = None
-
+        self._prev_log_inode = None
+        self._prev_log_size = 0
 
     @property
     def servo_serial(self):
         """Returns the serial number of the servo board."""
         return self._servo_serial
 
+    def fetch_servod_log(self, filename=None, skip_old=False):
+        """Save the servod log into the given local file.
+
+        @param filename: save the contents into a file with the given name.
+        @param skip_old: if True, skip past the old data in the log file.
+        @type filename: str
+        @type skip_old: bool
+        @rtype: None
+        """
+        return self._servo_host.fetch_servod_log(filename, skip_old)
 
     def get_power_state_controller(self):
         """Return the power state controller for this Servo.
@@ -309,7 +331,12 @@ class Servo(object):
         @param cold_reset If True, cold reset the device after
                           initialization.
         """
-        self._server.hwinit()
+        try:
+            self._server.hwinit()
+        except socket.error as e:
+            e.filename = '%s:%s' % (self._servo_host.hostname,
+                                    self._servo_host.servo_port)
+            raise
         self.set('usb_mux_oe1', 'on')
         self._usb_state = None
         self.switch_usbkey('off')
@@ -342,31 +369,51 @@ class Servo(object):
         return self._servo_host.is_localhost()
 
 
+    def get_os_version(self):
+        """Returns the chromeos release version."""
+        lsb_release_content = self.system_output('cat /etc/lsb-release',
+                                                 ignore_status=True)
+        return lsbrelease_utils.get_chromeos_release_builder_path(
+                    lsb_release_content=lsb_release_content)
+
+
+    def get_servod_version(self):
+        """Returns the servod version."""
+        result = self._servo_host.run('servod --version')
+        # TODO: use system_output once servod --version prints to stdout
+        stdout = result.stdout.strip()
+        return stdout if stdout else result.stderr.strip()
+
+
     def power_long_press(self):
         """Simulate a long power button press."""
         # After a long power press, the EC may ignore the next power
         # button press (at least on Alex).  To guarantee that this
         # won't happen, we need to allow the EC one second to
         # collect itself.
-        self._server.power_long_press()
+        # long_press is defined as 8.5s in servod
+        self.set_nocheck('power_key', 'long_press')
 
 
     def power_normal_press(self):
         """Simulate a normal power button press."""
-        self._server.power_normal_press()
+        # press is defined as 1.2s in servod
+        self.set_nocheck('power_key', 'press')
 
 
     def power_short_press(self):
         """Simulate a short power button press."""
-        self._server.power_short_press()
+        # tab is defined as 0.2s in servod
+        self.set_nocheck('power_key', 'tab')
 
 
-    def power_key(self, press_secs=''):
+    def power_key(self, press_secs='tab'):
         """Simulate a power button press.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.power_key(press_secs)
+        self.set_nocheck('power_key', press_secs)
 
 
     def lid_open(self):
@@ -418,90 +465,91 @@ class Servo(object):
             time_left = time_left - self.SHORT_DELAY
         raise error.TestFail("Failed setting volume_down to no")
 
-    def ctrl_d(self, press_secs=''):
+    def ctrl_d(self, press_secs='tab'):
         """Simulate Ctrl-d simultaneous button presses.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.ctrl_d(press_secs)
+        self.set_nocheck('ctrl_d', press_secs)
 
 
-    def ctrl_u(self):
+    def ctrl_u(self, press_secs='tab'):
         """Simulate Ctrl-u simultaneous button presses.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.ctrl_u()
+        self.set_nocheck('ctrl_u', press_secs)
 
 
-    def ctrl_enter(self, press_secs=''):
+    def ctrl_enter(self, press_secs='tab'):
         """Simulate Ctrl-enter simultaneous button presses.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.ctrl_enter(press_secs)
+        self.set_nocheck('ctrl_enter', press_secs)
 
 
-    def d_key(self, press_secs=''):
+    def ctrl_key(self, press_secs='tab'):
         """Simulate Enter key button press.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.d_key(press_secs)
+        self.set_nocheck('ctrl_key', press_secs)
 
 
-    def ctrl_key(self, press_secs=''):
+    def enter_key(self, press_secs='tab'):
         """Simulate Enter key button press.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.ctrl_key(press_secs)
+        self.set_nocheck('enter_key', press_secs)
 
 
-    def enter_key(self, press_secs=''):
-        """Simulate Enter key button press.
-
-        @param press_secs : Str. Time to press key.
-        """
-        self._server.enter_key(press_secs)
-
-
-    def refresh_key(self, press_secs=''):
+    def refresh_key(self, press_secs='tab'):
         """Simulate Refresh key (F3) button press.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.refresh_key(press_secs)
+        self.set_nocheck('refresh_key', press_secs)
 
 
-    def ctrl_refresh_key(self, press_secs=''):
+    def ctrl_refresh_key(self, press_secs='tab'):
         """Simulate Ctrl and Refresh (F3) simultaneous press.
 
         This key combination is an alternative of Space key.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.ctrl_refresh_key(press_secs)
+        self.set_nocheck('ctrl_refresh_key', press_secs)
 
 
-    def imaginary_key(self, press_secs=''):
+    def imaginary_key(self, press_secs='tab'):
         """Simulate imaginary key button press.
 
         Maps to a key that doesn't physically exist.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.imaginary_key(press_secs)
+        self.set_nocheck('imaginary_key', press_secs)
 
 
-    def sysrq_x(self, press_secs=''):
+    def sysrq_x(self, press_secs='tab'):
         """Simulate Alt VolumeUp X simulataneous press.
 
         This key combination is the kernel system request (sysrq) X.
 
-        @param press_secs : Str. Time to press key.
+        @param press_secs: int, float, str; time to press key in seconds or
+                           known shorthand: 'tab' 'press' 'long_press'
         """
-        self._server.sysrq_x(press_secs)
+        self.set_nocheck('sysrq_x', press_secs)
 
 
     def toggle_recovery_switch(self):
@@ -594,19 +642,47 @@ class Servo(object):
         """
         return re.sub('^.*>:', '', xmlexc.faultString)
 
+    def has_control(self, control):
+        """Query servod server to determine if |control| is a valid control.
+
+        @param control: str, control name to query
+
+        @returns: true if |control| is a known control, false otherwise.
+        """
+        assert control
+        try:
+            # If the control exists, doc() will work.
+            self._server.doc(control)
+            return True
+        except xmlrpclib.Fault as e:
+            if re.search('No control %s' % control,
+                         self._get_xmlrpclib_exception(e)):
+                return False
+            raise e
 
     def get(self, gpio_name):
         """Get the value of a gpio from Servod.
 
         @param gpio_name Name of the gpio.
+
+        @returns: server response to |gpio_name| request.
+
+        @raise ControlUnavailableError: if |gpio_name| not a known control.
+        @raise error.TestFail: for all other failures doing get().
         """
         assert gpio_name
         try:
             return self._server.get(gpio_name)
         except  xmlrpclib.Fault as e:
-            err_msg = "Getting '%s' :: %s" % \
-                (gpio_name, self._get_xmlrpclib_exception(e))
-            raise error.TestFail(err_msg)
+            err_str = self._get_xmlrpclib_exception(e)
+            err_msg = "Getting '%s' :: %s" % (gpio_name, err_str)
+            unknown_ctrl = re.findall(NO_CONTROL_RE, err_str)
+            if unknown_ctrl:
+                raise ControlUnavailableError('No control named %r' %
+                                              unknown_ctrl[0])
+            else:
+                logging.error(err_msg)
+                raise error.TestFail(err_msg)
 
 
     def set(self, gpio_name, gpio_value):
@@ -632,15 +708,25 @@ class Servo(object):
 
         @param gpio_name Name of the gpio.
         @param gpio_value New setting for the gpio.
+
+        @raise ControlUnavailableError: if |gpio_name| not a known control.
+        @raise error.TestFail: for all other failures doing set().
         """
-        assert gpio_name and gpio_value
-        logging.info('Setting %s to %r', gpio_name, gpio_value)
+        # The real danger here is to pass a None value through the xmlrpc.
+        assert gpio_name and gpio_value is not None
+        logging.debug('Setting %s to %r', gpio_name, gpio_value)
         try:
             self._server.set(gpio_name, gpio_value)
         except  xmlrpclib.Fault as e:
-            err_msg = "Setting '%s' to %r :: %s" % \
-                (gpio_name, gpio_value, self._get_xmlrpclib_exception(e))
-            raise error.TestFail(err_msg)
+            err_str = self._get_xmlrpclib_exception(e)
+            err_msg = "Setting '%s' :: %s" % (gpio_name, err_str)
+            unknown_ctrl = re.findall(NO_CONTROL_RE, err_str)
+            if unknown_ctrl:
+                raise ControlUnavailableError('No control named %r' %
+                                              unknown_ctrl[0])
+            else:
+                logging.error(err_msg)
+                raise error.TestFail(err_msg)
 
 
     def set_get_all(self, controls):
@@ -652,7 +738,7 @@ class Servo(object):
         """
         rv = []
         try:
-            logging.info('Set/get all: %s', str(controls))
+            logging.debug('Set/get all: %s', str(controls))
             rv = self._server.set_get_all(controls)
         except xmlrpclib.Fault as e:
             # TODO(waihong): Remove the following backward compatibility when
@@ -716,11 +802,24 @@ class Servo(object):
         # to do to the device after hotplug.  To avoid surprises,
         # force the DUT to be off.
         self._server.hwinit()
+        try:
+            # TODO(coconutruben): change this back to set() about a month
+            # after crrev.com/c/1586239 has been merged (or whenever that
+            # logic is in the labstation images).
+            self.set_nocheck('init_keyboard','on')
+        except error.TestFail as err:
+            if 'No control named' in str(err):
+                # This indicates the servod version does not
+                # have explicit keyboard initialization yet.
+                # Ignore this.
+                pass
+            else:
+                raise err
         self._power_state.power_off()
 
-        # Set up Servo's usb mux.
-        self.switch_usbkey('host')
         if image_path:
+            # Set up Servo's usb mux.
+            self.switch_usbkey('host')
             logging.info('Searching for usb device and copying image to it. '
                          'Please wait a few minutes...')
             if not self._server.download_image_to_usb(image_path):
@@ -754,6 +853,10 @@ class Servo(object):
                 after installation.
         """
         self.image_to_servo_usb(image_path, make_image_noninteractive)
+        # Give the DUT some time to power_off if we skip
+        # download image to usb. (crbug.com/982993)
+        if not image_path:
+            time.sleep(10)
         self.boot_in_recovery_mode()
 
 
@@ -811,6 +914,12 @@ class Servo(object):
 
         """
         return self._server.get_version()
+
+
+    def running_through_ccd(self):
+        """Returns True if the setup is using ccd to run."""
+        servo = self._server.get_version()
+        return 'ccd_cr50' in servo and 'servo_micro' not in servo
 
 
     def _initialize_programmer(self, rw_only=False):
@@ -904,16 +1013,19 @@ class Servo(object):
             self.program_bios(os.path.join(dest_dir, image), rw_only)
 
 
-    def program_firmware(self, model, tarball_path, rw_only=False):
+    def program_firmware(self, board, model, tarball_path, rw_only=False):
         """Program firmware (EC, if applied, and BIOS) of the DUT.
 
+        @param board: The DUT board name.
         @param model: The DUT model name.
         @param tarball_path: The path of the downloaded build tarball.
         @param rw_only: True to only install firmware to its RW portions. Keep
                 the RO portions unchanged.
         """
-        ap_image_candidates = ('image.bin', 'image-%s.bin' % model)
-        ec_image_candidates = ('ec.bin', '%s/ec.bin' % model)
+        ap_image_candidates = ('image.bin', 'image-%s.bin' % model,
+                               'image-%s.bin' % board)
+        ec_image_candidates = ('ec.bin', '%s/ec.bin' % model,
+                               '%s/ec.bin' % board)
 
         self._reprogram(tarball_path, 'EC', ec_image_candidates, rw_only)
         self._reprogram(tarball_path, 'BIOS', ap_image_candidates, rw_only)

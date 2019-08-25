@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-
 from autotest_lib.client.bin import test
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils
@@ -12,6 +11,7 @@ from autotest_lib.client.cros import certificate_util
 from autotest_lib.client.cros import shill_temporary_profile
 from autotest_lib.client.cros import tpm_store
 from autotest_lib.client.cros import vpn_server
+from autotest_lib.client.cros.networking import shill_context
 from autotest_lib.client.cros.networking import shill_proxy
 
 class network_VPNConnect(test.test):
@@ -59,23 +59,6 @@ class network_VPNConnect(test.test):
         device = self.get_device(interface_name)
         device_path = shill_proxy.ShillProxy.dbus2primitive(device.object_path)
         return self._shill_proxy.find_object('Service', {'Device': device_path})
-
-
-    def configure_static_ip(self, interface_name, address, prefix_len):
-        """Configures the Static IP parameters for the Ethernet interface
-        |interface_name| and applies those parameters to the interface by
-        forcing a re-connect.
-
-        @param interface_name string The name of the associated interface.
-        @param address string the IP address this interface should have.
-        @param prefix_len string the IP address prefix for the interface.
-
-        """
-        service = self.find_ethernet_service(interface_name)
-        service.SetProperty('StaticIP.Address', address)
-        service.SetProperty('StaticIP.Prefixlen', prefix_len)
-        service.Disconnect()
-        service.Connect()
 
 
     def get_vpn_server(self):
@@ -241,23 +224,26 @@ class network_VPNConnect(test.test):
                 if not ethernet_pair.is_healthy:
                     raise error.TestFail('Virtual ethernet pair failed.')
 
-                # When shill finds this ethernet interface, it will reset
-                # its IP address and start a DHCP client.  We must configure
-                # the static IP address through shill.
-                self.configure_static_ip(self.CLIENT_INTERFACE_NAME,
-                                         self.CLIENT_ADDRESS,
-                                         self.NETWORK_PREFIX)
-
                 with self.get_vpn_server() as server:
-                    if self.connect_vpn():
-                        res = utils.ping(server.SERVER_IP_ADDRESS, tries=3,
-                                         user='chronos')
-                        if res != 0:
-                            raise error.TestFail('Error pinging server IP')
+                    # When shill finds this ethernet interface, it will reset
+                    # its IP address and start a DHCP client.  We must configure
+                    # the static IP address through shill.
+                    service = self.find_ethernet_service(
+                            self.CLIENT_INTERFACE_NAME)
+                    static_ip_config = {'Address' : self.CLIENT_ADDRESS,
+                                        'Prefixlen' : self.NETWORK_PREFIX}
+                    with shill_context.StaticIPContext(service,
+                                                       static_ip_config):
+                        if self.connect_vpn():
+                            res = utils.ping(server.SERVER_IP_ADDRESS, tries=3,
+                                             user='chronos')
+                            if res != 0:
+                                raise error.TestFail('Error pinging server IP')
 
-                        # IPv6 should be blackholed, so ping returns
-                        # "other error"
-                        res = utils.ping("2001:db8::1", tries=1, user='chronos')
-                        if res != 2:
-                            raise error.TestFail('IPv6 ping should '
-                                                 'have aborted')
+                            # IPv6 should be blackholed, so ping returns
+                            # "other error"
+                            res = utils.ping("2001:db8::1", tries=1,
+                                             user='chronos')
+                            if res != 2:
+                                raise error.TestFail(
+                                        'IPv6 ping should have aborted')

@@ -20,25 +20,27 @@ class firmware_UpdateFirmwareDataKeyVersion(FirmwareTest):
     version = 1
 
     def resign_datakey_version(self, host):
+        """Resigns the datakey version."""
         host.send_file(os.path.join(self.bindir,
                                     'files/common.sh'),
-                       os.path.join(self.faft_client.updater.get_temp_path(),
+                       os.path.join(self.faft_client.Updater.GetTempPath(),
                                      'common.sh'))
         host.send_file(os.path.join(self.bindir,
                                     'files/make_keys.sh'),
-                       os.path.join(self.faft_client.updater.get_temp_path(),
+                       os.path.join(self.faft_client.Updater.GetTempPath(),
                                     'make_keys.sh'))
 
-        self.faft_client.system.run_shell_command('/bin/bash %s %s' % (
-             os.path.join(self.faft_client.updater.get_temp_path(),
+        self.faft_client.System.RunShellCommand('/bin/bash %s %s' % (
+             os.path.join(self.faft_client.Updater.GetTempPath(),
                           'make_keys.sh'),
              self._update_version))
 
 
     def check_firmware_datakey_version(self, expected_ver):
-        actual_ver = self.faft_client.bios.get_datakey_version(
+        """Checks the firmware datakey version."""
+        actual_ver = self.faft_client.Bios.GetDatakeyVersion(
                 'b' if self.fw_vboot2 else 'a')
-        actual_tpm_fwver = self.faft_client.tpm.get_firmware_datakey_version()
+        actual_tpm_fwver = self.faft_client.Tpm.GetFirmwareDatakeyVersion()
         if actual_ver != expected_ver or actual_tpm_fwver != expected_ver:
             raise error.TestFail(
                 'Firmware data key version should be %s,'
@@ -50,6 +52,7 @@ class firmware_UpdateFirmwareDataKeyVersion(FirmwareTest):
 
 
     def initialize(self, host, cmdline_args):
+        """Setup the test"""
         dict_args = utils.args_to_dict(cmdline_args)
         shellball_path = dict_args.get('shellball', None)
         super(firmware_UpdateFirmwareDataKeyVersion, self).initialize(
@@ -61,27 +64,28 @@ class firmware_UpdateFirmwareDataKeyVersion(FirmwareTest):
         # Update firmware if needed
         if shellball_path:
             self.set_hardware_write_protect(enable=False)
-            self.faft_client.updater.run_factory_install()
+            self.faft_client.Updater.RunFactoryInstall()
             self.switcher.mode_aware_reboot()
 
         self.setup_usbkey(usbkey=True)
-        self._fwid = self.faft_client.updater.get_fwid()
+        self._fwid = self.faft_client.Updater.GetSectionFwid()
 
-        self.fw_ver_tpm = self.faft_client.tpm.get_firmware_datakey_version()
-        actual_ver = self.faft_client.bios.get_datakey_version('a')
+        self.fw_ver_tpm = self.faft_client.Tpm.GetFirmwareDatakeyVersion()
+        actual_ver = self.faft_client.Bios.GetDatakeyVersion('a')
         logging.info('Origin version is %s', actual_ver)
         self._update_version = actual_ver + 1
         logging.info('Firmware version will update to version %s',
             self._update_version)
 
         self.resign_datakey_version(host)
-        self.faft_client.updater.resign_firmware(1)
-        self.faft_client.updater.repack_shellball('test')
+        self.faft_client.Updater.ResignFirmware(1)
+        self.faft_client.Updater.RepackShellball('test')
 
 
     def cleanup(self):
+        """Cleanup after the test"""
         try:
-            if (self.faft_client.tpm.get_firmware_datakey_version() !=
+            if (self.faft_client.Tpm.GetFirmwareDatakeyVersion() !=
                                                        self.fw_ver_tpm):
                 self.reboot_and_reset_tpm()
             self.restore_firmware()
@@ -92,16 +96,17 @@ class firmware_UpdateFirmwareDataKeyVersion(FirmwareTest):
 
 
     def run_once(self):
+        """Runs a single iteration of the test."""
         logging.info("Update firmware with new datakey version.")
         self.check_state((self.checkers.crossystem_checker, {
                           'fwid': self._fwid
                           }))
         self.check_state((self.checkers.fw_tries_checker, 'A'))
-        self.faft_client.updater.run_autoupdate('test')
+        self.faft_client.Updater.RunAutoupdate('test')
         self.switcher.mode_aware_reboot()
 
         logging.info("Check firmware data key version and Rollback.")
-        self.faft_client.updater.run_bootok('test')
+        self.faft_client.Updater.RunBootok('test')
         self.check_state((self.checkers.fw_tries_checker, 'B'))
         self.switcher.mode_aware_reboot()
 
@@ -109,7 +114,7 @@ class firmware_UpdateFirmwareDataKeyVersion(FirmwareTest):
         self.check_state((self.checkers.fw_tries_checker,
                           'B' if self.fw_vboot2 else 'A'))
         self.check_firmware_datakey_version(self._update_version)
-        self.faft_client.updater.run_recovery()
+        self.faft_client.Updater.RunRecovery()
         self.reboot_and_reset_tpm()
 
         logging.info("Check Rollback version.")

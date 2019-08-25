@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -166,10 +166,6 @@ def parse_local_arguments(argv):
     parser.add_argument('-x', '--max_runtime_mins', type=int,
                         dest='max_runtime_mins', default=20,
                         help='Default time allowed for the tests to complete.')
-    # TODO(crbug.com/763207): This is to support calling old moblab RPC
-    # with ToT code.  This does not need to be supported after M62.
-    parser.add_argument('--oldrpc', action='store_true',
-                        help='Use old AFE RPC.')
     _, remaining_argv = parser.parse_known_args(argv)
     return parser, remaining_argv
 
@@ -325,10 +321,6 @@ def _main_for_lab_run(argv, arguments):
                '--max_runtime_mins=%s' % str(arguments.max_runtime_mins),
                '--suite_args=%s'
                % repr({'tests': _suite_arg_tests(argv)})]
-    # TODO(crbug.com/763207): This is to support calling old moblab RPC
-    # with ToT code.  This does not need to be supported after M62.
-    if arguments.oldrpc:
-        command.append('--oldrpc')
     if arguments.web:
         command.extend(['--web=%s' % (arguments.web,)])
     logging.info('About to start lab suite with command %s.', command)

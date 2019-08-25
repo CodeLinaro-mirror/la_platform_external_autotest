@@ -57,6 +57,7 @@ class ShillProxy(object):
     MANAGER_PROPERTY_UNINITIALIZED_TECHNOLOGIES = 'UninitializedTechnologies'
     MANAGER_PROPERTY_PROFILES = 'Profiles'
     MANAGER_PROPERTY_SERVICES = 'Services'
+    MANAGER_PROPERTY_DEFAULT_SERVICE = 'DefaultService'
     MANAGER_PROPERTY_ALL_SERVICES = 'ServiceCompleteList'
     MANAGER_PROPERTY_DHCPPROPERTY_HOSTNAME = 'DHCPProperty.Hostname'
     MANAGER_PROPERTY_DHCPPROPERTY_VENDORCLASS = 'DHCPProperty.VendorClass'
@@ -100,7 +101,7 @@ class ShillProxy(object):
     SERVICE_PROPERTY_SSID = 'SSID'
     SERVICE_PROPERTY_STRENGTH = 'Strength'
     SERVICE_PROPERTY_STATE = 'State'
-    SERVICE_PROPERTY_STATIC_IP_NAMESERVERS = 'StaticIP.NameServers'
+    SERVICE_PROPERTY_STATIC_IP_CONFIG = 'StaticIPConfig'
     SERVICE_PROPERTY_TYPE = 'Type'
 
     # EAP related properties.
@@ -140,60 +141,61 @@ class ShillProxy(object):
     SERVICE_PROPERTY_L2TP_XAUTH_PASSWORD = 'L2TPIPsec.XauthPassword'
     SERVICE_PROPERTY_L2TP_XAUTH_USER = 'L2TPIPsec.XauthUser'
 
-    # Mapping of service property to its dbus type.
+    # Mapping of service property to (dbus-type, additional kwargs).
     SERVICE_PROPERTY_MAP = {
-        SERVICE_PROPERTY_AUTOCONNECT: dbus.Boolean,
-        SERVICE_PROPERTY_DEVICE: dbus.ObjectPath,
-        SERVICE_PROPERTY_GUID: dbus.String,
-        SERVICE_PROPERTY_HEX_SSID: dbus.String,
-        SERVICE_PROPERTY_HIDDEN: dbus.Boolean,
-        SERVICE_PROPERTY_MODE: dbus.String,
-        SERVICE_PROPERTY_NAME: dbus.String,
-        SERVICE_PROPERTY_PASSPHRASE: dbus.String,
-        SERVICE_PROPERTY_PROFILE: dbus.ObjectPath,
-        SERVICE_PROPERTY_SAVE_CREDENTIALS: dbus.Boolean,
-        SERVICE_PROPERTY_SECURITY_RAW: dbus.String,
-        SERVICE_PROPERTY_SECURITY_CLASS: dbus.String,
-        SERVICE_PROPERTY_SSID: dbus.String,
-        SERVICE_PROPERTY_STRENGTH: dbus.Byte,
-        SERVICE_PROPERTY_STATE: dbus.String,
-        SERVICE_PROPERTY_TYPE: dbus.String,
-        SERVICE_PROPERTY_FT_ENABLED: dbus.Boolean,
-        SERVICE_PROPERTY_STATIC_IP_NAMESERVERS: dbus.String,
+        SERVICE_PROPERTY_AUTOCONNECT: (dbus.Boolean, {}),
+        SERVICE_PROPERTY_DEVICE: (dbus.ObjectPath, {}),
+        SERVICE_PROPERTY_GUID: (dbus.String, {}),
+        SERVICE_PROPERTY_HEX_SSID: (dbus.String, {}),
+        SERVICE_PROPERTY_HIDDEN: (dbus.Boolean, {}),
+        SERVICE_PROPERTY_MODE: (dbus.String, {}),
+        SERVICE_PROPERTY_NAME: (dbus.String, {}),
+        SERVICE_PROPERTY_PASSPHRASE: (dbus.String, {}),
+        SERVICE_PROPERTY_PROFILE: (dbus.ObjectPath, {}),
+        SERVICE_PROPERTY_SAVE_CREDENTIALS: (dbus.Boolean, {}),
+        SERVICE_PROPERTY_SECURITY_RAW: (dbus.String, {}),
+        SERVICE_PROPERTY_SECURITY_CLASS: (dbus.String, {}),
+        SERVICE_PROPERTY_SSID: (dbus.String, {}),
+        SERVICE_PROPERTY_STRENGTH: (dbus.Byte, {}),
+        SERVICE_PROPERTY_STATE: (dbus.String, {}),
+        SERVICE_PROPERTY_TYPE: (dbus.String, {}),
+        SERVICE_PROPERTY_FT_ENABLED: (dbus.Boolean, {}),
+        SERVICE_PROPERTY_STATIC_IP_CONFIG: (dbus.Dictionary,
+                                            {'signature' : 'sv'}),
 
-        SERVICE_PROPERTY_EAP_EAP: dbus.String,
-        SERVICE_PROPERTY_EAP_INNER_EAP: dbus.String,
-        SERVICE_PROPERTY_EAP_IDENTITY: dbus.String,
-        SERVICE_PROPERTY_EAP_PASSWORD: dbus.String,
-        SERVICE_PROPERTY_EAP_CA_CERT_PEM: dbus.Array,
-        SERVICE_PROPERTY_CLIENT_CERT_ID: dbus.String,
-        SERVICE_PROPERTY_EAP_KEY_MGMT: dbus.String,
-        SERVICE_PROPERTY_EAP_PIN: dbus.String,
-        SERVICE_PROPERTY_PRIVATE_KEY_ID: dbus.String,
-        SERVICE_PROPERTY_USE_SYSTEM_CAS: dbus.Boolean,
+        SERVICE_PROPERTY_EAP_EAP: (dbus.String, {}),
+        SERVICE_PROPERTY_EAP_INNER_EAP: (dbus.String, {}),
+        SERVICE_PROPERTY_EAP_IDENTITY: (dbus.String, {}),
+        SERVICE_PROPERTY_EAP_PASSWORD: (dbus.String, {}),
+        SERVICE_PROPERTY_EAP_CA_CERT_PEM: (dbus.Array, {}),
+        SERVICE_PROPERTY_CLIENT_CERT_ID: (dbus.String, {}),
+        SERVICE_PROPERTY_EAP_KEY_MGMT: (dbus.String, {}),
+        SERVICE_PROPERTY_EAP_PIN: (dbus.String, {}),
+        SERVICE_PROPERTY_PRIVATE_KEY_ID: (dbus.String, {}),
+        SERVICE_PROPERTY_USE_SYSTEM_CAS: (dbus.Boolean, {}),
 
-        SERVICE_PROPERTY_OPENVPN_CA_CERT_PEM: dbus.Array,
-        SERVICE_PROPERTY_OPENVPN_PASSWORD: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_PKCS11_ID: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_PKCS11_PIN: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_PROVIDER_HOST: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_PROVIDER_TYPE: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_REMOTE_CERT_EKU: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_USER: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_VERB: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_VERIFY_HASH: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_VERIFY_X509_NAME: dbus.String,
-        SERVICE_PROPERTY_OPENVPN_VERIFY_X509_TYPE: dbus.String,
+        SERVICE_PROPERTY_OPENVPN_CA_CERT_PEM: (dbus.Array, {}),
+        SERVICE_PROPERTY_OPENVPN_PASSWORD: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_PKCS11_ID: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_PKCS11_PIN: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_PROVIDER_HOST: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_PROVIDER_TYPE: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_REMOTE_CERT_EKU: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_USER: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_VERB: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_VERIFY_HASH: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_VERIFY_X509_NAME: (dbus.String, {}),
+        SERVICE_PROPERTY_OPENVPN_VERIFY_X509_TYPE: (dbus.String, {}),
 
-        SERVICE_PROPERTY_L2TP_CA_CERT_PEM: dbus.Array,
-        SERVICE_PROPERTY_L2TP_CLIENT_CERT_ID: dbus.String,
-        SERVICE_PROPERTY_L2TP_CLIENT_CERT_SLOT: dbus.String,
-        SERVICE_PROPERTY_L2TP_PASSWORD: dbus.String,
-        SERVICE_PROPERTY_L2TP_PIN: dbus.String,
-        SERVICE_PROPERTY_L2TP_PSK: dbus.String,
-        SERVICE_PROPERTY_L2TP_USER: dbus.String,
-        SERVICE_PROPERTY_L2TP_XAUTH_PASSWORD: dbus.String,
-        SERVICE_PROPERTY_L2TP_XAUTH_USER: dbus.String
+        SERVICE_PROPERTY_L2TP_CA_CERT_PEM: (dbus.Array, {}),
+        SERVICE_PROPERTY_L2TP_CLIENT_CERT_ID: (dbus.String, {}),
+        SERVICE_PROPERTY_L2TP_CLIENT_CERT_SLOT: (dbus.String, {}),
+        SERVICE_PROPERTY_L2TP_PASSWORD: (dbus.String, {}),
+        SERVICE_PROPERTY_L2TP_PIN: (dbus.String, {}),
+        SERVICE_PROPERTY_L2TP_PSK: (dbus.String, {}),
+        SERVICE_PROPERTY_L2TP_USER: (dbus.String, {}),
+        SERVICE_PROPERTY_L2TP_XAUTH_PASSWORD: (dbus.String, {}),
+        SERVICE_PROPERTY_L2TP_XAUTH_USER: (dbus.String, {})
     }
 
     SERVICE_CONNECTED_STATES = ['portal', 'no-connectivity', 'redirect-found',
@@ -218,7 +220,6 @@ class ShillProxy(object):
     TECHNOLOGY_ETHERNET = 'ethernet'
     TECHNOLOGY_VPN = 'vpn'
     TECHNOLOGY_WIFI = 'wifi'
-    TECHNOLOGY_WIMAX = 'wimax'
 
     VALUE_POWERED_ON = True
     VALUE_POWERED_OFF = False
@@ -245,7 +246,6 @@ class ShillProxy(object):
         TECHNOLOGY_ETHERNET: LOG_SCOPES_FOR_TEST_COMMON + ['ethernet'],
         TECHNOLOGY_VPN: LOG_SCOPES_FOR_TEST_COMMON + ['vpn'],
         TECHNOLOGY_WIFI: LOG_SCOPES_FOR_TEST_COMMON + ['wifi'],
-        TECHNOLOGY_WIMAX: LOG_SCOPES_FOR_TEST_COMMON + ['wimax']
     }
 
     UNKNOWN_METHOD = 'org.freedesktop.DBus.Error.UnknownMethod'
@@ -280,8 +280,8 @@ class ShillProxy(object):
         for key, value in in_dict.iteritems():
                 if key not in ShillProxy.SERVICE_PROPERTY_MAP:
                         raise ShillProxyError('Unsupported property %s' % (key))
-                dbus_dict[key] = ShillProxy.SERVICE_PROPERTY_MAP[key](
-                        value, variant_level=1)
+                (dbus_type, kwargs) = ShillProxy.SERVICE_PROPERTY_MAP[key]
+                dbus_dict[key] = dbus_type(value, variant_level=1, **kwargs)
         return dbus_dict
 
 
@@ -719,3 +719,23 @@ class ShillProxy(object):
                 service, self.SERVICE_PROPERTY_STATE, ['idle'],
                 timeout_seconds=timeout_seconds)
         return success
+
+
+    def get_default_interface_name(self):
+        """Retrieve the name of the default interface.
+
+        Default interface is determined via the Manager's default service.
+
+        @return Device name string, or None.
+        """
+        service_path = self.get_dbus_property(self.manager,
+                self.MANAGER_PROPERTY_DEFAULT_SERVICE)
+        if not service_path:
+            return None
+        service = self.get_dbus_object(self.DBUS_TYPE_SERVICE, service_path)
+        device_path = self.get_dbus_property(service,
+                self.SERVICE_PROPERTY_DEVICE)
+        if not device_path:
+            return None
+        device = self.get_dbus_object(self.DBUS_TYPE_DEVICE, device_path)
+        return self.get_dbus_property(device, self.DEVICE_PROPERTY_INTERFACE)

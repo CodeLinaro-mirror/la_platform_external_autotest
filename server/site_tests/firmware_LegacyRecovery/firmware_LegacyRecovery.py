@@ -29,20 +29,21 @@ class firmware_LegacyRecovery(FirmwareTest):
         super(firmware_LegacyRecovery, self).cleanup()
 
     def run_once(self):
+        """Runs a single iteration of the test."""
         logging.info("Turn on the recovery boot. Enable recovery request "
                      "and perform a reboot.")
         self.check_state((self.checkers.crossystem_checker, {
                            'devsw_boot': '0',
                            'mainfw_type': 'normal',
                            }))
-        self.faft_client.system.request_recovery_boot()
+        self.faft_client.System.RequestRecoveryBoot()
         self.switcher.simple_reboot()
         self.switcher.bypass_rec_mode()
         try:
             self.switcher.wait_for_client()
         except ConnectionError:
             raise error.TestError('Failed to boot the USB image.')
-        self.faft_client.system.run_shell_command(
+        self.faft_client.System.RunShellCommand(
                                    'crossystem recovery_request=1')
 
         logging.info("Wait to ensure no recovery boot at remove screen "

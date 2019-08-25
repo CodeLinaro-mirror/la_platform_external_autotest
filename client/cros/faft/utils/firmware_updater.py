@@ -5,6 +5,7 @@
 
 See FirmwareUpdater object below.
 """
+import array
 import json
 import os
 
@@ -24,90 +25,125 @@ class FirmwareUpdater(object):
     two subdirectory keys/ and work/. You can modify the keys in keys/
     directory. If you want to provide a given shellball to do firmware update,
     put shellball under /var/tmp/faft/autest with name chromeos-firmwareupdate.
+
+    @type os_if: autotest_lib.client.cros.faft.utils.os_interface.OSInterface
     """
 
     DAEMON = 'update-engine'
     CBFSTOOL = 'cbfstool'
     HEXDUMP = 'hexdump -v -e \'1/1 "0x%02x\\n"\''
 
+    DEFAULT_SHELLBALL = '/usr/sbin/chromeos-firmwareupdate'
+    DEFAULT_SUBDIR = 'autest'  # subdirectory of /var/tmp/faft/
+    DEFAULT_SECTION_FOR_TARGET = {'bios': 'a', 'ec': 'rw'}
+
     def __init__(self, os_if):
+        """Initialize the updater tools, but don't load the image data yet."""
         self.os_if = os_if
-        self._temp_path = '/var/tmp/faft/autest'
+        self._temp_path = self.os_if.state_dir_file(self.DEFAULT_SUBDIR)
         self._cbfs_work_path = os.path.join(self._temp_path, 'cbfs')
         self._keys_path = os.path.join(self._temp_path, 'keys')
         self._work_path = os.path.join(self._temp_path, 'work')
         self._bios_path = 'bios.bin'
         self._ec_path = 'ec.bin'
 
-        pubkey_path = os.path.join(self._keys_path, 'root_key.vbpubk')
-        self._real_bios_handler = flashrom_handler.FlashromHandler(
-                self.os_if,
-                pubkey_path,
-                self._keys_path,
-                'bios',
-        )
-        self._real_ec_handler = flashrom_handler.FlashromHandler(
-                self.os_if,
-                pubkey_path,
-                self._keys_path,
-                'ec',
-        )
+        self.pubkey_path = os.path.join(self._keys_path, 'root_key.vbpubk')
+        self._real_bios_handler = self._create_handler('bios')
+        self._real_ec_handler = self._create_handler('ec')
+        self.initialized = False
 
-        # _detect_image_paths always needs to run during initialization
-        # or after extract_shellball is called.
-        #
-        # If we are setting up the temp dir from scratch, we'll transitively
-        # call _detect_image_paths since extract_shellball is called.
-        # Otherwise, we need to scan the existing temp directory.
-        if not self.os_if.is_dir(self._temp_path):
-            self._setup_temp_dir()
-        else:
+    def init(self):
+        """Extract the shellball and other files, unless they already exist."""
+
+        if self.os_if.is_dir(self._work_path):
+            # If work dir is present, assume the whole temp dir is usable as-is.
             self._detect_image_paths()
+        else:
+            # If work dir is missing, assume the whole temp dir is unusable, and
+            # recreate it.
+            self._create_temp_dir()
+            self.extract_shellball()
 
-    @property
-    def _bios_handler(self):
-        """Return the BIOS flashrom handler, after initializing it if necessary
+        self.initialized = True
 
+    def _get_handler(self, target):
+        """Return the handler for the target, after initializing it if needed.
+
+        @param target: image type ('bios' or 'ec')
+        @return: the handler for that target
+
+        @type target: str
         @rtype: flashrom_handler.FlashromHandler
         """
-        if not self._real_bios_handler.initialized:
-            bios_file = os.path.join(self._work_path, self._bios_path)
-            self._real_bios_handler.init(bios_file)
+        if target == 'bios':
+            if not self._real_bios_handler.initialized:
+                bios_file = self._get_image_path('bios')
+                self._real_bios_handler.init(bios_file)
+            return self._real_bios_handler
+        elif target == 'ec':
+            if not self._real_ec_handler.initialized:
+                ec_file = self._get_image_path('ec')
+                self._real_ec_handler.init(ec_file, allow_fallback=True)
+            return self._real_ec_handler
+        else:
+            raise FirmwareUpdaterError("Unhandled target: %r" % target)
 
-        return self._real_bios_handler
+    def _create_handler(self, target, suffix=None):
+        """Return a new (not pre-populated) handler for the given target,
+        such as for use in checking installed versions.
 
-    @property
-    def _ec_handler(self):
-        """Return the EC flashrom handler, after initializing it if necessary.
-        If there's no usable EC flash, this will raise an exception, instead of
-        allowing further attempts to run flashrom commands.
+        @param target: image type ('bios' or 'ec')
+        @param suffix: additional piece for subdirectory of handler
+                       Example: 'tmp' -> 'autest/<target>.tmp/'
+        @return: a new handler for that target
 
+        @type target: str
         @rtype: flashrom_handler.FlashromHandler
-        @raise: FirmwareUpdaterError
         """
-        # Raise an exception early if there's no usable EC flash.
-        if not self._real_ec_handler.is_available():
-            # Can't tell for sure whether it's broken or simply nonexistent.
-            raise FirmwareUpdaterError("No usable EC flash was detected.")
+        if suffix:
+            subdir = '%s/%s.%s' % (self.DEFAULT_SUBDIR, target, suffix)
+        else:
+            subdir = '%s/%s' % (self.DEFAULT_SUBDIR, target)
+        return flashrom_handler.FlashromHandler(
+                self.os_if, self.pubkey_path, self._keys_path, target=target,
+                subdir=subdir)
 
-        if not self._real_ec_handler.initialized:
-            ec_file = os.path.join(self._work_path, self._ec_path)
+    def _get_image_path(self, target):
+        """Return the handler for the given target
 
-            if os.path.exists(ec_file):
-                self._real_ec_handler.init(ec_file)
-            else:
-                self.os_if.log(
-                        "Shellball EC image missing: %s\n"
-                        "Trying current flash contents instead." % ec_file)
-                self._real_ec_handler.init()
+        @param target: image type ('bios' or 'ec')
+        @return: the path of the image file for that target
 
-        return self._real_ec_handler
+        @type target: str
+        @rtype: str
+        """
+        if target == 'bios':
+            return os.path.join(self._work_path, self._bios_path)
+        elif target == 'ec':
+            return os.path.join(self._work_path, self._ec_path)
+        else:
+            raise FirmwareUpdaterError("Unhandled target: %r" % target)
 
-    def _setup_temp_dir(self):
-        """Setup temporary directory.
+    def _get_default_section(self, target):
+        """Return the default section to work with, for the given target
 
-        Devkeys are copied to _key_path. Then, shellball (default:
-        /usr/sbin/chromeos-firmwareupdate) is extracted to _work_path.
+        @param target: image type ('bios' or 'ec')
+        @return: the default section for that target
+
+        @type target: str
+        @rtype: str
+        """
+        if target in self.DEFAULT_SECTION_FOR_TARGET:
+            return self.DEFAULT_SECTION_FOR_TARGET[target]
+        else:
+            raise FirmwareUpdaterError("Unhandled target: %r" % target)
+
+    def _create_temp_dir(self):
+        """Create (or recreate) the temporary directory.
+
+        The default /usr/sbin/chromeos-firmwareupdate is copied into _temp_dir,
+        and devkeys are copied to _key_path. The caller is responsible for
+        extracting the copied shellball.
         """
         self.cleanup_temp_dir()
 
@@ -116,11 +152,9 @@ class FirmwareUpdater(object):
         self.os_if.create_dir(self._work_path)
         self.os_if.copy_dir('/usr/share/vboot/devkeys', self._keys_path)
 
-        original_shellball = '/usr/sbin/chromeos-firmwareupdate'
         working_shellball = os.path.join(self._temp_path,
                                          'chromeos-firmwareupdate')
-        self.os_if.copy_file(original_shellball, working_shellball)
-        self.extract_shellball()
+        self.os_if.copy_file(self.DEFAULT_SHELLBALL, working_shellball)
 
     def cleanup_temp_dir(self):
         """Cleanup temporary directory."""
@@ -139,38 +173,109 @@ class FirmwareUpdater(object):
         cmd = 'status %s | grep start || start %s' % (self.DAEMON, self.DAEMON)
         self.os_if.run_shell_command(cmd)
 
-    def retrieve_fwid(self):
-        """Retrieve shellball's fwid tuple.
-
-        This method should be called after _setup_temp_dir.
-
-        Returns:
-            Shellball's fwid tuple (ro_fwid, rw_fwid).
-        """
-        self._bios_handler.new_image(
-                os.path.join(self._work_path, self._bios_path))
-        # Remove the tailing null characters
-        ro_fwid = self._bios_handler.get_section_fwid('ro').rstrip('\0')
-        rw_fwid = self._bios_handler.get_section_fwid('a').rstrip('\0')
-        return (ro_fwid, rw_fwid)
-
-    def retrieve_ecid(self):
-        """Retrieve shellball's ecid.
-
-        This method should be called after _setup_temp_dir.
-
-        Returns:
-            Shellball's ecid.
-        """
-        self._ec_handler.new_image(
-                os.path.join(self._work_path, self._ec_path))
-        fwid = self._ec_handler.get_section_fwid('rw')
-        # Remove the tailing null characters
-        return fwid.rstrip('\0')
-
-    def retrieve_ec_hash(self):
+    def get_ec_hash(self):
         """Retrieve the hex string of the EC hash."""
-        return self._ec_handler.get_section_hash('rw')
+        ec = self._get_handler('ec')
+        return ec.get_section_hash('rw')
+
+    def get_section_fwid(self, target='bios', section=None):
+        """Get one fwid from in-memory image, for the given target.
+
+        @param target: the image type to get from: 'bios (default) or 'ec'
+        @param section: section to return.  Default: A for bios, RW for EC
+
+        @type target: str | None
+        @rtype: str
+        """
+        if section is None:
+            section = self._get_default_section(target)
+        image_path = self._get_image_path(target)
+        if target == 'ec' and not os.path.isfile(image_path):
+            # If the EC image is missing, report a specific error message.
+            raise FirmwareUpdaterError("Shellball does not contain ec.bin")
+
+        handler = self._get_handler(target)
+        handler.new_image(image_path)
+        fwid = handler.get_section_fwid(section)
+        if fwid is not None:
+            return str(fwid)
+        else:
+            return None
+
+    def get_all_fwids(self, target='bios'):
+        """Get all non-empty fwids from in-memory image, for the given target.
+
+        @param target: the image type to get from: 'bios' (default) or 'ec'
+        @return: fwid for the sections
+
+        @type target: str
+        @rtype: dict | None
+        """
+        image_path = self._get_image_path(target)
+        if target == 'ec' and not os.path.isfile(image_path):
+            # If the EC image is missing, report a specific error message.
+            raise FirmwareUpdaterError("Shellball does not contain ec.bin")
+
+        handler = self._get_handler(target)
+        handler.new_image(image_path)
+
+        fwids = {}
+        for section in handler.fv_sections:
+            fwid = handler.get_section_fwid(section)
+            if fwid is not None:
+                fwids[section] = fwid
+        return fwids
+
+    def get_all_installed_fwids(self, target='bios', filename=None):
+        """Get all non-empty fwids from disk or flash, for the given target.
+
+        @param target: the image type to get from: 'bios' (default) or 'ec'
+        @param filename: filename to read instead of using the actual flash
+        @return: fwid for the sections
+
+        @type target: str
+        @type filename: str
+        @rtype: dict
+        """
+        handler = flashrom_handler.FlashromHandler(
+                self.os_if, self.pubkey_path, target=target)
+        if filename:
+            filename = os.path.join(self._temp_path, filename)
+        handler.new_image(filename)
+
+        fwids = {}
+        for section in handler.fv_sections:
+            fwid = handler.get_section_fwid(section)
+            if fwid is not None:
+                fwids[section] = fwid
+        return fwids
+
+    def modify_fwids(self, target='bios', sections=None):
+        """Modify the fwid in the image, but don't flash it.
+
+        @param target: the image type to modify: 'bios' (default) or 'ec'
+        @param sections: section(s) to modify.  Default: A for bios, RW for ec
+        @return: fwids for the modified sections, as {section: fwid}
+
+        @type target: str
+        @type sections: tuple | list
+        @rtype: dict
+        """
+        if sections is None:
+            sections = [self._get_default_section(target)]
+
+        image_fullpath = self._get_image_path(target)
+        if target == 'ec' and not os.path.isfile(image_fullpath):
+            # If the EC image is missing, report a specific error message.
+            raise FirmwareUpdaterError("Shellball does not contain ec.bin")
+
+        handler = self._get_handler(target)
+        fwids = handler.modify_fwids(sections)
+
+        handler.dump_whole(image_fullpath)
+        handler.new_image(image_fullpath)
+
+        return fwids
 
     def modify_ecid_and_flash_to_bios(self):
         """Modify ecid, put it to AP firmware, and flash it to the system.
@@ -192,31 +297,55 @@ class FirmwareUpdater(object):
         """
         self.cbfs_setup_work_dir()
 
-        fwid = self.retrieve_ecid()
+        fwid = self.get_section_fwid('ec', 'rw')
         if fwid.endswith('~'):
             raise FirmwareUpdaterError('The EC fwid is already modified')
 
         # Modify the EC FWID and resign
         fwid = fwid[:-1] + '~'
-        self._ec_handler.set_section_fwid('rw', fwid)
-        self._ec_handler.resign_ec_rwsig()
+        ec = self._get_handler('ec')
+        ec.set_section_fwid('rw', fwid)
+        ec.resign_ec_rwsig()
 
         # Replace ecrw to the new one
         ecrw_bin_path = os.path.join(self._cbfs_work_path,
                                      chip_utils.ecrw.cbfs_bin_name)
-        self._ec_handler.dump_section_body('rw', ecrw_bin_path)
+        ec.dump_section_body('rw', ecrw_bin_path)
 
         # Replace ecrw.hash to the new one
         ecrw_hash_path = os.path.join(self._cbfs_work_path,
                                       chip_utils.ecrw.cbfs_hash_name)
         with open(ecrw_hash_path, 'w') as f:
-            f.write(self.retrieve_ec_hash())
+            f.write(self.get_ec_hash())
 
         # Store the modified ecrw and its hash to cbfs
         self.cbfs_replace_chip(chip_utils.ecrw.fw_name, extension='')
 
         # Resign and flash the AP firmware back to the system
         self.cbfs_sign_and_flash()
+
+    def corrupt_diagnostics_image(self, local_filename):
+        """Corrupts a diagnostics image in the CBFS working directory.
+
+        @param local_filename: Filename for storing the diagnostics image in the
+            CBFS working directory
+        """
+        local_path = os.path.join(self._cbfs_work_path, local_filename)
+
+        # Invert the last few bytes of the image. Note that cbfstool will
+        # silently ignore bytes added after the end of the ELF, and it will
+        # refuse to use an ELF with noticeably corrupted headers as a payload.
+        num_bytes = 4
+        with open(local_path, 'rb+') as image:
+            image.seek(-num_bytes, os.SEEK_END)
+            last_bytes = array.array('B')
+            last_bytes.fromfile(image, num_bytes)
+
+            for i in range(len(last_bytes)):
+                last_bytes[i] = last_bytes[i] ^ 0xff
+
+            image.seek(-num_bytes, os.SEEK_END)
+            last_bytes.tofile(image)
 
     def resign_firmware(self, version=None, work_path=None):
         """Resign firmware with version.
@@ -245,12 +374,12 @@ class FirmwareUpdater(object):
 
     def _read_manifest(self, shellball=None):
         """This gets the manifest from the shellball or the extracted directory.
-        If a shellball path is specified, it gets the info by running --manifest
-        on it; otherwise, it reads manifest.json from the extracted work path.
 
-        @param shellball: Path of the shellball to use the manifest from.
-        @type shellball: str
+        @param shellball: Path of the shellball to read from (via --manifest).
+                          If None (default), read from extracted manifest.json.
         @return: the manifest information, or None
+
+        @type shellball: str | None
         @rtype: dict
         """
 
@@ -270,11 +399,10 @@ class FirmwareUpdater(object):
 
     def _detect_image_paths(self, shellball=None):
         """Scans shellball manifest to find correct bios and ec image paths.
-        If a shellball path is specified, it gets the info by running --manifest
-        on it; otherwise, it reads manifest.json from the extracted work path.
 
-        @param shellball: Path of the shellball to use the manifest from.
-        @type shellball: str
+        @param shellball: Path of the shellball to read from (via --manifest).
+                          If None (default), read from extracted manifest.json.
+        @type shellball: str | None
         """
         model_result = self.os_if.run_shell_command_get_output(
                 'mosys platform model')
@@ -321,7 +449,8 @@ class FirmwareUpdater(object):
         self.os_if.run_shell_command(
                 'sh %s --sb_extract %s' % (working_shellball, self._work_path))
 
-        self._detect_image_paths(working_shellball)
+        # use the json file that was extracted, to catch extraction problems.
+        self._detect_image_paths()
         return working_shellball
 
     def repack_shellball(self, append=None):
@@ -347,36 +476,69 @@ class FirmwareUpdater(object):
         self.os_if.run_shell_command(
                 'sh %s --sb_repack %s' % (working_shellball, self._work_path))
 
+        # use the shellball that was repacked, to catch repacking problems.
         self._detect_image_paths(working_shellball)
         return working_shellball
 
-    def run_firmwareupdate(self, mode, updater_append=None, options=[]):
+    def reset_shellball(self):
+        """Extract shellball, then revert the AP and EC handlers' data."""
+        self._create_temp_dir()
+        self.extract_shellball()
+        self.reload_images()
+
+    def reload_images(self):
+        """Reload handlers from the on-disk images, in case they've changed."""
+        bios_file = os.path.join(self._work_path, self._bios_path)
+        self._real_bios_handler.deinit()
+        self._real_bios_handler.init(bios_file)
+        if self._real_ec_handler.is_available():
+            ec_file = os.path.join(self._work_path, self._ec_path)
+            self._real_ec_handler.deinit()
+            self._real_ec_handler.init(ec_file, allow_fallback=True)
+
+    def run_firmwareupdate(self, mode, append=None, options=None):
         """Do firmwareupdate with updater in temp_dir.
 
-        Args:
-            updater_append: decide which shellball to use with format
-                chromeos-firmwareupdate-[append]. Use'chromeos-firmwareupdate'
-                if updater_append is None.
-            mode: ex.'autoupdate', 'recovery', 'bootok', 'factory_install'...
-            options: ex. ['--noupdate_ec', '--force'] or [] for
-                no option.
-        """
-        if updater_append:
-            updater = os.path.join(
-                    self._temp_path,
-                    'chromeos-firmwareupdate-%s' % updater_append)
-        else:
-            updater = os.path.join(self._temp_path, 'chromeos-firmwareupdate')
-        command = '/bin/sh %s --mode %s %s' % (updater, mode,
-                                               ' '.join(options))
+        @param append: decide which shellball to use with format
+                chromeos-firmwareupdate-[append].
+                Use'chromeos-firmwareupdate' if append is None.
+        @param mode: ex.'autoupdate', 'recovery', 'bootok', 'factory_install'...
+        @param options: ex. ['--noupdate_ec', '--force'] or [] or None.
 
+        @type append: str
+        @type mode: str
+        @type options: list | tuple | None
+        """
         if mode == 'bootok':
             # Since CL:459837, bootok is moved to chromeos-setgoodfirmware.
-            new_command = '/usr/sbin/chromeos-setgoodfirmware'
-            command = 'if [ -e %s ]; then %s; else %s; fi' % (
-                    new_command, new_command, command)
+            set_good_cmd = '/usr/sbin/chromeos-setgoodfirmware'
+            if os.path.isfile(set_good_cmd):
+                return self.os_if.run_shell_command_get_status(set_good_cmd)
 
-        self.os_if.run_shell_command(command)
+        updater = os.path.join(self._temp_path, 'chromeos-firmwareupdate')
+        if append:
+            updater = '%s-%s' % (updater, append)
+
+        if options is None:
+            options = []
+        if isinstance(options, tuple):
+            options = list(options)
+
+        def _has_emulate(option):
+            return option == '--emulate' or option.startswith('--emulate=')
+
+        if self.os_if.test_mode and not filter(_has_emulate, options):
+            # if in test mode, forcibly use --emulate, if not already used.
+            fake_bios = os.path.join(self._temp_path, 'rpc-test-fake-bios.bin')
+            if not os.path.exists(fake_bios):
+                bios_reader = self._create_handler('bios', 'tmp')
+                bios_reader.dump_flash(fake_bios)
+            options = ['--emulate', fake_bios] + options
+
+        update_cmd = '/bin/sh %s --mode %s %s' % (updater, mode,
+                                                  ' '.join(options))
+
+        return self.os_if.run_shell_command_get_status(update_cmd)
 
     def cbfs_setup_work_dir(self):
         """Sets up cbfs on DUT.
@@ -427,6 +589,20 @@ class FirmwareUpdater(object):
             return False
 
         return True
+
+    def cbfs_extract_diagnostics(self, diag_name, local_filename):
+        """Runs cbfstool to extract a diagnostics image.
+
+        @param diag_name: Name of the diagnostics image in CBFS
+        @param local_filename: Filename for storing the diagnostics image in the
+            CBFS working directory
+        """
+        bios_path = os.path.join(self._cbfs_work_path, self._bios_path)
+        cbfs_extract = '%s %s extract -m x86 -r RW_LEGACY -n %s -f %s' % (
+                self.CBFSTOOL, bios_path, diag_name,
+                os.path.join(self._cbfs_work_path, local_filename))
+
+        self.os_if.run_shell_command(cbfs_extract)
 
     def cbfs_get_chip_hash(self, fw_name):
         """Returns chip firmware hash blob.
@@ -512,13 +688,65 @@ class FirmwareUpdater(object):
 
         return True
 
+    def cbfs_replace_diagnostics(self, diag_name, local_filename):
+        """Runs cbfstool to replace a diagnostics image in the firmware image.
+
+        @param diag_name: Name of the diagnostics image in CBFS
+        @param local_filename: Filename for storing the diagnostics image in the
+            CBFS working directory
+        """
+        bios_path = os.path.join(self._cbfs_work_path, self._bios_path)
+        rm_cmd = '%s %s remove -r RW_LEGACY -n %s' % (
+                self.CBFSTOOL, bios_path, diag_name)
+        expand_cmd = '%s %s expand -r RW_LEGACY' % (self.CBFSTOOL, bios_path)
+        add_cmd = ('%s %s add-payload -r RW_LEGACY -c lzma -n %s -f %s') % (
+                self.CBFSTOOL, bios_path, diag_name,
+                os.path.join(self._cbfs_work_path, local_filename))
+        truncate_cmd = '%s %s truncate -r RW_LEGACY' % (
+                self.CBFSTOOL, bios_path)
+
+        self.os_if.run_shell_command(rm_cmd)
+
+        try:
+            self.os_if.run_shell_command(expand_cmd)
+        except shell_wrapper.ShellError:
+            self.os_if.log(
+                    '%s may be too old, continuing without "expand" support'
+                    % self.CBFSTOOL)
+
+        self.os_if.run_shell_command(add_cmd)
+
+        try:
+            self.os_if.run_shell_command(truncate_cmd)
+        except shell_wrapper.ShellError:
+            self.os_if.log(
+                    '%s may be too old, continuing without "truncate" support'
+                    % self.CBFSTOOL)
+
     def cbfs_sign_and_flash(self):
         """Signs CBFS (bios.bin) and flashes it."""
         self.resign_firmware(work_path=self._cbfs_work_path)
-        self._bios_handler.new_image(
-                os.path.join(self._cbfs_work_path, self._bios_path))
-        self._bios_handler.write_whole()
+        bios = self._get_handler('bios')
+        bios.new_image(os.path.join(self._cbfs_work_path, self._bios_path))
+        bios.write_whole()
         return True
+
+    def copy_bios(self, filename):
+        """Copy the shellball BIOS to the given name in the temp dir
+
+        @param filename: the filename to use for the copy
+        @return: the full path of the BIOS
+
+        @type filename: str
+        @rtype: str
+        """
+        if not isinstance(filename, basestring):
+            raise FirmwareUpdaterError(
+                    "Filename must be a string: %s" % repr(filename))
+        src_bios = os.path.join(self._work_path, self._bios_path)
+        dst_bios = os.path.join(self._temp_path, filename)
+        self.os_if.copy_file(src_bios, dst_bios)
+        return dst_bios
 
     def get_temp_path(self):
         """Get temp directory path."""
@@ -527,10 +755,6 @@ class FirmwareUpdater(object):
     def get_keys_path(self):
         """Get keys directory path."""
         return self._keys_path
-
-    def get_cbfs_work_path(self):
-        """Get cbfs work directory path."""
-        return self._cbfs_work_path
 
     def get_work_path(self):
         """Get work directory path."""

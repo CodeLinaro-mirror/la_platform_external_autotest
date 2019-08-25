@@ -3,17 +3,18 @@
 # found in the LICENSE file.
 
 from autotest_lib.server import utils
+from autotest_lib.server.cros.bluetooth import bluetooth_test
 
 AUTHOR = 'chromeos-chameleon'
 NAME = 'bluetooth_AdapterLESanity'
 PURPOSE = ('Batch of Bluetooth LE sanity tests')
 CRITERIA = 'Pass all sanity test'
-ATTRIBUTES = 'suite:bluetooth, suite:bluetooth_quicksanity'
+ATTRIBUTES = 'suite:bluetooth'
 TIME = 'MEDIUM'
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'bluetooth'
 TEST_TYPE = 'server'
-DEPENDENCIES = 'bluetooth, chameleon:ble, nRF52'
+DEPENDENCIES = 'bluetooth, chameleon:bt_ble_hid'
 
 DOC = """
     A Batch of Bluetooth LE sanity tests. This test is written as a batch
@@ -28,9 +29,13 @@ DOC = """
 
 args_dict = utils.args_to_dict(args)
 chameleon_args = hosts.CrosHost.get_chameleon_arguments(args_dict)
+newblue_enable = args_dict['newblue'] == 'enable'\
+  if 'newblue' in args_dict else False
 
 def run(machine):
     host = hosts.create_host(machine, chameleon_args=chameleon_args)
+    bluetooth_test.newblue_enable_disable(host=host,
+                                          newblue_enable=newblue_enable)
     job.run_test('bluetooth_AdapterLESanity', host=host,
                   num_iterations=1)
 

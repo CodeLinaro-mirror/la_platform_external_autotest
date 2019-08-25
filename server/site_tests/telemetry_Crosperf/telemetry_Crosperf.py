@@ -7,11 +7,11 @@ import re
 import shutil
 import StringIO
 
-import common
 from autotest_lib.client.common_lib import error
 from autotest_lib.server import test
 from autotest_lib.server import utils
 from autotest_lib.site_utils import test_runner_utils
+from contextlib import contextmanager
 
 
 TELEMETRY_TIMEOUT_MINS = 60
@@ -28,10 +28,14 @@ DUT_SCP_OPTIONS = ' '.join(DUT_COMMON_SSH_OPTIONS)
 
 CHROME_SRC_ROOT = '/var/cache/chromeos-cache/distfiles/target/'
 CLIENT_CHROME_ROOT = '/usr/local/telemetry/src'
-RUN_BENCHMARK  = 'tools/perf/run_benchmark'
+RUN_BENCHMARK = 'tools/perf/run_benchmark'
 
 RSA_KEY = '-i %s' % test_runner_utils.TEST_KEY_PATH
 DUT_CHROME_RESULTS_DIR = '/usr/local/telemetry/src/tools/perf'
+
+TURBOSTAT_LOG = 'turbostat.log'
+CPUSTATS_LOG = 'cpustats.log'
+CPUINFO_LOG = 'cpuinfo.log'
 
 # Result Statuses
 SUCCESS_STATUS = 'SUCCESS'
@@ -113,7 +117,12 @@ class telemetry_Crosperf(test.test):
     """Run one or more telemetry benchmarks under the crosperf script."""
     version = 1
 
-    def scp_telemetry_results(self, client_ip, dut, file, host_dir):
+    def scp_telemetry_results(self,
+                              client_ip,
+                              dut,
+                              file,
+                              host_dir,
+                              ignore_status=False):
         """Copy telemetry results from dut.
 
         @param client_ip: The ip address of the DUT
@@ -124,9 +133,8 @@ class telemetry_Crosperf(test.test):
         @returns status code for scp command.
         """
         cmd=[]
-        src = ('root@%s:%s/%s' %
+        src = ('root@%s:%s' %
                (dut.hostname if dut else client_ip,
-                DUT_CHROME_RESULTS_DIR,
                 file))
         cmd.extend(['scp', DUT_SCP_OPTIONS, RSA_KEY, '-v',
                     src, host_dir])
@@ -134,8 +142,10 @@ class telemetry_Crosperf(test.test):
 
         logging.debug('Retrieving Results: %s', command)
         try:
-            result = utils.run(command,
-                               timeout=WAIT_FOR_CMD_TIMEOUT_SECS)
+            result = utils.run(
+                command,
+                timeout=WAIT_FOR_CMD_TIMEOUT_SECS,
+                ignore_status=ignore_status)
             exit_code = result.exit_status
         except Exception as e:
             logging.error('Failed to retrieve results: %s', e)
@@ -143,6 +153,123 @@ class telemetry_Crosperf(test.test):
 
         logging.debug('command return value: %d', exit_code)
         return exit_code
+
+    @contextmanager
+    def no_background(self, *args):
+      yield
+
+    @contextmanager
+    def run_in_background_with_log(self, cmd, dut, log_path):
+      """Get cpustats periodically in background.
+
+      NOTE:
+        No error handling, exception or error report
+        if command fails to run in background.
+        Command failure is silenced.
+      """
+      logging.info('Running in background:\n%s', cmd)
+      pid = dut.run_background(cmd)
+      try:
+        # TODO(denik): replace with more reliable way
+        # to check run success/failure in background.
+        # Wait some time before checking the process.
+        check = dut.run('sleep 5; kill -0 %s' % pid, ignore_status=True)
+        if check.exit_status != 0:
+          # command wasn't started correctly
+          logging.error(
+              "Background command wasn't started correctly.\n"
+              'Command:\n%s', cmd)
+          pid = ''
+          yield
+          return
+
+        logging.info('Background process started successfully, pid %s', pid)
+        yield
+
+      finally:
+        if pid:
+          # Stop background processes.
+          logging.info('Killing background process, pid %s', pid)
+          # Kill the process blindly. OK if it's already gone.
+          dut.run('kill %s 2>/dev/null' % pid, ignore_status=True)
+
+          # Copy the results to results directory with silenced failure.
+          scp_res = self.scp_telemetry_results(
+              '', dut, log_path, self.resultsdir, ignore_status=True)
+          if scp_res:
+            logging.error(
+                'scp of cpuinfo logs failed '
+                'with error %d.', scp_res)
+
+    def run_cpustats_in_background(self, dut, log_name):
+      # Explicit separator is intentional.
+      # os.sep is not dut.sep.
+      log_path = '/'.join(['/tmp', log_name])
+      cpu_stats_cmd = (
+          'cpulog=%s; '
+          'rm -f ${cpulog}; '
+          # Stop after 720*0.5min=6hours if not killed at clean-up phase.
+          'for i in {1..720} ; do '
+          # Collect current CPU frequency on all cores and thermal data.
+          ' paste -d" " '
+          '   <(ls /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_cur_freq) '
+          '   <(cat /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_cur_freq) '
+          '  >> ${cpulog} || break; ' # exit loop if fails.
+          ' paste -d" "'
+          '   <(cat /sys/class/thermal/thermal_zone*/type)'
+          '   <(cat /sys/class/thermal/thermal_zone*/temp)'
+          # Filter in thermal data from only CPU-related sources.
+          '  | grep -iE "soc|cpu|pkg|big|little" >> ${cpulog} || break; '
+          # Repeat every 30 sec.
+          ' sleep 30; '
+          'done;'
+      ) % log_path
+
+      return self.run_in_background_with_log(cpu_stats_cmd, dut, log_path)
+
+    def run_turbostat_in_background(self, dut, log_name):
+      # Explicit separator is intentional.
+      # os.sep is not dut.sep.
+      log_path = '/'.join(['/tmp', log_name])
+      turbostat_cmd = (
+          'nohup turbostat --quiet --interval 10 '
+          '--show=CPU,Bzy_MHz,Avg_MHz,TSC_MHz,Busy%%,IRQ,CoreTmp '
+          '1> %s'
+      ) % log_path
+
+      return self.run_in_background_with_log(turbostat_cmd, dut, log_path)
+
+    def run_cpuinfo(self, dut, log_name):
+      cpuinfo_cmd = (
+          'for cpunum in '
+          "   $(awk '/^processor/ { print $NF ; }' /proc/cpuinfo ) ; do "
+          ' for i in `ls -d /sys/devices/system/cpu/cpu"${cpunum}"/cpufreq/'
+          '{cpuinfo_cur_freq,scaling_*_freq,scaling_governor} '
+          '     2>/dev/null` ; do '
+          '  paste -d" " <(echo "${i}") <(cat "${i}"); '
+          ' done;'
+          'done;'
+          'for cpudata in'
+          '  /sys/devices/system/cpu/intel_pstate/no_turbo'
+          '  /sys/devices/system/cpu/online; do '
+          ' if [[ -e "${cpudata}" ]] ; then '
+          '  paste <(echo "${cpudata}") <(cat "${cpudata}"); '
+          ' fi; '
+          'done; '
+          # Adding thermal data to the log.
+          'paste -d" "'
+          '  <(cat /sys/class/thermal/thermal_zone*/type)'
+          '  <(cat /sys/class/thermal/thermal_zone*/temp)')
+
+      # Get CPUInfo at the end of the test.
+      logging.info('Get cpuinfo: %s', cpuinfo_cmd)
+      with open(os.path.join(self.resultsdir, log_name), 'w') as cpu_log_file:
+        # Handle command failure gracefully.
+        res = dut.run(
+            cpuinfo_cmd, stdout_tee=cpu_log_file, ignore_status=True)
+        if res.exit_status:
+          logging.error('Get cpuinfo command failed with %d.',
+                        res.exit_status)
 
     def run_once(self, args, client_ip='', dut=None):
         """
@@ -164,20 +291,22 @@ class telemetry_Crosperf(test.test):
             # The telemetry scripts will run on DUT.
             _ensure_deps(dut, test_name)
             format_string = ('python %s --browser=system '
-                             '--output-format=chartjson %s %s')
-            command = format_string % (os.path.join(CLIENT_CHROME_ROOT,
-                                                    RUN_BENCHMARK),
-                                       test_args, test_name)
+                             '--output-format=chartjson '
+                             '--output-format=histograms '
+                             '%s %s')
+            command = format_string % (os.path.join(
+                CLIENT_CHROME_ROOT, RUN_BENCHMARK), test_args, test_name)
             runner = dut
         else:
             # The telemetry scripts will run on server.
             format_string = ('python %s --browser=cros-chrome --remote=%s '
                              '--output-dir="%s" '
-                             '--output-format=chartjson %s %s')
+                             '--output-format=chartjson '
+                             '--output-format=histograms '
+                             '%s %s')
             command = format_string % (os.path.join(_find_chrome_root_dir(),
-                                                    RUN_BENCHMARK),
-                                       client_ip, self.resultsdir, test_args,
-                                       test_name)
+                                                    RUN_BENCHMARK), client_ip,
+                                       self.resultsdir, test_args, test_name)
             runner = utils
 
         # Run the test. And collect profile if needed.
@@ -193,12 +322,26 @@ class telemetry_Crosperf(test.test):
                            ' --interval-profiler-options="%s"' \
                            % (profiler_args)
 
-            logging.info('CMD: %s', command)
-            result = runner.run(command, stdout_tee=stdout, stderr_tee=stderr,
-                                timeout=TELEMETRY_TIMEOUT_MINS*60)
-            exit_code = result.exit_status
-            if exit_code != 0:
-              raise RuntimeError
+            run_cpuinfo = self.run_cpustats_in_background if dut \
+                else self.no_background
+            run_turbostat = self.run_turbostat_in_background if (
+                dut and args.get('turbostat', 'False') == 'True') \
+                    else self.no_background
+
+            # FIXME(denik): replace with ExitStack.
+            with run_cpuinfo(dut, CPUSTATS_LOG) as cpu_cm, \
+                run_turbostat(dut, TURBOSTAT_LOG) as turbo_cm:
+
+                logging.info('CMD: %s', command)
+                result = runner.run(
+                    command,
+                    stdout_tee=stdout,
+                    stderr_tee=stderr,
+                    timeout=TELEMETRY_TIMEOUT_MINS * 60)
+                exit_code = result.exit_status
+                if exit_code != 0:
+                    raise RuntimeError
+
         except RuntimeError:
             logging.debug('Telemetry test failed.')
             raise error.TestFail('Test failed while executing telemetry test.')
@@ -216,18 +359,30 @@ class telemetry_Crosperf(test.test):
             stderr_str = stderr.getvalue()
             stdout.close()
             stderr.close()
-            logging.info('Telemetry completed with exit code: %d.'
-                         '\nstdout:%s\nstderr:%s', exit_code,
-                         stdout_str, stderr_str)
+            logging.info(
+                'Telemetry completed with exit code: %d.'
+                '\nstdout:%s\nstderr:%s', exit_code, stdout_str, stderr_str)
 
-        # Copy the results-chart.json file into the test_that results
-        # directory, if necessary.
+            if dut:
+                self.run_cpuinfo(dut, CPUINFO_LOG)
+
+        # Copy the results-chart.json and histograms.json file into
+        # the test_that results directory, if necessary.
         if args.get('run_local', 'false').lower() == 'true':
-            result = self.scp_telemetry_results(client_ip, dut,
-                                                'results-chart.json',
-                                                self.resultsdir)
+            result = self.scp_telemetry_results(
+                client_ip, dut,
+                os.path.join(DUT_CHROME_RESULTS_DIR, 'results-chart.json'),
+                self.resultsdir)
+            result = self.scp_telemetry_results(
+                client_ip, dut,
+                os.path.join(DUT_CHROME_RESULTS_DIR, 'histograms.json'),
+                self.resultsdir)
         else:
             filepath = os.path.join(self.resultsdir, 'results-chart.json')
+            if not os.path.exists(filepath):
+                exit_code = -1
+                raise RuntimeError('Missing results file: %s' % filepath)
+            filepath = os.path.join(self.resultsdir, 'histograms.json')
             if not os.path.exists(filepath):
                 exit_code = -1
                 raise RuntimeError('Missing results file: %s' % filepath)
@@ -236,12 +391,24 @@ class telemetry_Crosperf(test.test):
         # if necessary. It always comes from DUT.
         if profiler_args:
             filepath = os.path.join(self.resultsdir, 'artifacts')
+            if not os.path.isabs(filepath):
+                raise RuntimeError('Expected absolute path of '
+                                   'arfifacts: %s' % filepath)
             perf_exist = False
-            for filename in os.listdir(filepath):
-                if filename.endswith('perf.data'):
-                    perf_exist = True
-                    shutil.copyfile(os.path.join(filepath, filename),
-                                    os.path.join(self.profdir, 'perf.data'))
+            for root, dirs, files in os.walk(filepath):
+                for f in files:
+                    if f.endswith('.perf.data'):
+                        perf_exist = True
+                        src_file = os.path.join(root, f)
+                        # results-cache.py in crosperf supports multiple
+                        # perf.data files, but only if they are named exactly
+                        # so. Therefore, create a subdir for each perf.data
+                        # file.
+                        dst_dir = os.path.join(self.profdir,
+                                               ''.join(f.split('.')[:-2]))
+                        os.makedirs(dst_dir)
+                        dst_file = os.path.join(dst_dir, 'perf.data')
+                        shutil.copyfile(src_file, dst_file)
             if not perf_exist:
                 exit_code = -1
                 raise error.TestFail('Error: No profiles collected, test may '

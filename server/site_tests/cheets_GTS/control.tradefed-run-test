@@ -29,7 +29,7 @@ logging.info(
 # Define the variables that we are going to use and set sensible defaults.
 gts_module = ''
 gts_retry = 5
-gts_revision = '6.0_r4-5356336'  # TODO(ihf): Set this default value from generator.
+gts_revision = '7.0_r1-5731058'  # TODO(ihf): Set this default value from generator.
 gts_test = ''
 gts_timeout = 600
 
@@ -47,8 +47,8 @@ else:
 gts_module = args_dict.get('module', gts_module)
 gts_revision = args_dict.get('revision', gts_revision)
 gts_test = args_dict.get('test', gts_test)
-gts_timeout = args_dict.get('timeout', gts_timeout)
-gts_retry = args_dict.get('max_retry', gts_retry)
+gts_timeout = float(args_dict.get('timeout', gts_timeout))
+gts_retry = int(args_dict.get('max_retry', gts_retry))
 
 # Sanity checks.
 logging.error('Running module %s with test %s on revision %s',
@@ -59,13 +59,10 @@ if not gts_module or not gts_revision or not gts_test:
 # And we are getting ready for tradefed.
 uri = ('gs://chromeos-arc-images/cts/bundle/android-gts-' + gts_revision + '.zip')
 run_template = ['run', 'commandAndExit', 'gts',
-                '--include-filter', gts_module,
-                '--module', gts_module,
-                '--test', gts_test,
+                '--include-filter', gts_module + ' ' + gts_test,
                 '--ignore-business-logic-failure']
 retry_template = ['run', 'commandAndExit', 'retry',
-                  '--retry', '{session_id}',
-                  '--ignore-business-logic-failure']
+                  '--retry', '{session_id}']
 # Unfortunately super long test names can cause problems. Try to get the
 # rightmost element and use that as a simplified name.
 # TODO(ihf): fix pipeline so it works with super long names.

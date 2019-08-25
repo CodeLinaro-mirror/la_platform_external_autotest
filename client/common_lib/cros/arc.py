@@ -33,6 +33,7 @@ _ADBD_PID_PATH = '/run/arc/adbd.pid'
 _SDCARD_PID_PATH = '/run/arc/sdcard.pid'
 _ANDROID_ADB_KEYS_PATH = '/data/misc/adb/adb_keys'
 _PROCESS_CHECK_INTERVAL_SECONDS = 1
+_PROPERTY_CHECK_INTERVAL_SECONDS = 1
 _WAIT_FOR_ADB_READY = 60
 _WAIT_FOR_ANDROID_PROCESS_SECONDS = 60
 _PLAY_STORE_PKG = 'com.android.vending'
@@ -58,17 +59,48 @@ def setup_adb_host():
     os.environ[_ADB_VENDOR_KEYS] = key_path
 
 
-def adb_connect(attempts=1):
+def restart_adbd(timeout):
+    """Restarts the adb daemon.
+
+    Follows the same logic as tast.
+    """
+    logging.debug('restarting adbd')
+    config = 'mtp,adb'
+    _android_shell('setprop persist.sys.usb.config ' + config)
+    _android_shell('setprop sys.usb.config ' + config)
+
+    def property_check():
+      return _android_shell('getprop sys.usb.state') == config
+
+    try:
+      utils.poll_for_condition(
+          condition=property_check,
+          desc='Wait for sys.usb.state',
+          timeout=timeout,
+          sleep_interval=_PROPERTY_CHECK_INTERVAL_SECONDS)
+    except utils.TimeoutError:
+      raise error.TestFail('Timed out waiting for sys.usb.state change')
+
+    _android_shell('setprop ctl.restart adbd')
+
+
+def restart_adb():
+    """Restarts adb.
+
+    Follows the same logic as in tast, specifically avoiding kill-server
+    since it is unreliable (crbug.com/855325).
+    """
+    logging.debug('killing and restarting adb server')
+    utils.system('killall --quiet --wait -KILL adb')
+    utils.system('adb start-server')
+
+
+def adb_connect():
     """Attempt to connect ADB to the Android container.
 
     Returns true if successful. Do not call this function directly. Call
     wait_for_adb_ready() instead.
     """
-    # Kill existing adb server every other invocation to ensure that a full
-    # reconnect is performed.
-    if attempts % 2 == 1:
-        utils.system('adb kill-server', ignore_status=True)
-
     if utils.system('adb connect localhost:22', ignore_status=True) != 0:
         return False
     return is_adb_connected()
@@ -83,12 +115,12 @@ def is_adb_connected():
 
 def _is_android_data_mounted():
     """Return true if Android's /data is mounted with partial boot enabled."""
-    return _android_shell('getprop ro.data_mounted') == '1'
+    return _android_shell('getprop ro.data_mounted', ignore_status=True) == '1'
 
 
 def get_zygote_type():
     """Return zygote service type."""
-    return _android_shell('getprop ro.zygote')
+    return _android_shell('getprop ro.zygote', ignore_status=True)
 
 
 def get_sdk_version():
@@ -98,7 +130,7 @@ def get_sdk_version():
 
 def get_product():
     """Return the product string used for the Android build."""
-    return _android_shell('getprop ro.build.product')
+    return _android_shell('getprop ro.build.product', ignore_status=True)
 
 
 def _is_tcp_port_reachable(address):
@@ -145,20 +177,18 @@ def wait_for_adb_ready(timeout=_WAIT_FOR_ADB_READY):
     _android_shell('chown shell ' + pipes.quote(_ANDROID_ADB_KEYS_PATH))
     _android_shell('restorecon ' + pipes.quote(_ANDROID_ADB_KEYS_PATH))
 
-    # This starts adbd, restarting it if needed so it can read the updated key.
-    _android_shell('setprop sys.usb.config mtp')
-    _android_shell('setprop sys.usb.config mtp,adb')
+    # Restart adbd and adb.
+    start_time = time.time()
+    restart_adbd(timeout)
+    timeout -= (time.time() - start_time)
+    start_time = time.time()
+    restart_adb()
+    timeout -= (time.time() - start_time)
 
     exception = error.TestFail('Failed to connect to adb in %d seconds.' % timeout)
 
-    # Keeps track of how many times adb has attempted to establish a
-    # connection.
-    def _adb_connect_wrapper():
-        _adb_connect_wrapper.attempts += 1
-        return adb_connect(_adb_connect_wrapper.attempts)
-    _adb_connect_wrapper.attempts = 0
     try:
-        utils.poll_for_condition(_adb_connect_wrapper,
+        utils.poll_for_condition(adb_connect,
                                  exception,
                                  timeout)
     except (utils.TimeoutError, error.TestFail):
@@ -438,7 +468,8 @@ def get_android_file_stats(filename):
         '%u': 'uid',
     }
     output = _android_shell(
-        'stat -c "%s" %s' % (' '.join(mapping.keys()), pipes.quote(filename)))
+        'stat -c "%s" %s' % (' '.join(mapping.keys()), pipes.quote(filename)),
+        ignore_status=True)
     stats = output.split(' ')
     if len(stats) != len(mapping):
       raise error.TestError('Unexpected output from stat: %s' % output)
@@ -565,7 +596,8 @@ def _after_iteration_hook(obj):
     if not obj.run_once_finished:
         if is_adb_connected():
             logging.debug('Recent activities dump:\n%s',
-                          adb_shell('dumpsys activity recents'))
+                          adb_shell('dumpsys activity recents',
+                                    ignore_status=True))
         if not os.path.exists(_SCREENSHOT_DIR_PATH):
             os.mkdir(_SCREENSHOT_DIR_PATH, 0755)
         obj.num_screenshots += 1
@@ -653,11 +685,12 @@ def wait_for_userspace_ready():
     system server is still starting services. By waiting for ActivityManager to
     respond, we automatically wait on more services to be ready.
     """
-    output = adb_shell('am start -W -a android.settings.SETTINGS')
+    output = adb_shell('am start -W -a android.settings.SETTINGS',
+                       ignore_status=True)
     if not output.endswith('Complete'):
         logging.debug('Output was: %s', output)
         raise error.TestError('Could not launch SETTINGS')
-    adb_shell('am force-stop com.android.settings')
+    adb_shell('am force-stop com.android.settings', ignore_status=True)
 
 
 class ArcTest(test.test):

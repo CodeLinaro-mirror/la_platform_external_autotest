@@ -32,13 +32,14 @@ class firmware_ECWatchdog(FirmwareTest):
         """
         Trigger a watchdog reset.
         """
-        self.faft_client.system.run_shell_command("sync")
+        self.faft_client.System.RunShellCommand("sync")
         self.ec.send_command("waitms %d" % self.WATCHDOG_DELAY)
         time.sleep((self.WATCHDOG_DELAY + self.EC_BOOT_DELAY) / 1000.0)
         self.check_lid_and_power_on()
 
 
     def run_once(self):
+        """Runs a single iteration of the test."""
         if not self.check_ec_capability():
             raise error.TestNAError("Nothing needs to be tested on this device")
 

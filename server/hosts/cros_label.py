@@ -95,29 +95,40 @@ class ModelLabel(base_label.StringPrefixLabel):
         return [model or lsb_output.board]
 
 
-class LightSensorLabel(base_label.BaseLabel):
-    """Label indicating if a light sensor is detected."""
+class DeviceSkuLabel(base_label.StringPrefixLabel):
+    """Determine the correct device_sku label for the device."""
 
-    _NAME = 'lightsensor'
-    _LIGHTSENSOR_SEARCH_DIR = '/sys/bus/iio/devices'
-    _LIGHTSENSOR_FILES = [
-        "in_illuminance0_input",
-        "in_illuminance_input",
-        "in_illuminance0_raw",
-        "in_illuminance_raw",
-        "illuminance0_input",
-    ]
+    _NAME =  ds_constants.DEVICE_SKU_LABEL
 
-    def exists(self, host):
-        search_cmd = "find -L %s -maxdepth 4 | egrep '%s'" % (
-            self._LIGHTSENSOR_SEARCH_DIR, '|'.join(self._LIGHTSENSOR_FILES))
-        # Run the search cmd following the symlinks. Stderr_tee is set to
-        # None as there can be a symlink loop, but the command will still
-        # execute correctly with a few messages printed to stderr.
-        result = host.run(search_cmd, stdout_tee=None, stderr_tee=None,
-                          ignore_status=True)
+    def generate_labels(self, host):
+        device_sku = host.host_info_store.get().device_sku
+        if device_sku:
+            return [device_sku]
 
-        return result.exit_status == 0
+        mosys_cmd = 'mosys platform sku'
+        result = host.run(command=mosys_cmd, ignore_status=True)
+        if result.exit_status == 0:
+            return [result.stdout.strip()]
+
+        return []
+
+
+class BrandCodeLabel(base_label.StringPrefixLabel):
+    """Determine the correct brand_code (aka RLZ-code) for the device."""
+
+    _NAME =  ds_constants.BRAND_CODE_LABEL
+
+    def generate_labels(self, host):
+        brand_code = host.host_info_store.get().brand_code
+        if brand_code:
+            return [brand_code]
+
+        mosys_cmd = 'mosys platform brand'
+        result = host.run(command=mosys_cmd, ignore_status=True)
+        if result.exit_status == 0:
+            return [result.stdout.strip()]
+
+        return []
 
 
 class BluetoothLabel(base_label.BaseLabel):
@@ -126,6 +137,14 @@ class BluetoothLabel(base_label.BaseLabel):
     _NAME = 'bluetooth'
 
     def exists(self, host):
+        # Based on crbug.com/966219, the label is flipping sometimes.
+        # Potentially this is caused by testing itself.
+        # Making this label permanently sticky.
+        info = host.host_info_store.get()
+        for label in info.labels:
+            if label.startswith(self._NAME):
+                return True
+
         result = host.run('test -d /sys/class/bluetooth/hci0',
                           ignore_status=True)
 
@@ -257,8 +276,31 @@ class ChameleonPeripheralsLabel(base_label.StringPrefixLabel):
 
 
     def generate_labels(self, host):
-        bt_hid_device = host.chameleon.get_bluetooth_hid_mouse()
-        return ['bt_hid'] if bt_hid_device.CheckSerialConnection() else []
+        labels = []
+        try:
+            bt_hid_device = host.chameleon.get_bluetooth_hid_mouse()
+            if bt_hid_device.CheckSerialConnection():
+                labels.append('bt_hid')
+        except:
+            logging.error('Error with initializing bt_hid_mouse')
+        try:
+            ble_hid_device = host.chameleon.get_ble_mouse()
+            if ble_hid_device.CheckSerialConnection():
+                labels.append('bt_ble_hid')
+        except:
+            logging.error('Error with initializing bt_ble_hid')
+        try:
+            bt_a2dp_sink = host.chameleon.get_bluetooth_a2dp_sink()
+            if bt_a2dp_sink.CheckSerialConnection():
+                labels.append('bt_a2dp_sink')
+        except:
+            logging.error('Error with initializing bt_a2dp_sink')
+        if labels != []:
+            labels.append('bt_peer')
+        logging.info('Bluetooth labels are %s', labels)
+        return labels
+
+
 
 
 class AudioLoopbackDongleLabel(base_label.BaseLabel):
@@ -267,6 +309,29 @@ class AudioLoopbackDongleLabel(base_label.BaseLabel):
     _NAME = 'audio_loopback_dongle'
 
     def exists(self, host):
+        # Based on crbug.com/991285, AudioLoopbackDongle sometimes flips.
+        # Ensure that AudioLoopbackDongle.exists returns True
+        # forever, after it returns True *once*.
+        if self._cached_exists(host):
+            # If the current state is True, return it, don't run the command on
+            # the DUT and potentially flip the state.
+            return True
+        # If the current state is not True, run the command on
+        # the DUT. The new state will be set to whatever the command
+        # produces.
+        return self._host_run_exists(host)
+
+    def _cached_exists(self, host):
+        """Get the state of AudioLoopbackDongle in the data store"""
+        info = host.host_info_store.get()
+        for label in info.labels:
+            if label.startswith(self._NAME):
+                return True
+        return False
+
+    def _host_run_exists(self, host):
+        """Detect presence of audio_loopback_dongle by physically
+        running a command on the DUT."""
         nodes_info = host.run(command=cras_utils.get_cras_nodes_cmd(),
                               ignore_status=True).stdout
         if (cras_utils.node_type_is_plugged('HEADPHONE', nodes_info) and
@@ -618,15 +683,22 @@ CROS_LABELS = [
     Cr50Label(),
     CtsArchLabel(),
     DetachableBaseLabel(),
+    DeviceSkuLabel(),
+    BrandCodeLabel(),
     ECLabel(),
     FingerprintLabel(),
     HWIDLabel(),
     InternalDisplayLabel(),
-    LightSensorLabel(),
     LucidSleepLabel(),
     PowerSupplyLabel(),
     ReferenceDesignLabel(),
     ServoLabel(),
     StorageLabel(),
     VideoGlitchLabel(),
+]
+
+LABSTATION_LABELS = [
+    BoardLabel(),
+    ModelLabel(),
+    common_label.OSLabel(),
 ]

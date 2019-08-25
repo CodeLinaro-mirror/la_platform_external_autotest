@@ -23,14 +23,23 @@ class PDConsoleUtils(object):
     SNK_CONNECT = 'SNK_READY'
     SRC_DISC = 'SRC_DISCONNECTED'
     SNK_DISC = 'SNK_DISCONNECTED'
+    DRP_AUTO_TOGGLE = 'DRP_AUTO_TOGGLE'
     PD_MAX_PORTS = 2
     CONNECT_TIME = 4
 
-    # dualrole input/ouput values
     DUALROLE_QUERY_DELAY = 0.25
-    dual_index = {'on': 0, 'off': 1, 'snk': 2, 'src': 3}
-    dualrole_cmd = ['on', 'off', 'sink', 'source']
-    dualrole_resp = ['on', 'off', 'force sink', 'force source']
+    # Dualrole input/ouput values of methods in this class.
+    DUALROLE_VALUES = ['on', 'off', 'snk', 'src']
+    # Strings passing to the console command "pd dualrole"
+    DUALROLE_CMD_ARGS = ['on', 'off', 'sink', 'source']
+    # Strings returned from the console command "pd dualrole"
+    DUALROLE_CMD_RESULTS = ['on', 'off', 'force sink', 'force source']
+
+    # Some old firmware uses a single dualrole setting for all ports; while
+    # some new firmware uses a per port dualrole settting. This flag will be
+    # initialized to True or False.
+    # TODO: Remove this flag when the old setting phases out
+    per_port_dualrole_setting = None
 
     # Dictionary for 'pd 0/1 state' parsing
     PD_STATE_DICT = {
@@ -68,7 +77,7 @@ class PDConsoleUtils(object):
     }
 
     def __init__(self, console):
-        """ Console can be either usbpd, ec, or plankton_ec UART
+        """Console can be either usbpd, ec, or pdtester UART
         This object with then be used by the class which creates
         the PDConsoleUtils class to send/receive commands to UART
         """
@@ -88,7 +97,11 @@ class PDConsoleUtils(object):
         @param cmd: pd command string
         @param regexp: regular expression for desired output
         """
-        return self.console.send_command_get_output(cmd, regexp)
+        # Enable PD console debug mode to show control messages
+        self.enable_pd_console_debug()
+        output = self.console.send_command_get_output(cmd, regexp)
+        self.disable_pd_console_debug()
+        return output
 
     def send_pd_command_get_reply_msg(self, cmd):
         """Send PD protocol msg, get PD control msg reply
@@ -102,11 +115,8 @@ class PDConsoleUtils(object):
 
         @returns: PD control header message
         """
-        # Enable PD console debug mode to show control messages
-        self.enable_pd_console_debug()
-        m = self.send_pd_command_get_output(cmd, ['RECV\s([\w]+)'])
+        m = self.send_pd_command_get_output(cmd, ['RECV\s([\w]+)\W'])
         ctrl_msg = int(m[0][1], 16) & self.PD_CONTROL_MSG_MASK
-        self.disable_pd_console_debug()
         return ctrl_msg
 
     def verify_pd_console(self):
@@ -188,17 +198,36 @@ class PDConsoleUtils(object):
         pd_dict = self.execute_pd_state_cmd(port)
         return pd_dict['flags']
 
-    def get_pd_dualrole(self):
+    def get_pd_dualrole(self, port):
         """Get the current PD dualrole setting
 
-        @returns: current PD dualrole setting
+        @param port: Type C PD port 0/1
+        @returns: current PD dualrole setting, one of (on, off, snk, src)
         """
-        cmd = 'pd dualrole'
-        dual_list = self.send_pd_command_get_output(cmd,
-                ['dual-role toggling:\s+([\w ]+)[\r\n]'])
-        return dual_list[0][1]
+        if self.per_port_dualrole_setting is True:
+            cmd = 'pd %d dualrole' % port
+        elif self.per_port_dualrole_setting is False:
+            cmd = 'pd dualrole'
+        else:
+            try:
+                logging.info('The per_port_dualrole_setting is unknown; '
+                             'try the True case')
+                self.per_port_dualrole_setting = True
+                return self.get_pd_dualrole(port)
+            except:
+                logging.info('The per_port_dualrole_setting=True failed; '
+                             'try the False case')
+                self.per_port_dualrole_setting = False
+                return self.get_pd_dualrole(port)
 
-    def set_pd_dualrole(self, value):
+        m = self.send_pd_command_get_output(cmd,
+                ['dual-role toggling:\s+([\w ]+)[\r\n]'])
+        # Find the index according to the output of "pd dualrole" command
+        dual_index = self.DUALROLE_CMD_RESULTS.index(m[0][1])
+        # Map to a string which is the output of this method
+        return self.DUALROLE_VALUES[dual_index]
+
+    def set_pd_dualrole(self, port, value):
         """Set pd dualrole
 
         It can be set to either:
@@ -209,20 +238,25 @@ class PDConsoleUtils(object):
         After setting, the current value is read to confirm that it
         was set properly.
 
+        @param port: Type C PD port 0/1
         @param value: One of the 4 options listed
         """
+        # If the dualrole setting is not initialized, call the get method to
+        # initialize it.
+        if self.per_port_dualrole_setting is None:
+            self.get_pd_dualrole(port)
+
         # Get string required for console command
-        dual_index = self.dual_index[value]
+        dual_index = self.DUALROLE_VALUES.index(value)
         # Create console command
-        cmd = 'pd dualrole ' + self.dualrole_cmd[dual_index]
+        cmd = 'pd %d dualrole %s' % (port, self.DUALROLE_CMD_ARGS[dual_index])
         self.console.send_command(cmd)
         time.sleep(self.DUALROLE_QUERY_DELAY)
         # Get current setting to verify that command was successful
-        dual = self.get_pd_dualrole()
+        dual = self.get_pd_dualrole(port)
         # If it doesn't match, then raise error
-        if dual != self.dualrole_resp[dual_index]:
-            raise error.TestFail("dualrole error: " +
-                                 self.dualrole_resp[dual_index] + " != "+dual)
+        if dual != value:
+            raise error.TestFail("dualrole error: " + value + " != " + dual)
 
     def query_pd_connection(self):
         """Determine if PD connection is present
@@ -268,7 +302,7 @@ class PDConsoleUtils(object):
         @returns: True if power swap is successful, False otherwise.
         """
         # Get starting state
-        if self.is_pd_dual_role_enabled() == False:
+        if self.is_pd_dual_role_enabled(port) == False:
             logging.info('Dualrole Mode not enabled!')
             return False
         if self.is_pd_connected(port) == False:
@@ -295,7 +329,7 @@ class PDConsoleUtils(object):
         """Enable PD console debug level 1
 
         """
-        cmd = 'pd dump 1'
+        cmd = 'pd dump 2'
         self.send_pd_command(cmd)
 
     def is_pd_flag_set(self, port, key):
@@ -322,63 +356,63 @@ class PDConsoleUtils(object):
         state = self.get_pd_state(port)
         return bool(state == self.SRC_CONNECT or state == self.SNK_CONNECT)
 
-    def is_pd_dual_role_enabled(self):
+    def is_pd_dual_role_enabled(self, port):
         """Check if a PD device is in dualrole mode
 
         @returns True is dualrole mode is active, false otherwise
         """
-        drp = self.get_pd_dualrole()
-        return bool(drp == self.dualrole_resp[self.dual_index['on']])
+        drp = self.get_pd_dualrole(port)
+        return bool(drp == 'on')
 
 
 class PDConnectionUtils(PDConsoleUtils):
     """Provides a set of methods common to USB PD FAFT tests
 
-    This Class is used for PD utility methods that require access
-    to both Plankton and DUT PD consoles.
+    This class is used for PD utility methods that require access
+    to both PDTester and DUT PD consoles.
 
     """
 
-    def __init__(self, dut_console, plankton_console):
+    def __init__(self, dut_console, pdtester_console):
         """
         @param dut_console: PD console object for DUT
-        @param plankton_console: PD console object for Plankton
+        @param pdtester_console: PD console object for PDTester
         """
         # save console for DUT PD UART access functions
         self.dut_console = dut_console
-        # save console for Plankton UART access functions
-        self.plankton_console = plankton_console
+        # save console for PDTester UART access functions
+        self.pdtester_console = pdtester_console
         super(PDConnectionUtils, self).__init__(dut_console)
 
-    def _verify_plankton_connection(self, port):
-        """Verify DUT to Plankton PD connection
+    def _verify_pdtester_connection(self, port):
+        """Verify DUT to PDTester PD connection
 
-        This method checks for a Plankton PD connection for the
+        This method checks for a PDTester PD connection for the
         given port by first verifying if a PD connection is present.
-        If found, then it uses a Plankton feature to force a PD disconnect.
+        If found, then it uses a PDTester feature to force a PD disconnect.
         If the port is no longer in the connected state, and following
         a delay, is found to be back in the connected state, then
-        a DUT pd to Plankton connection is verified.
+        a DUT pd to PDTester connection is verified.
 
         @param port: DUT pd port to test
 
-        @returns True if DUT to Plankton pd connection is verified
+        @returns True if DUT to PDTester pd connection is verified
         """
         DISCONNECT_CHECK_TIME = 0.5
         DISCONNECT_TIME_SEC = 2
-        # plankton console command to force PD disconnect
+        # pdtester console command to force PD disconnect
         disc_cmd = 'fakedisconnect 100 %d' % (DISCONNECT_TIME_SEC * 1000)
-        # Only check for Plankton if DUT has active PD connection
+        # Only check for PDTester if DUT has active PD connection
         if self.dut_console.is_pd_connected(port):
             # Attempt to force PD disconnection
-            self.plankton_console.send_pd_command(disc_cmd)
+            self.pdtester_console.send_pd_command(disc_cmd)
             time.sleep(DISCONNECT_CHECK_TIME)
             # Verify that DUT PD port is no longer connected
             if self.dut_console.is_pd_connected(port) == False:
                 # Wait for disconnect timer and give time to reconnect
                 time.sleep(self.dut_console.CONNECT_TIME + DISCONNECT_TIME_SEC)
                 if self.dut_console.is_pd_connected(port):
-                    logging.info('Plankton connection verified on port %d',
+                    logging.info('PDTester connection verified on port %d',
                                  port)
                     return True
             else:
@@ -387,14 +421,14 @@ class PDConnectionUtils(PDConsoleUtils):
                 time.sleep(self.dut_console.CONNECT_TIME + DISCONNECT_TIME_SEC)
         return False
 
-    def find_dut_to_plankton_connection(self):
-        """Find the PD port which is connected to Plankton
+    def find_dut_to_pdtester_connection(self):
+        """Find the PD port which is connected to PDTester
 
         @returns DUT pd port number if found, None otherwise
         """
         for port in xrange(self.dut_console.PD_MAX_PORTS):
-            # Check for DUT to Plankton connection on port
-            if self._verify_plankton_connection(port):
-                # Plankton PD connection found so exit
+            # Check for DUT to PDTester connection on port
+            if self._verify_pdtester_connection(port):
+                # PDTester PD connection found so exit
                 return port
         return None

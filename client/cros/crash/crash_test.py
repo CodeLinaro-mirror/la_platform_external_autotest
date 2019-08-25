@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import shutil
+import time
 
 import common
 from autotest_lib.client.bin import test, utils
@@ -29,8 +30,8 @@ class CrashTest(test.test):
     by creating _PAUSE_FILE. When crash sender sees this, it pauses operation.
 
     For testing purposes we sometimes want to run the crash sender manually.
-    In this case we can set 'OVERRIDE_PAUSE_SENDING=1' in the environment and
-    run the crash sender manually (as a child process).
+    In this case we can pass the --ignore_pause_file flag and run the crash
+    sender manually.
 
     Also for testing we sometimes want to mock out the crash sender, and just
     have it pretend to succeed or fail. The _MOCK_CRASH_SENDING file is used
@@ -40,7 +41,9 @@ class CrashTest(test.test):
 
     If the user consents to sending crash tests, then the _CONSENT_FILE will
     exist in the home directory. This test needs to create this file for the
-    crash sending to work.
+    crash sending to work. The metrics daemon caches the consent state for
+    1 second, so we need to sleep for more than that after changing it to be
+    sure it picks up the change.
 
     Crash reports are rate limited to a certain number of reports each 24
     hours. If the maximum number has already been sent then reports are held
@@ -71,6 +74,7 @@ class CrashTest(test.test):
 
     _CONSENT_FILE = '/home/chronos/Consent To Send Stats'
     _CORE_PATTERN = '/proc/sys/kernel/core_pattern'
+    _LOCK_CORE_PATTERN = '/proc/sys/kernel/lock_core_pattern'
     _CRASH_REPORTER_PATH = '/sbin/crash_reporter'
     _CRASH_SENDER_PATH = '/sbin/crash_sender'
     _CRASH_SENDER_RATE_DIR = '/var/lib/crash_sender'
@@ -81,6 +85,7 @@ class CrashTest(test.test):
     _PAUSE_FILE = '/var/lib/crash_sender_paused'
     _SYSTEM_CRASH_DIR = '/var/spool/crash'
     _FALLBACK_USER_CRASH_DIR = '/home/chronos/crash'
+    _EARLY_BOOT_CRASH_DIR = '/mnt/stateful_partition/unencrypted/preserve/crash'
     _USER_CRASH_DIRS = '/home/chronos/u-*/crash'
     _USER_CRASH_DIR_REGEX = re.compile('/home/chronos/u-([a-f0-9]+)/crash')
 
@@ -93,8 +98,8 @@ class CrashTest(test.test):
 
         This is done by creating or removing _PAUSE_FILE.
 
-        crash_sender may still be allowed to run if _set_child_sending is
-        called with True and it is run as a child process.
+        crash_sender may still be allowed to run if _call_sender_one_crash is
+        called with 'ignore_pause=True'.
 
         @param is_enabled: True to enable crash_sender, False to disable it.
         """
@@ -103,22 +108,6 @@ class CrashTest(test.test):
                 os.remove(self._PAUSE_FILE)
         else:
             utils.system('touch ' + self._PAUSE_FILE)
-
-
-    def _set_child_sending(self, is_enabled):
-        """Overrides crash sending enabling for child processes.
-
-        When the system crash sender is disabled this test can manually run
-        the crash sender as a child process. Normally this would do nothing,
-        but this function sets up crash_sender to ignore its disabled status
-        and do its job.
-
-        @param is_enabled: True to enable crash sending for child processes.
-        """
-        if is_enabled:
-            os.environ['OVERRIDE_PAUSE_SENDING'] = "1"
-        else:
-            del os.environ['OVERRIDE_PAUSE_SENDING']
 
 
     def _reset_rate_limiting(self):
@@ -136,13 +125,14 @@ class CrashTest(test.test):
         This will remove all crash reports which are waiting to be sent.
         """
         utils.system('rm -rf ' + self._SYSTEM_CRASH_DIR)
+        utils.system('rm -rf ' + self._EARLY_BOOT_CRASH_DIR)
         utils.system('rm -rf %s %s' % (self._USER_CRASH_DIRS,
                                        self._FALLBACK_USER_CRASH_DIR))
 
 
     def _kill_running_sender(self):
         """Kill the the crash_sender process if running."""
-        utils.system('pkill -9 -e crash_sender', ignore_status=True)
+        utils.system('pkill -9 -e --exact crash_sender', ignore_status=True)
 
 
     def _set_sending_mock(self, mock_enabled, send_success=True):
@@ -193,7 +183,7 @@ class CrashTest(test.test):
             utils.open_write_close(temp_file, 'test-consent')
             utils.system('chown chronos:chronos "%s"' % (temp_file))
             shutil.move(temp_file, self._CONSENT_FILE)
-            logging.info('Created ' + self._CONSENT_FILE)
+            logging.info('Created %s', self._CONSENT_FILE)
         else:
             if os.path.isdir(constants.WHITELIST_DIR):
                 # Create policy file that disables metrics/consent.
@@ -203,12 +193,14 @@ class CrashTest(test.test):
                             constants.OWNER_KEY_FILE)
             # Remove deprecated consent file.
             utils.system('rm -f "%s"' % (self._CONSENT_FILE))
+        # Ensure cached consent state is updated.
+        time.sleep(2)
 
 
     def _set_crash_test_in_progress(self, in_progress):
         if in_progress:
             utils.open_write_close(self._CRASH_TEST_IN_PROGRESS, 'in-progress')
-            logging.info('Created ' + self._CRASH_TEST_IN_PROGRESS)
+            logging.info('Created %s', self._CRASH_TEST_IN_PROGRESS)
         else:
             utils.system('rm -f "%s"' % (self._CRASH_TEST_IN_PROGRESS))
 
@@ -243,6 +235,8 @@ class CrashTest(test.test):
         if os.path.exists(constants.OWNER_KEY_FILE):
             shutil.move(constants.OWNER_KEY_FILE,
                         self._get_pushed_owner_key_file_path())
+        # Ensure cached consent state is updated.
+        time.sleep(2)
 
 
     def _pop_consent(self):
@@ -263,6 +257,8 @@ class CrashTest(test.test):
                         constants.OWNER_KEY_FILE)
         else:
             utils.system('rm -f "%s"' % constants.OWNER_KEY_FILE)
+        # Ensure cached consent state is updated.
+        time.sleep(2)
 
 
     def _get_crash_dir(self, username, force_user_crash_dir=False):
@@ -273,7 +269,7 @@ class CrashTest(test.test):
                                      directory of the current user session, or
                                      the fallback directory if no sessions.
         """
-        if username == 'root' and not force_user_crash_dir:
+        if username in ('root', 'crash') and not force_user_crash_dir:
             return self._SYSTEM_CRASH_DIR
         else:
             dirs = glob.glob(self._USER_CRASH_DIRS)
@@ -290,13 +286,21 @@ class CrashTest(test.test):
         return ('/home/user/%s/crash' % match.group(1)) if match else crash_dir
 
 
-    def _initialize_crash_reporter(self):
-        """Start up the crash reporter."""
+    def _initialize_crash_reporter(self, lock_core_pattern):
+        """Start up the crash reporter.
+
+        @param lock_core_pattern: lock core pattern during initialization.
+        """
+
+        if not lock_core_pattern:
+            self._set_crash_test_in_progress(False)
         utils.system('%s --init' % self._CRASH_REPORTER_PATH)
-        # Completely disable crash_reporter from generating crash dumps
-        # while any tests are running, otherwise a crashy system can make
-        # these tests flaky.
-        self.enable_crash_filtering('none')
+        if not lock_core_pattern:
+            self._set_crash_test_in_progress(True)
+            # Completely disable crash_reporter from generating crash dumps
+            # while any tests are running, otherwise a crashy system can make
+            # these tests flaky.
+            self.enable_crash_filtering('none')
 
 
     def get_crash_dir_name(self, name):
@@ -398,10 +402,9 @@ class CrashTest(test.test):
             'service_failure',
         )
 
-        # TODO(crbug.com/923200): clean up and make more robust.
         def crash_sender_search(regexp, output):
             """Narrow search to lines from crash_sender."""
-            return re.search(r'crash_sender.*' + regexp, output)
+            return re.search(r'crash_sender\[\d+\]:\s+' + regexp, output)
 
         before_first_crash = None
         while True:
@@ -512,12 +515,15 @@ class CrashTest(test.test):
                                send_success=True,
                                reports_enabled=True,
                                report=None,
-                               should_fail=False):
+                               should_fail=False,
+                               ignore_pause=True):
         """Call the crash sender script to mock upload one crash.
 
         @param send_success: Mock a successful send if true
         @param reports_enabled: Has the user consented to sending crash reports.
         @param report: report to use for crash, if None we create one.
+        @param should_fail: expect the crash_sender program to fail
+        @param ignore_pause: crash_sender should ignore pause file existence
 
         @returns a dictionary describing the result with the keys
           from _parse_sender_output, as well as:
@@ -533,7 +539,8 @@ class CrashTest(test.test):
         script_output = ""
         try:
             script_output = utils.system_output(
-                '%s 2>&1' % self._CRASH_SENDER_PATH,
+                '%s %s2>&1' % (self._CRASH_SENDER_PATH,
+                               "--ignore_pause_file " if ignore_pause else ""),
                 ignore_status=should_fail)
         except error.CmdError as err:
             raise error.TestFail('"%s" returned an unexpected non-zero '
@@ -542,10 +549,10 @@ class CrashTest(test.test):
 
         self.wait_for_sender_completion()
         output = self._log_reader.get_logs()
-        logging.debug('Crash sender message output:\n' + output)
+        logging.debug('Crash sender message output:\n %s', output)
 
         if script_output != '':
-            logging.debug('crash_sender stdout/stderr: ' + script_output)
+            logging.debug('crash_sender stdout/stderr: %s', script_output)
 
         if os.path.exists(report):
             report_exists = True
@@ -651,7 +658,6 @@ class CrashTest(test.test):
         self._set_sending_mock(mock_enabled=False)
         if self._automatic_consent_saving:
             self._pop_consent()
-        self.disable_crash_filtering()
         self._set_crash_test_in_progress(False)
         test.test.cleanup(self)
 
@@ -660,7 +666,8 @@ class CrashTest(test.test):
                         test_names,
                         initialize_crash_reporter=False,
                         clear_spool_first=True,
-                        must_run_all=True):
+                        must_run_all=True,
+                        lock_core_pattern=False):
         """Run crash tests defined in this class.
 
         @param test_names: Array of test names.
@@ -670,6 +677,8 @@ class CrashTest(test.test):
                 starting the test.
         @param must_run_all: Should make sure every test in this class is
                 mentioned in test_names.
+        @param lock_core_pattern: Lock core_pattern while initializing
+                crash_reporter.
         """
         if self._automatic_consent_saving:
             self._push_consent()
@@ -685,11 +694,11 @@ class CrashTest(test.test):
         for test_name in test_names:
             logging.info(('=' * 20) + ('Running %s' % test_name) + ('=' * 20))
             if initialize_crash_reporter:
-                self._initialize_crash_reporter()
-            # Disable crash_sender from running, kill off any running ones, but
-            # set environment so crash_sender may run as a child process.
+                self._initialize_crash_reporter(lock_core_pattern)
+            # Disable crash_sender from running, kill off any running ones.
+            # We set a flag to crash_sender when invoking it manually to avoid
+            # our invocations being paused.
             self._set_system_sending(False)
-            self._set_child_sending(True)
             self._kill_running_sender()
             self._reset_rate_limiting()
             if clear_spool_first:

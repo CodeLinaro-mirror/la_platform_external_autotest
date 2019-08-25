@@ -34,7 +34,7 @@ class policy_ArcExternalStorageDisabled(
 
         arc_dirs = set(arc.adb_shell('ls /storage').split())
 
-        base_dirs = set(['emulated', 'self'])
+        base_dirs = set(['emulated', 'self', 'MyFiles'])
 
         usb_parts = arc_dirs - base_dirs
         if policy_value:
@@ -45,7 +45,7 @@ class policy_ArcExternalStorageDisabled(
             raise error.TestFail('External storage enabled but external '
                                  'storage not found')
 
-    def run_once(self, case='False_Allow'):
+    def run_once(self, case):
         """
         Setup and run the test configured for the specified test case.
 

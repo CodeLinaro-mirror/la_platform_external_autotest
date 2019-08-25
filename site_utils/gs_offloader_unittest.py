@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -877,6 +877,29 @@ class OffloadDirectoryTests(_TempResultsDirTestBase):
         gs_offloader._upload_cts_testresult(results_folder, False)
         self.mox.VerifyAll()
         shutil.rmtree(results_folder)
+
+
+    def test_parse_cts_job_results_file_path(self):
+        # A autotest path
+        path = ('/317739475-chromeos-test/chromeos4-row9-rack11-host22/'
+                'cheets_CTS.android.dpi/results/cts-results/'
+                '2016.04.28_01.41.44')
+        job_id, package, timestamp = \
+            gs_offloader._parse_cts_job_results_file_path(path)
+        self.assertEqual('317739475-chromeos-test', job_id)
+        self.assertEqual('cheets_CTS.android.dpi', package)
+        self.assertEqual('2016.04.28_01.41.44', timestamp)
+
+
+        # A skylab path
+        path = ('/swarming-458e3a3a7fc6f210/1/autoserv_test/'
+                'cheets_CTS.android.dpi/results/cts-results/'
+                '2016.04.28_01.41.44')
+        job_id, package, timestamp = \
+            gs_offloader._parse_cts_job_results_file_path(path)
+        self.assertEqual('swarming-458e3a3a7fc6f210-1', job_id)
+        self.assertEqual('cheets_CTS.android.dpi', package)
+        self.assertEqual('2016.04.28_01.41.44', timestamp)
 
 
     def test_upload_files(self):

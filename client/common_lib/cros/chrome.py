@@ -9,9 +9,11 @@ from autotest_lib.client.common_lib.cros import arc_util
 from autotest_lib.client.common_lib.cros import assistant_util
 from autotest_lib.client.cros import constants
 from autotest_lib.client.bin import utils
-from telemetry.core import cros_interface, exceptions, util
+from telemetry.core import cros_interface, exceptions
 from telemetry.internal.browser import browser_finder, browser_options
 from telemetry.internal.browser import extension_to_load
+
+import py_utils
 
 Error = exceptions.Error
 
@@ -263,6 +265,9 @@ class Chrome(object):
 
 
     def __exit__(self, *args):
+        # Turn off collection of Chrome coredumps turned on in init.
+        if os.path.exists(constants.CHROME_CORE_MAGIC_FILE):
+          os.remove(constants.CHROME_CORE_MAGIC_FILE)
         self.close()
 
 
@@ -374,7 +379,7 @@ class Chrome(object):
                 # crbug.com/350941
                 logging.error('Timed out closing tab')
             return True
-        util.WaitFor(lambda: _BrowserReady(self), timeout=10)
+        py_utils.WaitFor(lambda: _BrowserReady(self), timeout=10)
 
 
     def close(self):

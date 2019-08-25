@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 #
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -393,6 +393,12 @@ def make_parser():
                         type=ast.literal_eval,
                         default=None, action="store",
                         help="A dict of args passed to the suite control file.")
+    parser.add_argument("--suite_args_json", dest="suite_args_json",
+                        type=json.loads,
+                        default=None, action="store",
+                        help="A json-encoded string representation of args to "
+                             "passed to the suite control file. Overrides "
+                             "suite_args if specified.")
     parser.add_argument('--offload_failures_only',
                         dest='offload_failures_only', type=bool_str,
                         action='store', default=False,
@@ -405,7 +411,14 @@ def make_parser():
                         'control files, rather than SUITE.')
     parser.add_argument('--json_dump', dest='json_dump', action='store_true',
                         default=False,
-                        help='Dump the output of run_suite to stdout.')
+                        help='Dump the output of run_suite to stdout as json; '
+                             'silence other output.')
+    parser.add_argument('--json_dump_postfix', dest='json_dump_postfix',
+                        action='store_true',
+                        help='Dump the output of run_suite to stdout as json; '
+                             'do not silence other logging. Similar to '
+                             '--json_dump, the json payload will be wrapped in '
+                             'a tag to differentiate it from logging.')
     parser.add_argument(
         '--run_prod_code', dest='run_prod_code',
         action='store_true', default=False,
@@ -445,11 +458,6 @@ def make_parser():
         help=('Check lab and job status before kicking off a suite. Used by '
               'suite scheduler v2.'))
 
-    # TODO(crbug.com/763207): This is to support calling old moblab RPC
-    # with ToT code.  This does not need to be supported after M62.
-    parser.add_argument('--oldrpc', action='store_true',
-                        help='Use old AFE RPC.')
-
     return parser
 
 
@@ -488,6 +496,9 @@ def verify_and_clean_options(options):
         return False
     if options.no_wait and options.retry:
         print 'Test retry is not available when using --no_wait=True'
+    if options.json_dump and options.json_dump_postfix:
+        print '--json_dump and --json_dump_postfix are mutually exclusive'
+        return False
     # Default to use the test code in CrOS build.
     if not options.test_source_build and options.build:
         options.test_source_build = options.build
@@ -1098,9 +1109,13 @@ class TestView(object):
         """Generate the job_id_owner string for a test.
 
         @returns: A string which looks like 135036-username
-
         """
-        return '%s-%s' % (self.view['afe_job_id'], self.user)
+        # self.user is actually the user that is executing this run_suite
+        # call, which is not necessarily the same as the job-creating user.
+        # The job creating user is available as a keyval; but fall back to
+        # self.user in case that key is missing.
+        job_user = self.view['job_keyvals'].get('user') or self.user
+        return '%s-%s' % (self.view['afe_job_id'], job_user)
 
 
     def get_bug_info(self, suite_job_keyvals):
@@ -1562,8 +1577,8 @@ class ResultCollector(object):
         @returns: A dict of results in the format like:
                   {
                   'tests': {
-                        'test_1': {'status': 'PASSED', 'attributes': [1,2], ...}
-                        'test_2': {'status': 'FAILED', 'attributes': [1],...}
+                        'test_1': {'status': 'GOOD', 'attributes': [1,2], ...}
+                        'test_2': {'status': 'FAIL', 'attributes': [1],...}
                   }
                   'suite_timings': {
                         'download_start': '1998-07-17 00:00:00',
@@ -1582,6 +1597,7 @@ class ResultCollector(object):
                 'attributes': v.get_control_file_attributes() or list(),
                 'reason': v['reason'],
                 'retry_count': self._retry_counts.get(v['test_idx'], 0),
+                'job_id': v['afe_job_id'],
                 })
             # For aborted test, the control file will not be parsed and thus
             # fail to get the attributes info. Therefore, the subsystems the
@@ -1699,18 +1715,6 @@ def create_suite(afe, options):
     """
     logging.info('%s Submitted create_suite_job rpc',
                  diagnosis_utils.JobTimer.format_time(datetime.now()))
-
-    # TODO(crbug.com/763207): This is to support calling old moblab RPC
-    # with ToT code.  This does not need to be supported after M62.
-    if options.oldrpc:
-        suite_args = options.suite_args
-        if 'tests' in suite_args:
-            # This is for test_that_wrapper
-            suite_args = ' '.join([':lab:'] + suite_args['tests'])
-        else:
-            # This is for suite_attr_wrapper
-            suite_args = repr(suite_args)
-        options.suite_args = suite_args
 
     return afe.run(
         'create_suite_job',
@@ -2172,7 +2176,7 @@ def _run_paygen_with_skylab(options, override_pool, override_qs_account):
             if not override_pool else override_pool)
     paygen_tests = paygen.get_paygen_tests(test_source_build, options.name)
     for test in paygen_tests:
-        cmd = [skylab_tool, 'create-test']
+        cmd = [skylab_tool, 'create-test', '-bb=False']
         cmd += paygen.paygen_skylab_args(
                 test, options.name, test_source_build, pool, options.board,
                 options.model, options.timeout_mins,
@@ -2206,7 +2210,7 @@ def _run_with_skylab(options, override_pool, override_qs_account):
     pool = override_pool or options.pool
     if options.mock_job_id:
         taskID = options.mock_job_id
-        cmd = [skylab_tool, 'wait-task',
+        cmd = [skylab_tool, 'wait-task', '-bb=False',
                '-timeout-mins', str(options.timeout_mins),
                '-service-account-json', _SKYLAB_SERVICE_ACCOUNT,
                taskID]
@@ -2225,7 +2229,7 @@ def _run_with_skylab(options, override_pool, override_qs_account):
         _log_skylab_for_buildbot(task_stdout)
         return run_suite_common.SuiteResult(return_code)
     else:
-        cmd = [skylab_tool, 'create-suite',
+        cmd = [skylab_tool, 'create-suite', '-bb=False',
                '-board', options.board,
                '-image', builds[provision.CROS_VERSION_PREFIX],
                '-pool', pool,
@@ -2281,7 +2285,7 @@ def _run_with_autotest(options):
     else:
         result = _run_task(options)
 
-    if options.json_dump:
+    if options.json_dump or options.json_dump_postfix:
         run_suite_common.dump_json(result.output_dict)
 
     return result
@@ -2295,6 +2299,12 @@ def main():
     options = parser.parse_args()
     if options.do_nothing:
         return 0
+
+    if options.suite_args_json and options.suite_args:
+        raise ValueError("suite_args and suite_args_json may not both "
+                         "be specified.")
+    if options.suite_args_json:
+        options.suite_args = options.suite_args_json
 
     sys.exceptionhandler = _ExceptionHandler(dump_json=options.json_dump)
     if options.json_dump:

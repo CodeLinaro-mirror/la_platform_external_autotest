@@ -10,9 +10,12 @@ import mmap
 import os
 import re
 
+from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import file_utils
 from autotest_lib.client.cros import chrome_binary_test
+from autotest_lib.client.cros import service_stopper
+from autotest_lib.client.cros.video import constants
 from autotest_lib.client.cros.video import device_capability
 from autotest_lib.client.cros.video import helper_logger
 
@@ -77,6 +80,23 @@ class video_VEAPerf(chrome_binary_test.ChromeBinaryTest):
     """
 
     version = 1
+
+    def initialize(self):
+        """Initialize this test."""
+        super(video_VEAPerf, self).initialize()
+        # Stop the thermal service that may change the cpu frequency.
+        self._service_stopper = service_stopper.get_thermal_service_stopper()
+        self._service_stopper.stop_services()
+        # Set the scaling governor to performance mode to set the cpu to the
+        # highest frequency available.
+        self._original_governors = utils.set_high_performance_mode()
+
+    def cleanup(self):
+        """Cleanup this test."""
+        self._service_stopper.restore_services()
+        utils.restore_scaling_governor_states(self._original_governors)
+        super(video_VEAPerf, self).cleanup()
+
 
     def _logperf(self, test_name, key, value, units, higher_is_better=False):
         description = '%s.%s' % (test_name, key)
@@ -324,7 +344,8 @@ class video_VEAPerf(chrome_binary_test.ChromeBinaryTest):
                                               os.path.basename(path))
                     self._download_video(path, input_path)
                 else:
-                    input_path = os.path.join(self.cr_source_dir, path)
+                    input_path = os.path.join(constants.CROS_VIDEO_DIR,
+                                              'files', path)
                 output_path = os.path.join(self.tmpdir, output_name)
                 test_stream_data = '%s:%s:%s:%s:%s:%s:%s' % (
                     input_path, width, height, profile, output_path,

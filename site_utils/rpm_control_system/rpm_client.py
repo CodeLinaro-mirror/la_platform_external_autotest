@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -81,36 +81,6 @@ def _set_power(args_tuple, timeout_mins=RPM_CALL_TIMEOUT_MINS):
     if not result:
         error_msg = ('Failed to change outlet status for host: %s to '
                      'state: %s.' % (args_tuple[0], args_tuple[-1]))
-        logging.error(error_msg)
-        raise RemotePowerException(error_msg)
-
-
-# This function will be removed once we try to move tests running in
-# the chaos lab to skylab. See crbug.com/863217.
-def set_power_afe(hostname, new_state, timeout_mins=RPM_CALL_TIMEOUT_MINS):
-    """Sends the power state change request to the RPM Infrastructure.
-
-    @param hostname: host who's power outlet we want to change.
-    @param new_state: State we want to set the power outlet to.
-    """
-    client = xmlrpclib.ServerProxy(RPM_FRONTEND_URI, verbose=False)
-    timeout = None
-    result = None
-    try:
-        timeout, result = retry.timeout(client.queue_request,
-                                        args=(hostname, new_state),
-                                        timeout_sec=timeout_mins * 60,
-                                        default_result=False)
-    except Exception as e:
-        logging.exception(e)
-        raise RemotePowerException(
-                'Client call exception: ' + str(e))
-    if timeout:
-        raise RemotePowerException(
-                'Call to RPM Infrastructure timed out.')
-    if not result:
-        error_msg = ('Failed to change outlet status for host: %s to '
-                     'state: %s.' % (hostname, new_state))
         logging.error(error_msg)
         raise RemotePowerException(error_msg)
 

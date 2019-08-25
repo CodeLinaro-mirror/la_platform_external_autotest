@@ -18,16 +18,14 @@ from autotest_lib.client.bin.input.linux_input import (
         BTN_LEFT, BTN_RIGHT, EV_KEY, EV_REL, REL_X, REL_Y, REL_WHEEL)
 
 
-REBOOTING_CHAMELEON = False
-
 Event = recorder.Event
 
 
 # Delay binding the methods since host is only available at run time.
 SUPPORTED_DEVICE_TYPES = {
     'MOUSE': lambda host: host.chameleon.get_bluetooth_hid_mouse,
-    'LE_MOUSE': lambda host: host.chameleon.get_bluetooth_hog_mouse,
     'BLE_MOUSE': lambda host: host.chameleon.get_ble_mouse,
+    'A2DP_SINK': lambda host: host.chameleon.get_bluetooth_a2dp_sink,
 }
 
 
@@ -94,11 +92,12 @@ def get_bluetooth_emulated_device(host, device_type):
         contrary, given device.GetAdvertisedName, it is not feasible to get the
         method name by device.GetAdvertisedName.__name__
 
-        Also note that if the device method fails at the first time, we would
-        try to fix the problem by re-creating the serial device and see if the
-        problem is fixed. If not, we will reboot the chameleon board and see
-        if the problem is fixed. If yes, execute the target method the second
-        time.
+        Also note that if the device method fails, we would try remediation
+        step and retry the device method. The remediation steps are
+         1) re-creating the serial device.
+         2) reset (powercycle) the bluetooth dongle.
+         3) reboot chameleond host.
+        If the device method still fails after these steps, we fail the test
 
         The default values exist for uses of this function before the options
         were added, ideally we should change zero_ok to False.
@@ -106,22 +105,39 @@ def get_bluetooth_emulated_device(host, device_type):
         @param method_name: the string of the method name.
         @param legal_falsy_values: Values that are falsy but might be OK.
 
-        @returns: the result returned by the device's method.
+        @returns: the result returned by the device's method if the call was
+                  successful
+
+        @raises: TestError if the devices's method fails or if repair of
+                 peripheral kit fails
 
         """
+
+        action_table = [('recreate' , 'Fixing the serial device'),
+                        ('reset', 'Power cycle the peer device'),
+                        ('reboot', 'Reboot the chamleond host')]
+
+        for i, (action, description) in enumerate(action_table):
+            logging.info('Attempt %s : %s ', i+1, method_name)
+
+            result = _run_method(getattr(device, method_name), method_name)
+            if _is_successful(result, legal_falsy_values):
+                return result
+
+            logging.error('%s failed the %s time. Attempting to %s',
+                          method_name,i,description)
+            if not fix_serial_device(host, device, action):
+                logging.info('%s failed', description)
+            else:
+                logging.info('%s successful', description)
+
+        #try it last time after fix it by last action
         result = _run_method(getattr(device, method_name), method_name)
         if _is_successful(result, legal_falsy_values):
             return result
 
-        logging.error('%s failed the 1st time. Try to fix the serial device.',
-                      method_name)
-
-        # Try to fix the serial device if possible.
-        if not fix_serial_device(host, device):
-            return False
-
-        logging.info('%s: retry the 2nd time.', method_name)
-        return _run_method(getattr(device, method_name), method_name)
+        raise error.TestError('Failed to execute %s. Bluetooth peer device is'
+                              'not working' % method_name)
 
 
     if device_type not in SUPPORTED_DEVICE_TYPES:
@@ -210,37 +226,58 @@ def recreate_serial_device(device):
         return False
 
 
-def _reboot_chameleon(host, device):
-    REBOOT_SLEEP_SECS = 40
-
-    if not REBOOTING_CHAMELEON:
-        logging.info('Skip rebooting chameleon.')
+def _check_device_init(device, operation):
+    # Check if the serial device could initialize, connect, and
+    # enter command mode correctly.
+    logging.info('Checking device status...')
+    if not _run_method(device.Init, 'Init'):
+        logging.info('device.Init: failed after %s', operation)
         return False
+    if not device.CheckSerialConnection():
+        logging.info('device.CheckSerialConnection: failed after %s', operation)
+        return False
+    if not _run_method(device.EnterCommandMode, 'EnterCommandMode'):
+        logging.info('device.EnterCommandMode: failed after %s', operation)
+        return False
+    logging.info('The device is created successfully after %s.', operation)
+    return True
+
+def _reboot_chameleon(host, device):
+    """ Reboot chameleond host
+
+    Also power cycle the device since reboot may not do that.."""
+
+    # Chameleond fizz hosts should have write protect removed and
+    # set_gbb_flags set to 0 to minimize boot time
+    REBOOT_SLEEP_SECS = 10
+    RESET_SLEEP_SECS = 1
 
     # Close the bluetooth peripheral device and reboot the chameleon board.
     device.Close()
+    logging.info("Powercycling the device")
+    device.PowerCycle()
+    time.sleep(RESET_SLEEP_SECS)
     logging.info('rebooting chameleon...')
     host.chameleon.reboot()
 
     # Every chameleon reboot would take a bit more than REBOOT_SLEEP_SECS.
     # Sleep REBOOT_SLEEP_SECS and then begin probing the chameleon board.
     time.sleep(REBOOT_SLEEP_SECS)
+    return _check_device_init(device, 'reboot')
 
-    # Check if the serial device could initialize, connect, and
-    # enter command mode correctly.
-    logging.info('Checking device status...')
-    if not _run_method(device.Init, 'Init'):
-        logging.info('device.Init: failed after reboot')
-        return False
-    if not device.CheckSerialConnection():
-        logging.info('device.CheckSerialConnection: failed after reboot')
-        return False
-    if not _run_method(device.EnterCommandMode, 'EnterCommandMode'):
-        logging.info('device.EnterCommandMode: failed after reboot')
-        return False
-    logging.info('The device is created successfully after reboot.')
-    return True
-
+def _reset_device_power(device):
+    """Power cycle the device."""
+    RESET_SLEEP_SECS = 1
+    try:
+        if not device.PowerCycle():
+            logging.info('device.PowerCycle() failed')
+            return False
+    except:
+        logging.error('exception in device.PowerCycle')
+    else:
+        logging.info('device powercycled')
+    time.sleep(RESET_SLEEP_SECS)
+    return _check_device_init(device, 'reset')
 
 def _is_successful(result, legal_falsy_values=[]):
     """Is the method result considered successful?
@@ -261,35 +298,56 @@ def _is_successful(result, legal_falsy_values=[]):
     return truthiness_of_result or result in legal_falsy_values
 
 
-def fix_serial_device(host, device):
+def fix_serial_device(host, device, operation='reset'):
     """Fix the serial device.
 
     This function tries to fix the serial device by
     (1) re-creating a serial device, or
-    (2) rebooting the chameleon board.
+    (2) power cycling the usb port to which device is connected
+    (3) rebooting the chameleon board.
+
+    Argument operation determine which of the steps above are perform
+
+    Note that rebooting the chameleon board or reseting the device will remove
+    the state on the peripheral which might cause test failures. Please use
+    reset/reboot only before or after a test.
 
     @param host: the DUT, usually a chromebook
-    @param device: the bluetooth HID device
+    @param device: the bluetooth HID device.
+    @param operation: Recovery operation to perform 'recreate/reset/reboot'
 
     @returns: True if the serial device is fixed. False otherwise.
 
     """
-    # Check the serial connection. Fix it if needed.
-    if device.CheckSerialConnection():
-        # The USB serial connection still exists.
-        # Re-connection suffices to solve the problem. The problem
-        # is usually caused by serial port change. For example,
-        # the serial port changed from /dev/ttyUSB0 to /dev/ttyUSB1.
-        logging.info('retry: creating a new serial device...')
-        if not recreate_serial_device(device):
-            return False
 
-    # Check if recreate_serial_device() above fixes the problem.
-    # If not, reboot the chameleon board including creation of a new
-    # bluetooth device. Check if reboot fixes the problem.
-    # If not, return False.
-    result = _run_method(device.EnterCommandMode, 'EnterCommandMode')
-    return _is_successful(result) or _reboot_chameleon(host, device)
+    if operation == 'recreate':
+        # Check the serial connection. Fix it if needed.
+        if device.CheckSerialConnection():
+            # The USB serial connection still exists.
+            # Re-connection suffices to solve the problem. The problem
+            # is usually caused by serial port change. For example,
+            # the serial port changed from /dev/ttyUSB0 to /dev/ttyUSB1.
+            logging.info('retry: creating a new serial device...')
+            return recreate_serial_device(device)
+        else:
+            # Recreate the bluetooth peer device
+            return _check_device_init(device, operation)
+
+    elif operation == 'reset':
+        # Powercycle the USB port where the bluetooth peer device is connected.
+        # RN-42 and RN-52 share the same vid:pid so both will be powercycled.
+        # This will only work on fizz host with write protection removed.
+        # Note that the state on the device will be lost.
+        return _reset_device_power(device)
+
+    elif operation == 'reboot':
+        # Reboot the chameleon host.
+        # The device is power cycled before rebooting chameleon host
+        return _reboot_chameleon(host, device)
+
+    else:
+        logging.error('fix_serial_device Invalid operation %s', operation)
+        return False
 
 
 def retry(test_method, instance, *args, **kwargs):
@@ -321,7 +379,7 @@ def retry(test_method, instance, *args, **kwargs):
 
     host = instance.host
     device = instance.devices[instance.device_type]
-    if not fix_serial_device(host, device):
+    if not fix_serial_device(host, device, "recreate"):
         return False
 
     logging.info('%s: retry the 2nd time.', test_method.__name__)
@@ -506,13 +564,14 @@ class BluetoothAdapterTests(test.test):
                             sleep_interval=ADAPTER_POLLING_DEFAULT_SLEEP_SECS):
         """Wait for the func() to become True.
 
-        @param fun: the function to wait for.
+        @param func: the function to wait for.
         @param method_name: the invoking class method.
         @param timeout: number of seconds to wait before giving up.
         @param sleep_interval: the interval in seconds to sleep between
                 invoking func().
 
-        @returns: the bluetooth device object
+        @returns: True if the condition is met,
+                  False otherwise
 
         """
 
@@ -555,6 +614,13 @@ class BluetoothAdapterTests(test.test):
         """Test that bluetoothd could be stopped successfully."""
         return self.bluetooth_facade.stop_bluetoothd()
 
+
+    @_test_retry_and_log
+    def test_has_adapter(self):
+        """Verify that there is an adapter. This will return True only if both
+        the kernel and bluetooth daemon see the adapter.
+        """
+        return self.bluetooth_facade.has_adapter()
 
     @_test_retry_and_log
     def test_adapter_work_state(self):
@@ -680,6 +746,152 @@ class BluetoothAdapterTests(test.test):
                 'set_discoverable': set_discoverable,
                 'is_discoverable': is_discoverable}
         return all(self.results.values())
+
+    def _test_timeout_property(self, set_property, check_property, set_timeout,
+                              get_timeout, property_name,
+                              timeout_values = [0, 60, 180]):
+        """Common method to test (Discoverable/Pairable)Timeout property.
+
+        This is used to test
+        - DiscoverableTimeout property
+        - PairableTimeout property
+
+        The test performs the following
+           - Set PropertyTimeout
+           - Read PropertyTimeout and make sure values match
+           - Set adapter propety
+           - In a loop check if property is active
+           - Test fails property is false before timeout
+           - Test fails property is True after timeout
+           Repeat the test for different values for timeout
+
+           Note : Value of 0 mean it never timeouts, so the test will
+                 end after 30 seconds.
+        """
+        def _test_timeout_property(timeout):
+            # minium time after timeout before checking property
+            MIN_DELTA_SECS = 3
+            # Time between checking  property
+            WAIT_TIME_SECS = 5
+
+            # Set and read back the timeout value
+            if not set_timeout(timeout):
+                logging.error('Setting the %s timeout failed',property_name)
+                return False
+            actual_timeout = get_timeout()
+            if timeout != actual_timeout:
+                logging.error('%s timeout value read %s does not '
+                              'match value set %s', property_name,
+                              actual_timeout, timeout)
+                return False
+
+            #
+            # Check that the timeout works
+            # Check property is true until timeout
+            # and then it is not
+
+            property_set = set_property(True)
+            property_is_true = self._wait_for_condition(check_property,
+                                                        method_name())
+
+            self.results = { 'set_%s' % property_name : property_set,
+                             'is_%s' % property_name: property_is_true}
+            logging.debug(self.results)
+
+            if not all(self.results.values()):
+                logging.error('Setting %s failed',property_name)
+                return False
+
+            start_time = time.time()
+            while True:
+                time.sleep(WAIT_TIME_SECS)
+                cur_time = time.time()
+                property_set = check_property()
+                time_elapsed = cur_time - start_time
+
+                # Ignore check_property results made near the timeout
+                # to avoid spurious failures.
+                if abs(int(timeout - time_elapsed)) < MIN_DELTA_SECS:
+                    continue
+
+                # Timeout of zero seconds mean that the adapter never times out
+                # Check for 30 seconds and then exit the test.
+                if timeout == 0:
+                    if not property_set:
+                        logging.error('Adapter is not %s after %.2f '
+                                      'secs with a timeout of zero ',
+                                      property_name, time_elapsed)
+                        return False
+                    elif time_elapsed > 30:
+                        logging.debug('Adapter %s after %.2f seconds '
+                                      'with timeout of zero as expected' ,
+                                      property_name, time_elapsed)
+                        return True
+                    continue
+
+                #
+                # Check if property is true till timeout ends and
+                # false afterwards
+                #
+                if time_elapsed < timeout:
+                    if not property_set:
+                        logging.error('Adapter is not %s after %.2f '
+                                      'secs before timeout of %.2f',
+                                      property_name, time_elapsed, timeout)
+                        return False
+                else:
+                    if property_set:
+                        logging.error('Adapter is still %s after '
+                                      ' %.2f secs with timeout of %.2f',
+                                      property_name, time_elapsed, timeout)
+                        return False
+                    else:
+                        logging.debug('Adapter not %s after %.2f '
+                                      'secs with timeout of %.2f as expected ',
+                                      property_name, time_elapsed, timeout)
+                        return True
+
+        default_timeout = get_timeout()
+        #
+        # Test with default value along any values passed.
+        #
+        if default_timeout not in timeout_values:
+            timeout_values.append(default_timeout)
+
+        result = []
+        try:
+            for timeout in timeout_values:
+                result.append(_test_timeout_property(timeout))
+            logging.debug("Test returning %s", all(self.results))
+            return all(self.results)
+        except:
+            logging.error("exception in test_%s_timeout",property_name)
+            raise
+        finally:
+            # Set the timeout back to default value before existing the test
+            set_timeout(default_timeout)
+
+    @_test_retry_and_log
+    def test_discoverable_timeout(self, timeout_values = [0, 60, 180]):
+        """Test adapter dbus property DiscoverableTimeout."""
+        return self._test_timeout_property(
+            set_property = self.bluetooth_facade.set_discoverable,
+            check_property = self.bluetooth_facade.is_discoverable,
+            set_timeout = self.bluetooth_facade.set_discoverable_timeout,
+            get_timeout = self.bluetooth_facade.get_discoverable_timeout,
+            property_name = 'discoverable',
+            timeout_values = [0, 60, 180])
+
+    @_test_retry_and_log
+    def test_pairable_timeout(self, timeout_values = [0, 60, 180]):
+        """Test adapter dbus property PairableTimeout."""
+        return self._test_timeout_property(
+            set_property = self.bluetooth_facade.set_pairable,
+            check_property = self.bluetooth_facade.is_pairable,
+            set_timeout = self.bluetooth_facade.set_pairable_timeout,
+            get_timeout = self.bluetooth_facade.get_pairable_timeout,
+            property_name = 'pairable',
+            timeout_values = [0, 60, 180])
 
 
     @_test_retry_and_log
@@ -1847,6 +2059,35 @@ class BluetoothAdapterTests(test.test):
                 'advertising_disabled': advertising_disabled,
         }
         return all(self.results.values())
+
+    def add_device(self, address, address_type, action):
+        """Add a device to the Kernel action list."""
+        return self.bluetooth_facade.add_device(address, address_type, action)
+
+
+    def remove_device(self, address, address_type):
+        """Remove a device from the Kernel action list."""
+        return self.bluetooth_facade.remove_device(address,address_type)
+
+
+    def read_supported_commands(self):
+        """Read the set of supported commands from the Kernel."""
+        return self.bluetooth_facade.read_supported_commands()
+
+
+    def read_info(self):
+        """Read the adapter information from the Kernel."""
+        return self.bluetooth_facade.read_info()
+
+
+    def get_adapter_properties(self):
+        """Read the adapter properties from the Bluetooth Daemon."""
+        return self.bluetooth_facade.get_adapter_properties()
+
+
+    def get_dev_info(self):
+        """Read raw HCI device information."""
+        return self.bluetooth_facade.get_dev_info()
 
 
     # -------------------------------------------------------------------

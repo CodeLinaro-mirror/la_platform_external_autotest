@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -150,6 +150,14 @@ class RPMFrontendServer(object):
         @raise RPMInfrastructureException: No dispatchers are available or can
                                            be reached.
         """
+        new_state = new_state.upper()
+        if new_state not in VALID_STATE_VALUES:
+            logging.error('Received request to set device %s to invalid '
+                          'state %s', device_hostname, new_state)
+            return False
+        logging.info('Received request to set device: %s to state: %s',
+                     device_hostname, new_state)
+
         powerunit_info = utils.PowerUnitInfo(
                 device_hostname=device_hostname,
                 powerunit_type=utils.PowerUnitInfo.POWERUNIT_TYPES.RPM,
@@ -163,42 +171,6 @@ class RPMFrontendServer(object):
             # Retry forwarding the request.
             return self.set_power_via_rpm(device_hostname, rpm_hostname,
                                           rpm_outlet, hydra_hostname, new_state)
-
-
-    def queue_request(self, device_hostname, new_state):
-        """
-        Forwards a request to change a device's (a dut or a servo) power state
-        to the appropriate dispatcher server.
-
-        This call will block until the forwarded request returns.
-
-        @param device_hostname: Hostname of the device whose power state we want
-                                to change.
-        @param new_state: [ON, OFF, CYCLE] State to which we want to set the
-                          device's outlet to.
-
-        @return: True if the attempt to change power state was successful,
-                 False otherwise.
-
-        @raise RPMInfrastructureException: No dispatchers are available or can
-                                           be reached.
-        """
-        # Remove any DNS Zone information and simplify down to just the hostname.
-        device_hostname = device_hostname.split('.')[0]
-        new_state = new_state.upper()
-        # Put new_state in all uppercase letters
-        if new_state not in VALID_STATE_VALUES:
-            logging.error('Received request to set device %s to invalid '
-                          'state %s', device_hostname, new_state)
-            return False
-        logging.info('Received request to set device: %s to state: %s',
-                     device_hostname, new_state)
-        powerunit_info = self._get_powerunit_info(device_hostname)
-        try:
-            return self._queue_once(powerunit_info, new_state)
-        except DispatcherDownException:
-            # Retry forwarding the request.
-            return self.queue_request(device_hostname, new_state)
 
 
     def _queue_once(self, powerunit_info, new_state):

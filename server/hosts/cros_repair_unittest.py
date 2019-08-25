@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -46,16 +46,16 @@ CROS_REPAIR_ACTIONS = (
     (cros_repair.AutoUpdateRepair,
      'au',
      ('ssh', 'writable', 'tpm', 'good_au', 'ext4'),
-     ('power', 'rwfw', 'python', 'cros')),
+     ('power', 'rwfw', 'python', 'cros', 'ec_reset')),
     (cros_repair.PowerWashRepair,
      'powerwash',
      ('ssh', 'writable'),
-     ('tpm', 'good_au', 'ext4', 'power', 'rwfw', 'python', 'cros')),
+     ('tpm', 'good_au', 'ext4', 'power', 'rwfw', 'python', 'cros', 'ec_reset')),
     (cros_repair.ServoInstallRepair,
      'usb',
      (),
      ('ssh', 'writable', 'tpm', 'good_au', 'ext4', 'power', 'rwfw',
-      'python', 'cros')),
+      'python', 'cros', 'ec_reset')),
 )
 
 MOBLAB_VERIFY_DAG = (

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,7 +9,10 @@ import common
 
 from autotest_lib.server import utils
 from autotest_lib.server.hosts.cros_label import BoardLabel
+from autotest_lib.server.hosts.cros_label import BluetoothLabel
+from autotest_lib.server.hosts.cros_label import BrandCodeLabel
 from autotest_lib.server.hosts.cros_label import Cr50Label
+from autotest_lib.server.hosts.cros_label import DeviceSkuLabel
 from autotest_lib.server.hosts.cros_label import ModelLabel
 from autotest_lib.server.hosts import host_info
 
@@ -189,6 +192,55 @@ class BoardLabelTests(unittest.TestCase):
     def test_existing_label_in_host_info_store(self):
         host = MockHostWithoutAFE(['board:existing'])
         self.assertEqual(BoardLabel().generate_labels(host), ['existing'])
+
+
+class DeviceSkuLabelTests(unittest.TestCase):
+    """Unit tests for DeviceSkuLabel"""
+
+    def test_new_label(self):
+        mosys_cmd = 'mosys platform sku'
+        host = MockHost([], MockCmd(mosys_cmd, 0, '27\n'))
+        self.assertEqual(DeviceSkuLabel().generate_labels(host), ['27'])
+
+    def test_new_label_mosys_fails(self):
+        mosys_cmd = 'mosys platform sku'
+        host = MockHost([], MockCmd(mosys_cmd, 1, '27\n'))
+        self.assertEqual(DeviceSkuLabel().generate_labels(host), [])
+
+    def test_existing_label(self):
+        host = MockHost(['device-sku:48'])
+        self.assertEqual(DeviceSkuLabel().generate_labels(host), ['48'])
+
+
+class BrandCodeLabelTests(unittest.TestCase):
+    """Unit tests for DeviceSkuLabel"""
+
+    def test_new_label(self):
+        mosys_cmd = 'mosys platform brand'
+        host = MockHost([], MockCmd(mosys_cmd, 0, 'XXYZ\n'))
+        self.assertEqual(BrandCodeLabel().generate_labels(host), ['XXYZ'])
+
+    def test_new_label_mosys_fails(self):
+        mosys_cmd = 'mosys platform brand'
+        host = MockHost([], MockCmd(mosys_cmd, 1, 'XXYZ\n'))
+        self.assertEqual(BrandCodeLabel().generate_labels(host), [])
+
+    def test_existing_label(self):
+        host = MockHost(['brand-code:ABCD'])
+        self.assertEqual(BrandCodeLabel().generate_labels(host), ['ABCD'])
+
+
+class BluetoothLabelTests(unittest.TestCase):
+    """Unit tests for BluetoothLabel"""
+
+    def test_new_label(self):
+        test_cmd = 'test -d /sys/class/bluetooth/hci0'
+        host = MockHost([], MockCmd(test_cmd, 0, ''))
+        self.assertEqual(BluetoothLabel().exists(host), True)
+
+    def test_existing_label(self):
+        host = MockHostWithoutAFE(['bluetooth'])
+        self.assertEqual(BoardLabel().exists(host), True)
 
 
 class Cr50LabelTests(unittest.TestCase):
