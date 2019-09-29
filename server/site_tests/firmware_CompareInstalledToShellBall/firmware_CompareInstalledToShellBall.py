@@ -12,14 +12,15 @@ class firmware_CompareInstalledToShellBall(test.test):
     version = 1
 
     def run_once(self, host):
+        """Runs a single iteration of the test."""
         # Make sure the client library is on the device so that the proxy
         # code is there when we try to call it.
         client_at = autotest.Autotest(host)
         client_at.install()
 
         self.faft_client = RPCProxy(host)
-        installed_ec = self.faft_client.ec.get_version()
-        installed_bios = self.faft_client.system.get_crossystem_value('fwid')
+        installed_ec = self.faft_client.Ec.GetVersion()
+        installed_bios = self.faft_client.System.GetCrossystemValue('fwid')
 
         # Chromeboxes do not have an EC
         if 'mosys' in installed_ec:

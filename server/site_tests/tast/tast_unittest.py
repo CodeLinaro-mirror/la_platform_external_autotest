@@ -1,4 +1,5 @@
-#!/usr/bin/python
+#!/usr/bin/python2
+# -*- coding: utf-8 -*-
 # Copyright 2018 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -18,6 +19,8 @@ import tast
 from autotest_lib.client.common_lib import base_job
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils
+from autotest_lib.server.hosts import host_info
+from autotest_lib.server.hosts import servo_host
 
 
 # Arbitrary base time to use in tests.
@@ -59,6 +62,7 @@ class TastTest(unittest.TestCase):
         self._set_up_root()
 
         self._test = tast.tast(self._job, self._bin_dir, self._out_dir)
+        self._host = FakeHost(self.HOST, self.PORT)
 
         self._test_patterns = []
         self._tast_commands = {}
@@ -113,23 +117,30 @@ class TastTest(unittest.TestCase):
                 tast.tast._SSP_REMOTE_TEST_RUNNER_PATH if ssp
                 else tast.tast._REMOTE_TEST_RUNNER_PATH)
 
-    def _init_tast_commands(self, tests, run_private_tests=False):
+    def _init_tast_commands(self, tests, run_private_tests=False,
+                            run_vars=[]):
         """Sets fake_tast.py's behavior for 'list' and 'run' commands.
 
         @param tests: List of TestInfo objects.
         @param run_private_tests: Whether to run private tests.
+        @param run_vars: List of string values that should be passed to 'run'
+            via -var.
         """
         list_args = [
             'build=False',
             'patterns=%s' % self.TEST_PATTERNS,
-            'remotebundledir=' + self._remote_bundle_dir,
-            'remoterunner=' + self._remote_test_runner_path,
+            'remotebundledir=%s' % self._remote_bundle_dir,
+            'remoterunner=%s' % self._remote_test_runner_path,
             'sshretries=%d' % tast.tast._SSH_CONNECT_RETRIES,
             'target=%s:%d' % (self.HOST, self.PORT),
             'downloadprivatebundles=%s' % run_private_tests,
             'verbose=True',
         ]
-        run_args = list_args + ['resultsdir=' + self._test.resultsdir]
+        run_args = list_args + [
+            'resultsdir=%s' % self._test.resultsdir,
+            'var=%s' % run_vars,
+        ]
+
         test_list = json.dumps([t.test() for t in tests])
         run_files = {
             self._results_path(): ''.join(
@@ -149,18 +160,22 @@ class TastTest(unittest.TestCase):
         return os.path.join(self._test.resultsdir,
                             tast.tast._STREAMED_RESULTS_FILENAME)
 
-    def _run_test(self, ignore_test_failures=False, run_private_tests=False):
+    def _run_test(self, ignore_test_failures=False, command_args=[],
+                  run_private_tests=False):
         """Writes fake_tast.py's configuration and runs the test.
 
         @param ignore_test_failures: Passed as the identically-named arg to
             Tast.initialize().
+        @param command_args: Passed as the identically-named arg to
+            Tast.initialize().
         @param run_private_tests: Passed as the identically-named arg to
             Tast.initialize().
         """
-        self._test.initialize(FakeHost(self.HOST, self.PORT),
+        self._test.initialize(self._host,
                               self.TEST_PATTERNS,
                               ignore_test_failures=ignore_test_failures,
                               max_run_sec=self.MAX_RUN_SEC,
+                              command_args=command_args,
                               install_root=self._root_dir,
                               run_private_tests=run_private_tests)
         self._test.set_fake_now_for_testing(
@@ -470,11 +485,52 @@ class TastTest(unittest.TestCase):
         self.assertEqual('1 missing: t1', msg([], ['t1']))
         self.assertEqual('1 missing: t2', msg(['t1'], ['t2']))
 
+    def testNonAsciiFailureMessage(self):
+        """Tests that non-ascii failure message should be handled correctly"""
+        tests = [TestInfo('pkg.Test', 0, 2, errors=[('失敗', 1)])]
+        self._init_tast_commands(tests)
+        self._run_test(ignore_test_failures=True)
+        self.assertEqual(status_string(get_status_entries_from_tests(tests)),
+                         status_string(self._job.status_entries))
+
     def testRunPrivateTests(self):
         """Tests running private tests."""
         self._init_tast_commands([TestInfo('pkg.Test', 0, 0)],
                                  run_private_tests=True)
         self._run_test(ignore_test_failures=True, run_private_tests=True)
+
+    def testServoFromCommandArgs(self):
+        """Tests passing servo info via command-line arg."""
+        SERVO_HOST = 'chromeos6-row2-rack21-labstation1.cros'
+        SERVO_PORT = '9995'
+
+        servo_var = 'servo=%s:%s' % (SERVO_HOST, SERVO_PORT)
+        self._init_tast_commands([TestInfo('pkg.Test', 0, 0)],
+                                 run_vars=[servo_var])
+
+        # Simulate servo info being passed on the command line via --args.
+        args = [
+            '%s=%s' % (servo_host.SERVO_HOST_ATTR, SERVO_HOST),
+            '%s=%s' % (servo_host.SERVO_PORT_ATTR, SERVO_PORT),
+        ]
+        self._run_test(command_args=args)
+
+    def testServoFromHostInfoStore(self):
+        """Tests getting servo info from the host."""
+        SERVO_HOST = 'chromeos6-row2-rack21-labstation1.cros'
+        SERVO_PORT = '9995'
+
+        servo_var = 'servo=%s:%s' % (SERVO_HOST, SERVO_PORT)
+        self._init_tast_commands([TestInfo('pkg.Test', 0, 0)],
+                                 run_vars=[servo_var])
+
+        # Simulate the host's servo info being stored in the Autotest DB.
+        attr = {
+            servo_host.SERVO_HOST_ATTR: SERVO_HOST,
+            servo_host.SERVO_PORT_ATTR: SERVO_PORT,
+        }
+        self._host.host_info_store.commit(host_info.HostInfo(attributes=attr))
+        self._run_test()
 
 
 class TestInfo:
@@ -638,6 +694,7 @@ class FakeHost:
     def __init__(self, hostname, port):
         self.hostname = hostname
         self.port = port
+        self.host_info_store = host_info.InMemoryHostInfoStore(None)
 
 
 class TastCommand(object):

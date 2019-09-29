@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 #pylint: disable-msg=C0111
 
 # Copyright (c) 2014 The Chromium OS Authors. All rights reserved.
@@ -27,16 +27,11 @@ from autotest_lib.scheduler import scheduler_lib
 from autotest_lib.server.cros.dynamic_suite import frontend_wrappers
 from autotest_lib.server import utils as server_utils
 from chromite.lib import timeout_util
+from chromite.lib import metrics
+from chromite.lib import ts_mon_config
 from django.core.exceptions import MultipleObjectsReturned
 from django.db import transaction
-
-try:
-    from chromite.lib import metrics
-    from chromite.lib import ts_mon_config
-    from infra_libs import ts_mon
-except ImportError:
-    metrics = server_utils.metrics_mock
-    ts_mon_config = server_utils.metrics_mock
+from infra_libs import ts_mon
 
 
 """
@@ -102,8 +97,8 @@ _METRICS_PREFIX  = 'chromeos/autotest/shard_client/heartbeat/'
 RPC_TIMEOUT_MIN = 30
 RPC_DELAY_SEC = 5
 
-# The maximum number of jobs to attempt to upload in a single heartbeat.
 MAX_UPLOAD_JOBS = 1000
+MAX_KNOWN_JOBS_TO_REPORT = 2000
 
 _heartbeat_client = None
 
@@ -169,16 +164,19 @@ class ShardClient(object):
         jobs_serialized = heartbeat_response['jobs']
         suite_keyvals_serialized = heartbeat_response['suite_keyvals']
         incorrect_host_ids = heartbeat_response.get('incorrect_host_ids', [])
+        new_jobs_serialized = self._remove_known_jobs(jobs_serialized)
 
         metrics.Gauge('chromeos/autotest/shard_client/hosts_received'
                       ).set(len(hosts_serialized))
         metrics.Gauge('chromeos/autotest/shard_client/jobs_received'
                       ).set(len(jobs_serialized))
+        metrics.Gauge('chromeos/autotest/shard_client/new_jobs_received'
+                      ).set(len(new_jobs_serialized))
         metrics.Gauge('chromeos/autotest/shard_client/suite_keyvals_received'
                       ).set(len(suite_keyvals_serialized))
 
         self._deserialize_many(hosts_serialized, models.Host, 'host')
-        self._deserialize_many(jobs_serialized, models.Job, 'job')
+        self._deserialize_many(new_jobs_serialized, models.Job, 'job')
         self._deserialize_many(suite_keyvals_serialized, models.JobKeyval,
                                'jobkeyval')
 
@@ -227,6 +225,13 @@ class ShardClient(object):
                               incorrect_host_ids)
 
 
+    def _remove_known_jobs(self, serialized_jobs):
+        job_ids = [j['id'] for j in serialized_jobs]
+        known_jobs = models.Job.objects.filter(id__in=job_ids)
+        known_job_ids = set([j.id for j in known_jobs])
+        return [j for j in serialized_jobs if j['id'] not in known_job_ids]
+
+
     @property
     def shard(self):
         """Return this shard's own shard object, fetched from the database.
@@ -246,20 +251,26 @@ class ShardClient(object):
         return self._shard
 
 
-    def _get_jobs_to_upload(self):
-        jobs = []
+    def _get_jobs_to_upload(self, limit):
+        """
+        @param limit: Maximum number of jobs to be returned.
+        """
         # The scheduler sets shard to None upon completion of the job.
         # For more information on the shard field's semantic see
         # models.Job.shard. We need to be careful to wait for both the
         # shard_id and the complete bit here, or we will end up syncing
         # the job without ever setting the complete bit.
         job_ids = list(models.Job.objects.filter(
-            shard=None,
-            hostqueueentry__complete=True).values_list('pk', flat=True))
-
-        for job_to_upload in models.Job.objects.filter(pk__in=job_ids).all():
-            jobs.append(job_to_upload)
+                shard=None,
+                hostqueueentry__complete=True,
+        ).values_list('pk', flat=True))
+        jobs = list(models.Job.objects.filter(pk__in=job_ids).all())
+        if len(jobs) > limit:
+            logging.info('Throttling number of jobs to upload from %s to %s.',
+                         len(jobs), limit)
+            jobs = jobs[:limit]
         return jobs
+
 
 
     def _mark_jobs_as_uploaded(self, job_ids):
@@ -276,33 +287,32 @@ class ShardClient(object):
         return hqes
 
 
-    def _get_known_jobs_and_hosts(self):
-        """Returns lists of host and job info to send in a heartbeat.
-
-        The host and job ids are ids of objects that are already present on the
-        shard and therefore don't need to be sent again.
-
-        For jobs, only incomplete jobs are sent, as the master won't send
-        already completed jobs anyway. This helps keeping the list of id's
-        considerably small.
-
-        For hosts, host status in addition to host id are sent to master
-        to sync the host status.
-
-        @returns: Tuple of three lists. The first one contains job ids, the
-                  second one host ids, and the third one host statuses.
+    def _get_incomplete_job_ids(self, limit):
+        """
+        @param limit: Include no more than limit most recent incomplete jobs.
         """
         jobs = models.Job.objects.filter(hostqueueentry__complete=False)
-        job_ids = list(jobs.values_list('id', flat=True))
         self._report_job_time_distribution(jobs)
 
+        ids = list(jobs.values_list('id', flat=True))
+        if _incomplete_job_throttling_enabled() and len(ids) > limit:
+            logging.info('Throttling number of incomplete jobs from %d to %d.',
+                         len(ids), limit)
+            ids = list(reversed(sorted(ids)))
+            ids = ids[:limit]
+        return ids
+
+
+    def _get_known_hosts(self):
+        """
+        @return: ([host_id], [host_status]) --  tuple of list of host IDs and
+                 their corresponding statuses.
+        """
         host_models = models.Host.objects.filter(invalid=0)
-        host_ids = []
-        host_statuses = []
-        for h in host_models:
-            host_ids.append(h.id)
-            host_statuses.append(h.status)
-        return job_ids, host_ids, host_statuses
+        return (
+            [h.id for h in host_models],
+            [h.status for h in host_models],
+        )
 
 
     def _heartbeat_packet(self):
@@ -312,22 +322,13 @@ class ShardClient(object):
 
         @return: A heartbeat packet.
         """
-        known_job_ids, known_host_ids, known_host_statuses = (
-                self._get_known_jobs_and_hosts())
-        max_print = 100
-        logging.info('Known jobs (first %s): %s', max_print,
-                     known_job_ids[:max_print])
-        logging.info('Total known jobs: %s', len(known_job_ids))
+        known_host_ids, known_host_statuses = self._get_known_hosts()
+        known_job_ids = self._get_incomplete_job_ids(MAX_KNOWN_JOBS_TO_REPORT)
 
-        job_objs = self._get_jobs_to_upload()
+        job_objs = self._get_jobs_to_upload(MAX_UPLOAD_JOBS)
         hqes = [hqe.serialize(include_dependencies=False)
                 for hqe in self._get_hqes_for_jobs(job_objs)]
-
         jobs = [job.serialize(include_dependencies=False) for job in job_objs]
-        if len(jobs) > MAX_UPLOAD_JOBS:
-            logging.info('Throttling number of jobs to upload from %s to %s.',
-                         len(jobs), MAX_UPLOAD_JOBS)
-            jobs = jobs[:MAX_UPLOAD_JOBS]
         logging.info('Uploading jobs %s', [j['id'] for j in jobs])
 
         return {'shard_hostname': self.hostname,
@@ -505,6 +506,19 @@ def get_shard_client():
     shard_hostname = _get_shard_hostname_and_ensure_running_on_shard()
     tick_pause_sec = _get_tick_pause_sec()
     return ShardClient(global_afe_hostname, shard_hostname, tick_pause_sec)
+
+
+def _incomplete_job_throttling_enabled():
+    """A temporary flag to safely roll out incomplete job upload throttling.
+
+    See crbug.com/966872.
+    """
+    return global_config.global_config.get_config_value(
+        'SHARD',
+        'throttle_incomplete_jobs_upload',
+        type=bool,
+        default=False,
+    )
 
 
 def main():

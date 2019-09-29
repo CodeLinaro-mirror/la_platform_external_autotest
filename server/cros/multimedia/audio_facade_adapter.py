@@ -42,7 +42,7 @@ class AudioFacadeRemoteAdapter(object):
 
 
     def playback(self, client_path, data_format, blocking=False,
-                 node_type=None):
+                 node_type=None, block_size=None):
         """Playback an audio file on DUT.
 
         @param client_path: The path to the file on DUT.
@@ -57,10 +57,11 @@ class AudioFacadeRemoteAdapter(object):
         @param node_type: A Cras node type defined in cras_utils.CRAS_NODE_TYPES
                           that we like to pin at. None to have the playback on
                           active selected device.
+        @param block_size: The number for frames per callback.
 
         """
         self._audio_proxy.playback(
-                client_path, data_format, blocking, node_type)
+                client_path, data_format, blocking, node_type, block_size)
 
 
     def stop_playback(self):
@@ -83,7 +84,7 @@ class AudioFacadeRemoteAdapter(object):
         return client_file_path
 
 
-    def start_recording(self, data_format):
+    def start_recording(self, data_format, node_type=None, block_size=None):
         """Starts recording an audio file on DUT.
 
         @param data_format: A dict containing:
@@ -92,22 +93,30 @@ class AudioFacadeRemoteAdapter(object):
                                            little-endian.
                             channel: channel number.
                             rate: sampling rate.
+        @param node_type: A Cras node type defined in cras_utils.CRAS_NODE_TYPES
+                          that we like to pin at. None to have the recording
+                          from active selected device.
+        @param block_size: The number for frames per callback.
 
         @returns: True
 
         """
-        self._audio_proxy.start_recording(data_format)
+        self._audio_proxy.start_recording(data_format, node_type, block_size)
         return True
 
 
-    def stop_recording(self):
+    def stop_recording(self, node_type=None):
         """Stops recording on DUT.
+
+        @param node_type: A Cras node type defined in cras_utils.CRAS_NODE_TYPES
+                          that we like to stop recording from. None to stop the
+                          recording from active selected device.
 
         @returns: the path to the recorded file on DUT.
 
         @raises: AudioFacadeError if recorded path is None
         """
-        path = self._audio_proxy.stop_recording()
+        path = self._audio_proxy.stop_recording(node_type)
         if not path:
             raise AudioFacadeError(
                     'Recording does not work on DUT. '
@@ -251,6 +260,14 @@ class AudioFacadeRemoteAdapter(object):
 
         """
         self._audio_proxy.wait_for_unexpected_nodes_changed(timeout_secs)
+
+
+    def get_chrome_audio_availablity(self):
+        """Gets if the chrome.audio API is ready.
+
+        @returns: chrome.audio is ready or not.
+        """
+        return self._audio_proxy.get_audio_availability()
 
 
     def set_chrome_active_volume(self, volume):

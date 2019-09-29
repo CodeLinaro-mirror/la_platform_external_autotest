@@ -69,7 +69,7 @@ class firmware_Mosys(FirmwareTest):
 
         """
         logging.info('Execute %s', command)
-        output = self.faft_client.system.run_shell_command_get_output(command, True)
+        output = self.faft_client.System.RunShellCommandGetOutput(command, True)
         logging.info('Output %s', output)
         return output
 
@@ -82,7 +82,7 @@ class firmware_Mosys(FirmwareTest):
         @param exp_ec_version: The expected EC version string.
 
         """
-        if self.faft_client.system.has_host():
+        if self.faft_client.System.HasHost():
             lines = self.run_cmd('fwtool ec version')
         else:
             lines = self.run_cmd('ectool version')
@@ -169,7 +169,7 @@ class firmware_Mosys(FirmwareTest):
 
         """
         device_info = 'adb devices -l'
-        lines = self.faft_client.host.run_shell_command_get_output(device_info)
+        lines = self.faft_client.Host.RunShellCommandGetOutput(device_info)
         logging.info(lines)
         pattern = re.compile(fieldname + ':(\S+)\s+')
         logging.info(pattern)
@@ -189,6 +189,7 @@ class firmware_Mosys(FirmwareTest):
         logging.error('Execute %s failed', cmd)
 
     def run_once(self, dev_mode=False):
+        """Runs a single iteration of the test."""
         # a. mosys -k smbios info bios
         command = 'mosys -k smbios info bios'
         if 'smbios' in self.command_list:
@@ -225,7 +226,7 @@ class firmware_Mosys(FirmwareTest):
         command = 'mosys platform name'
         output = self.run_cmd(command)
         self.check_for_errors(output, command)
-        if self.faft_client.system.has_host():
+        if self.faft_client.System.HasHost():
             self.check_adb_devices(command, 'product', output[0])
         else:
             self.check_lsb_info(command, 'CHROMEOS_RELEASE_BOARD', output[0])
@@ -241,7 +242,7 @@ class firmware_Mosys(FirmwareTest):
         for line in lines:
             row = line.split(' | ')
             # no need to check if we don't have enough items in the list
-            if len(row) != 4:
+            if len(row) < 4:
                  continue
             if row[1] in emap:
                 emap[row[1]] += 1
@@ -263,7 +264,7 @@ class firmware_Mosys(FirmwareTest):
         command = 'mosys platform vendor'
         output = self.run_cmd(command)
         self.check_for_errors(output, command)
-        p = re.compile('^[-\w\s]+$')
+        p = re.compile('^[-\w\s,.]+$')
         if not p.match(output[0]):
             logging.error('output is not a string Expect GOOGLE'
                           'or name of maker.')

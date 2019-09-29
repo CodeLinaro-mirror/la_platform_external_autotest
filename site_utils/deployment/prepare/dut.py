@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # Copyright 2019 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -171,7 +171,8 @@ def _start_firmware_update(host, result_file):
 
     @returns The process id."""
     # TODO(guocb): Use `make_dev_firmware` to re-sign from MP to test/dev.
-    fw_update_cmd = 'chromeos-firmwareupdate --mode=factory --force'
+    # Use --host_only option here due to crbug.com/950090.
+    fw_update_cmd = 'chromeos-firmwareupdate --mode=factory --force --host_only'
 
     cmd = [
         "date > %s" % result_file,

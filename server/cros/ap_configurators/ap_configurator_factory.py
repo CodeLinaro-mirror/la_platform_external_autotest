@@ -5,13 +5,14 @@
 """File containing class to build all available ap_configurators."""
 
 import logging
-import requests
 
+import common
 from autotest_lib.client.common_lib.cros.network import ap_constants
 from autotest_lib.server import site_utils
 from autotest_lib.server.cros import ap_config
 from autotest_lib.server.cros.ap_configurators import ap_cartridge
 from autotest_lib.server.cros.ap_configurators import ap_spec
+from autotest_lib.server.cros.ap_configurators import static_ap_configurator
 from autotest_lib.server.cros.dynamic_suite import frontend_wrappers
 
 CHAOS_URL = 'https://chaos-188802.appspot.com'
@@ -30,12 +31,6 @@ class APConfiguratorFactory(object):
     @attribute ap_config: an APConfiguratorConfig object.
     """
 
-    PREFIX='autotest_lib.server.cros.ap_configurators.'
-    CONFIGURATOR_MAP = {
-        'StaticAPConfigurator':
-            [PREFIX + 'static_ap_configurator',
-                'StaticAPConfigurator'],
-    }
 
     BANDS = 'bands'
     MODES = 'modes'
@@ -47,12 +42,8 @@ class APConfiguratorFactory(object):
         webdriver_ready = False
         self.ap_list = []
         self.test_type = ap_test_type
-        for ap in ap_config.get_ap_list(ap_test_type):
-            module_name, configurator_class = \
-                    self.CONFIGURATOR_MAP[ap.get_class()]
-            module = __import__(module_name, fromlist=configurator_class)
-            configurator = module.__dict__[configurator_class]
-            self.ap_list.append(configurator(ap_config=ap))
+        for ap in ap_config.get_ap_list():
+            self.ap_list.append(static_ap_configurator.StaticAPConfigurator(ap))
 
 
     def _get_aps_by_visibility(self, visible=True):
@@ -203,50 +194,6 @@ class APConfiguratorFactory(object):
 
         return aps
 
-    def _get_ds_aps_by_lab_location(self, want_chamber_aps, ap_list):
-        """Returns APs that are inside or outside of the chaos/clique lab.
-
-        @param want_chamber_aps: True to select only APs in the chaos/clique
-        chamber. False to select APs outside of the chaos/clique chamber.
-        @param ap_list: a list of APConfigurator objects.
-
-        @return a list of APConfigurators
-        """
-        aps = []
-        if self.test_type == ap_constants.AP_TEST_TYPE_CHAOS:
-            ap_label = 'chaos_ap'
-            lab_label = 'chaos_chamber'
-        elif self.test_type == ap_constants.AP_TEST_TYPE_CLIQUE:
-            ap_label = 'clique_ap'
-            lab_label = 'clique_chamber'
-        elif self.test_type == ap_constants.AP_TEST_TYPE_CASEY5:
-            ap_label = 'casey_ap5'
-            lab_label = 'casey_chamber5'
-        elif self.test_type == ap_constants.AP_TEST_TYPE_CASEY7:
-            ap_label = 'casey_ap7'
-            lab_label = 'casey_chamber7'
-        else:
-            return None
-
-        chamber_aps = []
-
-        # Request datastore for devices with requested labels.
-        device_query = requests.put(CHAOS_URL + '/devices/location', \
-                       json={"ap_label":ap_label, "lab_label":lab_label})
-
-        # Add hostnames to chamber_aps list
-        for device in device_query.json():
-            chamber_aps.append(device['hostname'])
-
-        for ap in ap_list:
-            if want_chamber_aps and ap.host_name in chamber_aps:
-                aps.append(ap)
-
-            if not want_chamber_aps and ap.host_name not in chamber_aps:
-                aps.append(ap)
-
-        return aps
-
 
     def get_ap_configurators_by_spec(self, spec=None, pre_configure=False):
         """Returns available configurators meeting spec.
@@ -275,9 +222,6 @@ class APConfiguratorFactory(object):
         if spec.hostnames is None:
             matching_aps = self._get_aps_by_lab_location(spec.lab_ap,
                                                          matching_aps)
-            # TODO(@rjahagir): Uncomment to use datastore methods.
-            # matching_aps = self._get_ds_aps_by_lab_location(spec.lab_ap,
-            #                                                 matching_aps)
 
         if spec.configurator_type != ap_spec.CONFIGURATOR_ANY:
             matching_aps = self._get_aps_by_configurator_type(

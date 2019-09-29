@@ -48,13 +48,14 @@ class firmware_FWtries(FirmwareTest):
         self.switcher.setup_mode('dev' if dev_mode else 'normal')
 
     def run_once(self, host):
+        """Runs a single iteration of the test."""
         self.check_state((self.checkers.fw_tries_checker, ('A', True, 0)))
 
         self.try_fwb(2);
 
         self.check_state((self.checkers.fw_tries_checker, ('A', True, 2)))
         self.switcher.mode_aware_reboot()
-        if self.faft_client.system.has_host():
+        if self.faft_client.System.HasHost():
             # Android: Does not have chromeos mechanism to block init file from
             # resetting try_count to 0 if in testing mode, so we just need to
             # check if we successfully booted into B

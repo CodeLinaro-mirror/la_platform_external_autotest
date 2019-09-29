@@ -13,10 +13,26 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import dev_server
 from autotest_lib.server import test
 from autotest_lib.server import utils
+from autotest_lib.server.hosts import cros_host
+from autotest_lib.server.hosts import servo_host
 
 
 # A datetime.DateTime representing the Unix epoch in UTC.
 _UNIX_EPOCH = dateutil.parser.parse('1970-01-01T00:00:00Z')
+
+
+def _encode_utf8_json(j):
+    """Takes JSON object parsed by json.load() family, and encode each unicode
+    strings into utf-8.
+    """
+    if isinstance(j, unicode):
+        return j.encode('utf-8')
+    if isinstance(j, list):
+        return [_encode_utf8_json(x) for x in j]
+    if isinstance(j, dict):
+        return dict((_encode_utf8_json(k), _encode_utf8_json(v))
+                    for k, v in j.iteritems())
+    return j
 
 
 class tast(test.test):
@@ -95,7 +111,8 @@ class tast(test.test):
     _TEST_DID_NOT_FINISH_MSG = 'Test did not finish'
 
     def initialize(self, host, test_exprs, ignore_test_failures=False,
-                   max_run_sec=3600, install_root='/', run_private_tests=True):
+                   max_run_sec=3600, command_args=[], install_root='/',
+                   run_private_tests=True):
         """
         @param host: remote.RemoteHost instance representing DUT.
         @param test_exprs: Array of strings describing tests to run.
@@ -106,6 +123,8 @@ class tast(test.test):
             when it's running asynchronously.
         @param max_run_sec: Integer maximum running time for the "tast run"
             command in seconds.
+        @param command_args: List of arguments passed on the command line via
+            test_that's --args flag, i.e. |args| in control file.
         @param install_root: Root directory under which Tast binaries are
             installed. Alternate values may be passed by unit tests.
         @param run_private_tests: Download and run private tests.
@@ -116,6 +135,7 @@ class tast(test.test):
         self._test_exprs = test_exprs
         self._ignore_test_failures = ignore_test_failures
         self._max_run_sec = max_run_sec
+        self._command_args = command_args
         self._install_root = install_root
         self._run_private_tests = run_private_tests
         self._fake_now = None
@@ -150,6 +170,7 @@ class tast(test.test):
 
     def run_once(self):
         """Runs a single iteration of the test."""
+
         self._log_version()
         self._find_devservers()
         self._get_tests_to_run()
@@ -194,6 +215,29 @@ class tast(test.test):
         if allow_missing:
             return ''
         raise error.TestFail('None of %s exist' % list(paths))
+
+    def _get_servo_args(self):
+        """Gets servo-related arguments to pass to "tast run".
+
+        @returns List of command-line flag strings that should be inserted in
+            the command line after "tast run".
+        """
+        # Start with information provided by the Autotest database.
+        merged_args = {}
+        host_args = servo_host.get_servo_args_for_host(self._host)
+        if host_args:
+            merged_args.update(host_args)
+
+        # Incorporate information that was passed manually.
+        args_dict = utils.args_to_dict(self._command_args)
+        merged_args.update(cros_host.CrosHost.get_servo_arguments(args_dict))
+
+        logging.info('Autotest servo-related args: %s', merged_args)
+        host_arg = merged_args.get(servo_host.SERVO_HOST_ATTR)
+        port_arg = merged_args.get(servo_host.SERVO_PORT_ATTR)
+        if not host_arg or not port_arg:
+            return []
+        return ['-var=servo=%s:%s' % (host_arg, port_arg)]
 
     def _find_devservers(self):
         """Finds available devservers.
@@ -285,7 +329,8 @@ class tast(test.test):
             args.append('-downloadprivatebundles=true')
         result = self._run_tast('list', args, self._LIST_TIMEOUT_SEC)
         try:
-            self._tests_to_run = json.loads(result.stdout.strip())
+            self._tests_to_run = _encode_utf8_json(
+                json.loads(result.stdout.strip()))
         except ValueError as e:
             raise error.TestFail('Failed to parse tests: %s' % str(e))
         if len(self._tests_to_run) == 0:
@@ -301,14 +346,16 @@ class tast(test.test):
             if individual tests fail).
         """
         timeout_sec = self._get_run_tests_timeout_sec()
-        logging.info('Running tests with timeout of %d sec', timeout_sec)
         args = [
             '-resultsdir=' + self.resultsdir,
             '-waituntilready=true',
             '-timeout=' + str(timeout_sec),
-        ] + self._devserver_args
+        ] + self._devserver_args + self._get_servo_args()
+
         if self._run_private_tests:
             args.append('-downloadprivatebundles=true')
+
+        logging.info('Running tests with timeout of %d sec', timeout_sec)
         self._run_tast('run', args, timeout_sec + tast._RUN_EXIT_SEC,
                        log_stdout=True)
 
@@ -359,7 +406,7 @@ class tast(test.test):
                 if not line:
                     continue
                 try:
-                    test = json.loads(line)
+                    test = _encode_utf8_json(json.loads(line))
                 except ValueError as e:
                     raise error.TestFail('Failed to parse %s: %s' % (path, e))
                 self._test_results.append(test)

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 #pylint: disable-msg=C0111
 
 # Copyright (c) 2014 The Chromium OS Authors. All rights reserved.
@@ -35,6 +35,26 @@ class ShardClientIntegrationTest(rdb_testing_utils.AbstractBaseRDBTester,
         return shard_client.get_shard_client()
 
 
+    def testIncompleteJobThrottling(self):
+        client = self.initialize_shard_client()
+        job = self.create_job(deps=set(['a']), shard_hostname=client.hostname)
+        scheduler_models.initialize()
+        hqe = scheduler_models.HostQueueEntry.fetch(
+                where='job_id = %s' % job.id)[0]
+
+        global_config.global_config.override_config_value(
+                'SHARD', 'throttle_incomplete_jobs_upload', 'False')
+        job_ids = client._get_incomplete_job_ids(0)
+        assert(job_ids == [job.id])
+
+        global_config.global_config.override_config_value(
+                'SHARD', 'throttle_incomplete_jobs_upload', 'True')
+        job_ids = client._get_incomplete_job_ids(0)
+        assert(job_ids == [])
+        job_ids = client._get_incomplete_job_ids(1)
+        assert(job_ids == [job.id])
+
+
     def testCompleteStatusBasic(self):
         """Test that complete jobs are uploaded properly."""
 
@@ -48,12 +68,12 @@ class ShardClientIntegrationTest(rdb_testing_utils.AbstractBaseRDBTester,
         hqe.set_status('Completed')
 
         # Only incomplete jobs should be in known ids.
-        job_ids, host_ids, _ = client._get_known_jobs_and_hosts()
+        job_ids = client._get_incomplete_job_ids(10)
         assert(job_ids == [])
 
         # Jobs that have successfully gone through a set_status should
         # be ready for upload.
-        jobs = client._get_jobs_to_upload()
+        jobs = client._get_jobs_to_upload(10)
         assert(job.id in [j.id for j in jobs])
 
 
@@ -89,12 +109,12 @@ class ShardClientIntegrationTest(rdb_testing_utils.AbstractBaseRDBTester,
 
         # Make sure the job with a shard but without complete is still
         # in known_ids.
-        job_ids, host_ids, _ = client._get_known_jobs_and_hosts()
+        job_ids = client._get_incomplete_job_ids(10)
         assert(set(job_ids) == set([job.id]))
 
         # Make sure the job with a shard but without complete is not
         # in uploaded jobs.
-        jobs = client._get_jobs_to_upload()
+        jobs = client._get_jobs_to_upload(10)
         assert(jobs == [])
 
 
@@ -130,6 +150,42 @@ class ShardClientIntegrationTest(rdb_testing_utils.AbstractBaseRDBTester,
         models.User.objects.all().delete()
         models.User.deserialize(serialized_user)
         models.User.objects.get(login='new_user')
+
+
+    def testProcessHeartbeatResponseIgnoresKnownJobs(self):
+        known_job = self.create_job(deps={'a'})
+        known_serialized_job = known_job.serialize()
+        self._set_job_deps(known_serialized_job, {'b'})
+
+        client = self.initialize_shard_client()
+        client.process_heartbeat_response(
+            _response_with_job(known_serialized_job))
+        self.assert_job_in_shard_database(known_job.id, deps={'a'})
+
+
+    def _set_job_deps(self, serialized_job, deps):
+        temp = self.create_job(deps=deps)
+        serialized_temp = temp.serialize()
+        serialized_job['dependency_labels'] = (
+            serialized_temp['dependency_labels']
+        )
+
+
+    def assert_job_in_shard_database(self, job_id, deps):
+        jobs = models.Job.objects.filter(id=job_id)
+        self.assertEqual(1, len(jobs))
+        job = jobs[0]
+        got = set([l.name for l in job.dependency_labels.all()])
+        self.assertEqual(got, deps)
+
+
+
+def _response_with_job(job):
+    return {
+        'hosts': [],
+        'jobs': [job],
+        'suite_keyvals': [],
+    }
 
 
 if __name__ == '__main__':

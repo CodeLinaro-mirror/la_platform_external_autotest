@@ -83,6 +83,9 @@ class firmware_ECBootTime(FirmwareTest):
         if not version:
             raise error.TestFail("Unable to get EC console.")
 
+        # Wait until the ap enter the G3
+        time.sleep(self.faft_config.ec_reboot_to_g3_delay)
+
         # Switch on the AP
         power_press = self.ec.send_command_get_output(
             power_cmd, boot_anchors)
@@ -108,7 +111,7 @@ class firmware_ECBootTime(FirmwareTest):
         """
 
         arm_legacy = ('Snow', 'Spring', 'Pit', 'Pi', 'Big', 'Blaze', 'Kitty')
-        output = self.faft_client.system.get_platform_name()
+        output = self.faft_client.System.GetPlatformName()
         return output in arm_legacy
 
     def run_once(self):

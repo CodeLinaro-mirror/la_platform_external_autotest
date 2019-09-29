@@ -66,6 +66,7 @@ _DEV_MODE_ALWAYS_ALLOWED = global_config.global_config.get_config_value(
 # simplification.  The ultimate fix is to split the 'cros' verifier
 # into smaller individual verifiers.
 _CROS_AU_TRIGGERS = ('power', 'rwfw', 'python', 'cros',)
+_CROS_EXTENDED_AU_TRIGGERS = _CROS_AU_TRIGGERS + ('ec_reset',)
 _CROS_POWERWASH_TRIGGERS = ('tpm', 'good_au', 'ext4',)
 _CROS_USB_TRIGGERS = ('ssh', 'writable',)
 
@@ -308,7 +309,7 @@ class HWIDVerifier(hosts.Verifier):
             if info != host.host_info_store.get():
                 host.host_info_store.commit(info)
         except Exception as e:
-            logging.exception('Failed to get HWID & Serial Number for host ',
+            logging.exception('Failed to get HWID & Serial Number for host '
                               '%s: %s', host.hostname, str(e))
 
     @property
@@ -411,7 +412,12 @@ class KvmExistsVerifier(hosts.Verifier):
         result = host.run('[ ! -e /dev/kvm -a -f /usr/bin/vm_concierge ]',
                           ignore_status=True)
         if result.exit_status == 0:
-            raise hosts.AutoservVerifyError('/dev/kvm is missing')
+            # Silently check if the kvm_transition flag is being used by Chrome
+            # indicating /dev/kvm may not be present yet on this system.
+            result = host.run('grep -qsxF "kvm_transition" '
+                              '/etc/ui_use_flags.txt', ignore_status=True)
+            if result.exit_status != 0:
+                raise hosts.AutoservVerifyError('/dev/kvm is missing')
 
     @property
     def description(self):
@@ -702,7 +708,7 @@ def _cros_basic_repair_actions():
     return repair_actions
 
 
-def _cros_extended_repair_actions(au_triggers=_CROS_AU_TRIGGERS,
+def _cros_extended_repair_actions(au_triggers=_CROS_EXTENDED_AU_TRIGGERS,
                                   powerwash_triggers=_CROS_POWERWASH_TRIGGERS,
                                   usb_triggers=_CROS_USB_TRIGGERS):
     """Return the extended repair actions for a `CrosHost`"""

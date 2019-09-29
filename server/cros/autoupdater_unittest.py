@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -281,10 +281,9 @@ class TestAutoUpdater(mox.MoxTestBase):
         fake_shell = '/bin/ash'
         tmp_script = '/tmp/%s' % script_name
         fake_result = self.mox.CreateMockAnything()
-        fake_result.stdout = ' %s\n' % fake_shell
+        fake_result.stdout = '#!%s\n' % fake_shell
         host.path_exists(local_script).AndReturn(False)
-        host.run(mox.IgnoreArg(),
-                 ignore_status=True).AndReturn(fake_result)
+        host.run(mox.IgnoreArg()).AndReturn(fake_result)
 
         self.mox.ReplayAll()
         # Complicated case:  script not on DUT, so try to download it.
@@ -362,8 +361,8 @@ class TestAutoUpdater2(unittest.TestCase):
 
         updater.run_update()
         host.run.assert_any_call(
-                '/usr/local/bin/quick-provision --noreboot %s %s/static' %
-                (image, devserver))
+            '/usr/local/bin/quick-provision --noreboot %s '
+            '%s/download/chromeos-image-archive' % (image, devserver))
 
 
 if __name__ == '__main__':

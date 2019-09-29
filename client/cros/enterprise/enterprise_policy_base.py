@@ -70,13 +70,17 @@ DEVICE_POLICY_DICT = {
     'DeviceAllowBluetooth': 'allow_bluetooth',
     'DeviceAutoUpdateDisabled': 'update_disabled',
     'DeviceEphemeralUsersEnabled': 'ephemeral_users_enabled',
+    'DeviceNativePrinters': 'external_policy',
+    'DeviceNativePrintersAccessMode': 'access_mode',
+    'DeviceNativePrintersBlacklist': 'blacklist',
+    'DeviceNativePrintersWhitelist': 'whitelist',
     'DeviceOpenNetworkConfiguration': 'open_network_configuration',
     'DeviceRollbackToTargetVersion': 'rollback_to_target_version',
     'DeviceTargetVersionPrefix': 'target_version_prefix',
     'SystemTimezone': 'timezone',
     'ReportUploadFrequency': 'device_status_frequency',
     'DeviceLocalAccounts': 'account',
-    'DeviceLocalAccountAutoLoginId': 'auto_login_id'
+    'DeviceLocalAccountAutoLoginId': 'auto_login_id',
 }
 
 # Default settings for managed user policies
@@ -478,7 +482,6 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
 
         @returns: JSON policy blob to send to the fake DM server.
         """
-
         user_p = copy.deepcopy(user_policies)
         s_user_p = copy.deepcopy(suggested_user_policies)
         device_p = copy.deepcopy(device_policies)
@@ -486,28 +489,28 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
 
         # Replace all device policies with their FakeDMS-friendly names.
         fixed_device_p = {}
-        for policy in device_p:
-            if policy not in DEVICE_POLICY_DICT:
-                raise error.TestError('Cannot convert %s!' % policy)
-            fixed_device_p[DEVICE_POLICY_DICT[policy]] = device_p[policy]
+        for Policy in device_p:
+            if Policy not in DEVICE_POLICY_DICT:
+                raise error.TestError('Cannot convert %s!' % Policy)
+            fixed_device_p[DEVICE_POLICY_DICT[Policy]] = device_p[Policy]
 
         # Remove "Not set" policies and json-ify dicts because the
         # FakeDMServer expects "policy": "{value}" not "policy": {value}
         # and "policy": "[{value}]" not "policy": [{value}].
         for policies_dict in [user_p, s_user_p, fixed_device_p]:
             policies_to_pop = []
-            for policy in policies_dict:
-                value = policies_dict[policy]
+            for Policy in policies_dict:
+                value = policies_dict[Policy]
                 if value is None:
-                    policies_to_pop.append(policy)
+                    policies_to_pop.append(Policy)
                 elif isinstance(value, dict):
-                    policies_dict[policy] = encode_json_string(value)
-                elif isinstance(value, list) and not (
-                    policies_dict in [fixed_device_p]):
+                    policies_dict[Policy] = encode_json_string(value)
+                # "account" is the Kiosk Policy, which has special formatting.
+                elif isinstance(value, list) and Policy != 'account':
                     if value and isinstance(value[0], dict):
-                        policies_dict[policy] = encode_json_string(value)
-            for policy in policies_to_pop:
-                policies_dict.pop(policy)
+                        policies_dict[Policy] = encode_json_string(value)
+            for Policy in policies_to_pop:
+                policies_dict.pop(Policy)
 
         management_dict = {
             'managed_users': ['*'],
@@ -531,6 +534,7 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
         if extension_p:
             management_dict['google/chrome/extension'] = extension_p
         logging.info('Created policy blob: %s', management_dict)
+
         return encode_json_string(management_dict)
 
 
@@ -963,12 +967,14 @@ class EnterprisePolicyTest(arc.ArcTest, test.test):
                                         username=self.username,
                                         password=self.password,
                                         arc_mode=arc_mode,
+                                        gaia_login=True,
                                         disable_gaia_services=False,
+                                        expect_policy_fetch=True,
                                         disable_arc_opt_in=False,
+                                        disable_default_apps=False,
                                         enterprise_arc_test=True,
                                         autotest_ext=True,
                                         extra_browser_args=extra_flags)
-
             else:
                 self.cr = chrome.Chrome(
                         extra_browser_args=extra_flags,

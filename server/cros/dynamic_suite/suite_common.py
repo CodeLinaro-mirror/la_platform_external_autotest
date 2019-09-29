@@ -132,9 +132,9 @@ def stage_build_artifacts(build, hostname=None, artifacts=[]):
     ds_name = ds.hostname
     timings[constants.DOWNLOAD_STARTED_TIME] = _formatted_now()
     try:
-        ds.stage_artifacts(image=build, artifacts=['test_suites'])
-        if artifacts:
-          ds.stage_artifacts(image=build, artifacts=artifacts)
+        artifacts_to_stage = ['test_suites', 'control_files']
+        artifacts_to_stage.extend(artifacts if artifacts else [])
+        ds.stage_artifacts(image=build, artifacts=artifacts_to_stage)
     except dev_server.DevServerException as e:
         raise error.StageControlFileFailure(
                 "Failed to stage %s on %s: %s" % (build, ds_name, e))
@@ -399,3 +399,13 @@ def name_in_tag_predicate(name):
             ControlData object's suite member.
     """
     return lambda t: name in t.suite_tag_parts
+
+
+def test_name_in_list_predicate(name_list):
+    """Returns a predicate that matches control files by test name.
+
+    The returned predicate returns True for control files whose test name
+    is present in name_list.
+    """
+    name_set = set(name_list)
+    return lambda t: t.name in name_set

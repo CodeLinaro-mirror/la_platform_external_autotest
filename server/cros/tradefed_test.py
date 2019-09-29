@@ -15,7 +15,6 @@
 # _parse_result() and _dir_size() don't access self and could be functions.
 # pylint: disable=no-self-use
 
-import contextlib
 import errno
 import glob
 import hashlib
@@ -54,7 +53,7 @@ class TradefedTest(test.test):
     # parameter in control files can override the count, within the
     # _BRANCH_MAX_RETRY limit below.
     _BRANCH_DEFAULT_RETRY = [(0, 5), (1, 10)]  # dev=5, beta=stable=10
-    _BRANCH_MAX_RETRY = [(0, 5), (1, 10),      # dev=5, beta=10, stable=99
+    _BRANCH_MAX_RETRY = [(0, 5), (1, 30),      # dev=5, beta=30, stable=99
         (constants.APPROXIMATE_STABLE_BRANCH_NUMBER, 99)]
     # TODO(kinaba): betty-arcnext
     _BOARD_MAX_RETRY = {'betty': 0}
@@ -66,6 +65,7 @@ class TradefedTest(test.test):
     _android_version = None
     _num_media_bundles = 0
     _perf_results = []
+    _abilist = []
 
     def _log_java_version(self):
         """Quick sanity and spew of java version installed on the server."""
@@ -214,18 +214,8 @@ class TradefedTest(test.test):
             raise error.TestFail('Hosts\' supported fingerprint is different: '
                                  '%s', fingerprint)
 
-        # Check all hosts support same abilist.
-        abilist = set(self._run_adb_cmd(
-            host,
-            args=('shell', 'getprop', 'ro.product.cpu.abilist')).stdout
-            for host in self._hosts)
-        if len(abilist) > 1:
-            raise error.TestFail('Hosts\' supported abilist is different: %s',
-                                 abilist)
-        self._abilist = str(list(abilist)[0]).split(',')
-
-    def _calculate_timeout_factor(self, bundle):
-        """ Calculate the multiplicative factor for timeout.
+    def _calculate_test_count_factor(self, bundle):
+        """ Calculate the multiplicative factor for the test case number.
 
         The value equals to the times each test case is run, which is determined
         by the intersection of the supported ABIs of the CTS/GTS bundle and that
@@ -238,25 +228,9 @@ class TradefedTest(test.test):
             tradefed_abis = x86_abis
         else:
             tradefed_abis = arm_abis | x86_abis
-        self._timeout_factor = len(set(self._get_abilist()) & tradefed_abis)
-
-    @contextlib.contextmanager
-    def _login_chrome(self, **cts_helper_kwargs):
-        """Returns Chrome log-in context manager.
-
-        Please see also cheets_StartAndroid for details about how this works.
-        """
-        # TODO(pwang): Chromelogin takes 10+ seconds for it to successfully
-        #              enter. Parallelize if this becomes a bottleneck.
-        instances = []
-        for host in self._hosts:
-            instances.append(login.ChromeLogin(host, cts_helper_kwargs))
-
-        for instance in instances:
-            instance.enter()
-        yield instances
-        for instance in instances:
-            instance.exit()
+        self._test_count_factor = len(set(self._get_abilist()) & tradefed_abis)
+        # Avoid setting timeout=0 (None) in any cases.
+        self._timeout_factor = max(1, self._test_count_factor)
 
     def _get_adb_targets(self):
         """Get a list of adb targets."""
@@ -411,6 +385,10 @@ class TradefedTest(test.test):
             args=('shell', 'settings', 'put', 'global',
                   'verifier_verify_adb_installs', '0'))
         logging.info('Disable adb dialog: %s', result.stdout)
+
+        # Android "RescueParty" feature can reset the above settings when the
+        # device crashes often. Disable the rescue during testing.
+        self._android_shell(host, 'setprop persist.sys.disable_rescue true')
 
     def _ready_arc(self):
         """Ready ARC and adb in parallel for running tests via tradefed."""
@@ -729,6 +707,16 @@ class TradefedTest(test.test):
             self._num_media_bundles = len(
                     os.listdir(constants.TRADEFED_MEDIA_PATH))
 
+    def _cleanup_media(self):
+        """Clean up the local copy of cached media files."""
+        self._fail_on_unexpected_media_download()
+        if os.path.islink(constants.TRADEFED_MEDIA_PATH):
+            path = os.readlink(constants.TRADEFED_MEDIA_PATH)
+            os.unlink(constants.TRADEFED_MEDIA_PATH)
+            if os.path.isdir(path):
+                logging.info('Cleaning up media files in %s', path)
+                shutil.rmtree(path)
+
     def _fail_on_unexpected_media_download(self):
         if os.path.isdir(constants.TRADEFED_MEDIA_PATH):
             contents = os.listdir(constants.TRADEFED_MEDIA_PATH)
@@ -803,10 +791,18 @@ class TradefedTest(test.test):
         This method should only be called after the android environment is
         successfully initialized."""
         if not self._abilist:
-            self._abilist = self._run_adb_cmd(
-                self._hosts[0],
-                args=('shell', 'getprop',
-                      'ro.product.cpu.abilist')).stdout.split(',')
+            for _ in range(3):
+                abilist_str = self._run_adb_cmd(
+                    self._hosts[0],
+                    args=('shell', 'getprop',
+                          'ro.product.cpu.abilist')).stdout.strip()
+                if abilist_str:
+                    self._abilist = abilist_str.split(',')
+                    break
+                else:
+                    # TODO(kinaba): Sometimes getprop returns an empty string.
+                    # Investigate why. For now we mitigate the bug by retries.
+                    logging.error('Empty abilist.')
         return self._abilist
 
     def _get_release_branch_number(self):
@@ -871,15 +867,60 @@ class TradefedTest(test.test):
         logging.warning('Could not establish channel. Using retry=0.')
         return 0
 
-    def _run_precondition_scripts(self, commands, steps):
-        """Run precondition scripts on all the hosts."""
+    def _run_commands(self, commands, **kwargs):
+        """Run commands on all the hosts."""
         for host in self._hosts:
             for command in commands:
-                # Replace {0} (if any) with the retry count.
-                formatted_command = command.format(steps)
-                logging.info('RUN: %s\n', formatted_command)
-                output = host.run(formatted_command, ignore_status=True)
-                logging.info('END: %s\n', output)
+                logging.info('RUN: %s\n', command)
+                output = host.run(command, **kwargs)
+                logging.info('END: %s\n', command)
+                logging.debug(output)
+
+    def _run_precondition_scripts(self, commands, steps):
+        """Run precondition scripts on all the hosts.
+
+        Replaces {0} in commands (if any) with the retry count.
+        """
+        self._run_commands((command.format(steps) for command in commands),
+                           ignore_status=True)
+
+    def _override_powerd_prefs(self):
+        """Overrides powerd prefs to prevent screen from turning off, complying
+        with CTS requirements.
+
+        This is a remote version of PowerPrefChanger which ensures overrided
+        policies won't persist across reboots by bind-mounting onto the config
+        directory.
+        """
+        pref_dir = constants.POWERD_PREF_DIR
+        temp_dir = constants.POWERD_TEMP_DIR
+        commands = (
+                'cp -r %s %s' % (pref_dir, temp_dir),
+                'echo 1 > %s/ignore_external_policy' % temp_dir,
+                'echo 0 | tee %s/{,un}plugged_{dim,off,suspend}_ms' % temp_dir,
+                'mount --bind %s %s' % (temp_dir, pref_dir),
+                'restart powerd',
+        )
+        try:
+            self._run_commands(commands)
+        except (error.AutoservRunError, error.AutoservSSHTimeout):
+            logging.warning('Failed to override powerd policy, tests depending '
+                            'on screen being always on may fail.')
+
+    def _restore_powerd_prefs(self):
+        """Restores powerd prefs overrided by _override_powerd_prefs()."""
+        pref_dir = constants.POWERD_PREF_DIR
+        temp_dir = constants.POWERD_TEMP_DIR
+        commands = (
+                'umount %s' % pref_dir,
+                'restart powerd',
+                'rm -rf %s' % temp_dir,
+        )
+        try:
+            self._run_commands(commands)
+        except (error.AutoservRunError, error.AutoservSSHTimeout):
+            logging.warning('Failed to restore powerd policy, overrided policy '
+                            'will persist until device reboot.')
 
     def _run_and_parse_tradefed(self, commands):
         """Kick off the tradefed command.
@@ -1026,8 +1067,10 @@ class TradefedTest(test.test):
                                    retry_template,
                                    timeout,
                                    needs_push_media=False,
+                                   enable_default_apps=False,
                                    target_module=None,
                                    target_plan=None,
+                                   executable_test_count=None,
                                    bundle=None,
                                    cts_uri=None,
                                    login_precondition_commands=[],
@@ -1064,9 +1107,12 @@ class TradefedTest(test.test):
             steps += 1
             keep_media = needs_push_media and steps >= 1
             self._run_precondition_scripts(login_precondition_commands, steps)
-            with self._login_chrome(
+            with login.login_chrome(
+                    hosts=self._hosts,
                     board=board,
-                    reboot=self._should_reboot(steps),
+                    dont_override_profile=keep_media,
+                    enable_default_apps=enable_default_apps) as current_logins:
+                if self._should_reboot(steps):
                     # TODO(rohitbm): Evaluate if power cycle really helps with
                     # Bluetooth test failures, and then make the implementation
                     # more strict by first running complete restart and reboot
@@ -1075,11 +1121,12 @@ class TradefedTest(test.test):
                     # Currently, (steps + 1 == self._max_retry) means that
                     # hard_reboot is attempted after "this" cycle failed. Then,
                     # the last remaining 1 step will be run on the rebooted DUT.
-                    hard_reboot_on_failure=(self._hard_reboot_on_failure
-                                     and steps + 1 == self._max_retry),
-                    dont_override_profile=keep_media) as current_logins:
+                    hard_reboot = (self._hard_reboot_on_failure
+                        and steps + 1 == self._max_retry)
+                    for current_login in current_logins:
+                        current_login.need_reboot(hard_reboot=hard_reboot)
                 self._ready_arc()
-                self._calculate_timeout_factor(bundle)
+                self._calculate_test_count_factor(bundle)
                 self._run_precondition_scripts(precondition_commands, steps)
 
                 # Run tradefed.
@@ -1099,8 +1146,17 @@ class TradefedTest(test.test):
                 #              not-excecuted, for instance, by collecting all
                 #              tests on startup (very expensive, may take 30
                 #              minutes).
-                waived_tests, acc = self._run_and_parse_tradefed(
-                    commands)
+                # TODO(b/137917339): Only prevent screen from turning off for
+                # media tests. Remove this check once the GPU issue is fixed.
+                if needs_push_media:
+                    self._override_powerd_prefs()
+                try:
+                    waived_tests, acc = self._run_and_parse_tradefed(
+                        commands)
+                finally:
+                    # TODO(b/137917339): ditto
+                    if needs_push_media:
+                        self._restore_powerd_prefs()
                 self._fail_on_unexpected_media_download()
                 result = self._run_tradefed_list_results()
                 if not result:
@@ -1111,6 +1167,13 @@ class TradefedTest(test.test):
 
                 waived = len(waived_tests)
                 last_session_id, passed, failed, all_done = result
+
+                if passed + failed > 0:
+                    # At least one test had run, which means the media push step
+                    # of tradefed didn't fail. To free up the storage earlier,
+                    # delete the copy on the server side. See crbug.com/970881
+                    self._cleanup_media()
+
                 # If the result is |acc|urate according to the log, or the
                 # inaccuracy is recognized by tradefed (not all_done), then
                 # it is fine.
@@ -1148,6 +1211,13 @@ class TradefedTest(test.test):
                     continue
 
                 session_id = last_session_id
+                if (not all_done and executable_test_count != None and
+                        (passed + failed ==
+                         executable_test_count * self._test_count_factor)):
+                    logging.warning('Overwriting all_done as True, since the '
+                                    'explicitly set executable_test_count '
+                                    'tests have run.')
+                    all_done = True
 
                 # Check if all the tests passed.
                 if failed <= waived and all_done:
@@ -1165,7 +1235,7 @@ class TradefedTest(test.test):
             # Only record the failure by module, which exclude 'all', 'collects-tests-only', etc.
             self._perf_results.append(dict(
                 description=perf_description if perf_description else target_module,
-                value=failed,
+                value=failed - waived,
                 graph=bundle
             ))
 

@@ -69,7 +69,7 @@ class firmware_ECUsbPorts(FirmwareTest):
                 (self.RPC_DELAY, ports_off_cmd,
                  self.REBOOT_DELAY,
                  ports_on_cmd))
-        self.faft_client.system.run_shell_command(cmd)
+        self.faft_client.System.RunShellCommand(cmd)
         self.faft_client.disconnect()
 
     def __get_usb_enable_name(self, idx):
@@ -129,7 +129,7 @@ class firmware_ECUsbPorts(FirmwareTest):
     def check_power_off_mode(self):
         """Shutdown the system and check USB ports are disabled."""
         self._failed = False
-        self.faft_client.system.run_shell_command("shutdown -P now")
+        self.faft_client.System.RunShellCommand("shutdown -P now")
         self.switcher.wait_for_client_offline()
         if not self.wait_port_disabled(self._port_count, self.SHUTDOWN_TIMEOUT):
             logging.info("Fails to wait for USB port disabled")
@@ -149,9 +149,15 @@ class firmware_ECUsbPorts(FirmwareTest):
             'smart_usb_charge' in self.faft_config.ec_capability)
         self._port_count = self.get_port_count()
 
-        logging.info("Turn off all USB ports and then turn them on again.")
-        self.switcher.mode_aware_reboot(
-                'custom', self.fake_reboot_by_usb_mode_change)
+        if self._port_count == 0:
+            raise error.TestNAError("No USB-A port; nothing needs to be tested")
+
+        if self.servo.running_through_ccd():
+            logging.info("Using CCD, ignore checking USB port connection.")
+        else:
+            logging.info("Turn off all USB ports and then turn them on again.")
+            self.switcher.mode_aware_reboot(
+                    'custom', self.fake_reboot_by_usb_mode_change)
 
         logging.info("Check USB ports are disabled when powered off.")
         self.switcher.mode_aware_reboot('custom', self.check_power_off_mode)

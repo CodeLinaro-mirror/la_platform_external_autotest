@@ -20,17 +20,18 @@ from autotest_lib.client.common_lib.cros import retry
 from autotest_lib.client.cros import constants as client_constants
 from autotest_lib.client.cros import cros_ui
 from autotest_lib.server import afe_utils
+from autotest_lib.server import crashcollect
 from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros import provision
 from autotest_lib.server.cros.dynamic_suite import constants as ds_constants
 from autotest_lib.server.cros.dynamic_suite import tools, frontend_wrappers
-from autotest_lib.server.cros.servo import plankton
+from autotest_lib.server.cros.servo import pdtester
 from autotest_lib.server.hosts import abstract_ssh
 from autotest_lib.server.hosts import base_label
 from autotest_lib.server.hosts import chameleon_host
 from autotest_lib.server.hosts import cros_label
 from autotest_lib.server.hosts import cros_repair
-from autotest_lib.server.hosts import plankton_host
+from autotest_lib.server.hosts import pdtester_host
 from autotest_lib.server.hosts import servo_host
 from autotest_lib.site_utils.rpm_control_system import rpm_client
 
@@ -154,6 +155,10 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
     _FW_IMAGE_URL_PATTERN = CONFIG.get_config_value(
             'CROS', 'firmware_url_pattern', type=str)
 
+    # DUT_LOG_LOCATION: the directory in the DUT that the log is saved
+    # after re-imaging using chromeos-install.
+    # The location is specified in chromeos-install script.
+    DUT_LOG_LOCATION = '/mnt/stateful_partition/unencrypted/prior_logs'
 
     @staticmethod
     def check_host(host, timeout=10):
@@ -170,7 +175,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             result = host.run(
                     'grep -q CHROMEOS /etc/lsb-release && '
                     '! test -f /mnt/stateful_partition/.android_tester && '
-                    '! grep -q moblab /etc/lsb-release',
+                    '! grep -q moblab /etc/lsb-release && '
+                    '! grep -q labstation /etc/lsb-release',
                     ignore_status=True, timeout=timeout)
             if result.exit_status == 0:
                 lsb_release_content = host.run(
@@ -208,21 +214,21 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
 
     @staticmethod
-    def get_plankton_arguments(args_dict):
+    def get_pdtester_arguments(args_dict):
         """Extract chameleon options from `args_dict` and return the result.
 
         Recommended usage:
         ~~~~~~~~
             args_dict = utils.args_to_dict(args)
-            plankton_args = hosts.CrosHost.get_plankton_arguments(args_dict)
-            host = hosts.create_host(machine, plankton_args=plankton_args)
+            pdtester_args = hosts.CrosHost.get_pdtester_arguments(args_dict)
+            host = hosts.create_host(machine, pdtester_args=pdtester_args)
         ~~~~~~~~
 
-        @param args_dict Dictionary from which to extract the plankton
+        @param args_dict Dictionary from which to extract the pdtester
           arguments.
         """
         return {key: args_dict[key]
-                for key in ('plankton_host', 'plankton_port')
+                for key in ('pdtester_host', 'pdtester_port')
                 if key in args_dict}
 
 
@@ -255,7 +261,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
 
     def _initialize(self, hostname, chameleon_args=None, servo_args=None,
-                    plankton_args=None, try_lab_servo=False,
+                    pdtester_args=None, try_lab_servo=False,
                     try_servo_repair=False,
                     ssh_verbosity_flag='', ssh_options='',
                     *args, **dargs):
@@ -304,30 +310,43 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         # TODO(waihong): Do the simplication on Chameleon too.
         self._chameleon_host = chameleon_host.create_chameleon_host(
                 dut=self.hostname, chameleon_args=chameleon_args)
-        # Add plankton host if plankton args were added on command line
-        self._plankton_host = plankton_host.create_plankton_host(plankton_args)
+        # Add pdtester host if pdtester args were added on command line
+        self._pdtester_host = pdtester_host.create_pdtester_host(pdtester_args)
 
         if self._chameleon_host:
             self.chameleon = self._chameleon_host.create_chameleon_board()
         else:
             self.chameleon = None
 
-        if self._plankton_host:
-            self.plankton_servo = self._plankton_host.get_servo()
-            logging.info('plankton_servo: %r', self.plankton_servo)
-            # Create the plankton object used to access the ec uart
-            self.plankton = plankton.Plankton(self.plankton_servo,
-                    self._plankton_host.get_servod_server_proxy())
+        if self._pdtester_host:
+            self.pdtester_servo = self._pdtester_host.get_servo()
+            logging.info('pdtester_servo: %r', self.pdtester_servo)
+            # Create the pdtester object used to access the ec uart
+            self.pdtester = pdtester.PDTester(self.pdtester_servo,
+                    self._pdtester_host.get_servod_server_proxy())
         else:
-            self.plankton = None
+            self.pdtester = None
 
 
     def get_cros_repair_image_name(self):
-        info = self.host_info_store.get()
-        if not info.board:
-            raise error.AutoservError('Cannot obtain repair image name. '
-                                      'No board label value found')
-        return afe_utils.get_stable_cros_image_name(info.board)
+        """Get latest stable cros image name from AFE.
+
+        Use the board name from the info store. Should that fail, try to
+        retrieve the board name from the host's installed image itself.
+
+        @returns: current stable cros image name for this host.
+        """
+        board = self.host_info_store.get().board
+        if not board:
+            logging.warn('No board label value found. Trying to infer '
+                         'from the host itself.')
+            try:
+                board = self.get_board().split(':')[1]
+            except (error.AutoservRunError, error.AutoservSSHTimeout) as e:
+                logging.error('Also failed to get the board name from the DUT '
+                              'itself. %s.', str(e))
+                raise error.AutoservError('Cannot obtain repair image name.')
+        return afe_utils.get_stable_cros_image_name(board)
 
 
     def host_version_prefix(self, image):
@@ -461,7 +480,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             else:
                 raise error.AutoservError(
                         'Failed to stage server-side package. The host has '
-                        'no job_report_url attribute or version label.')
+                        'no job_repo_url attribute or cros-version label.')
 
         # Get the OS version of the build, for any build older than
         # MIN_VERSION_SUPPORT_SSP, server side packaging is not supported.
@@ -603,6 +622,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         # Get the DUT board name from AFE.
         info = self.host_info_store.get()
         board = info.board
+        model = info.model
 
         if board is None or board == '':
             board = self.servo.get_board()
@@ -626,7 +646,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             ds.download_file(fwurl, local_tarball)
 
             self._clear_fw_version_labels(rw_only)
-            self.servo.program_firmware(board, local_tarball, rw_only)
+            self.servo.program_firmware(board, model, local_tarball, rw_only)
             if utils.host_is_in_lab_zone(self.hostname):
                 self._add_fw_version_label(build, rw_only)
         finally:
@@ -675,7 +695,21 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         with metrics.SecondsTimer(
                 'chromeos/autotest/provision/servo_install/install_duration'):
             logging.info('Installing image through chromeos-install.')
-            self.run('chromeos-install --yes', timeout=install_timeout)
+            try:
+                # Re-imaging the DUT with log collecting.
+                self.run(
+                    'chromeos-install --yes '
+                    '--lab_preserve_logs='
+                    '"/usr/local/autotest/common_lib/logs_to_collect"',
+                    timeout=install_timeout)
+            except Exception as e:
+                logging.exception(
+                    'Fail to collect log from DUT.'
+                    'Retry to fix DUT without collecting log.')
+                self.run(
+                    'chromeos-install --yes',
+                    timeout=install_timeout)
+
             self.halt()
 
         logging.info('Power cycling DUT through servo.')
@@ -696,6 +730,21 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             raise error.AutoservError('DUT failed to reboot installed '
                                       'test image after %d seconds' %
                                       self.BOOT_TIMEOUT)
+
+        # The log saved after re-imaging process is transferred to shard
+        # result directory when the job instance exists.
+        # When we run repair manually, the result directory is created
+        # within local host.
+        try:
+            local_dir = crashcollect.get_crashinfo_dir(
+                self,
+                'prior_log'
+            )
+
+            self.collect_logs(self.DUT_LOG_LOCATION, local_dir)
+        except OSError:
+            logging.exception('Fail to collect log. '
+                              'The destination log directory does not exist')
 
 
     def set_servo_host(self, host):
@@ -1523,6 +1572,10 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                          ' changing servo_role to %s.', servo_role)
             self.servo.set_servo_v4_role(servo_role)
             if not self.ping_wait_up(timeout=self._CHANGE_SERVO_ROLE_TIMEOUT):
+                # Make sure we don't leave DUT with no power(servo_role=snk)
+                # when DUT is not pingable, as we raise a exception here
+                # that may break a power cycle in the middle.
+                self.servo.set_servo_v4_role('src')
                 raise error.AutoservError(
                     'DUT failed to regain network connection after %d seconds.'
                     % self._CHANGE_SERVO_ROLE_TIMEOUT)

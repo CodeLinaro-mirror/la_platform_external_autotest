@@ -720,6 +720,7 @@ def run(command, timeout=None, ignore_status=False, stdout_tee=None,
 
     @return a CmdResult object or None if the command timed out and
             ignore_timeout is True
+    @rtype: CmdResult
 
     @raise CmdError: the exit code of the command execution was not 0
     @raise CmdTimeoutError: the command timed out and ignore_timeout is False.
@@ -1174,9 +1175,8 @@ def get_num_logical_cpus_per_socket(run_function=run):
     throw a CmdError exception.
     """
     siblings = run_function('grep "^siblings" /proc/cpuinfo').stdout.rstrip()
-    num_siblings = map(int,
-                       re.findall(r'^siblings\s*:\s*(\d+)\s*$',
-                                  siblings, re.M))
+    num_siblings = [int(x) for x in
+                    re.findall(r'^siblings\s*:\s*(\d+)\s*$', siblings, re.M)]
     if len(num_siblings) == 0:
         raise error.TestError('Unable to find siblings info in /proc/cpuinfo')
     if min(num_siblings) != max(num_siblings):
@@ -2283,8 +2283,8 @@ def compare_gs_uri_build_versions(x, y):
     """
     # Converts a gs uri 'gs://.../R75-<major>.<minor>.<sub>' to
     # [major, minor, sub]
-    split_version = lambda v: map(lambda s: int(s),
-                                  parse_gs_uri_version(v).split('.'))
+    split_version = lambda v: [int(x) for x in
+                               parse_gs_uri_version(v).split('.')]
 
     x_version = split_version(x)
     y_version = split_version(y)
@@ -2519,19 +2519,27 @@ def is_in_same_subnet(ip_1, ip_2, mask_bits=24):
     return ip_1_num & mask == ip_2_num & mask
 
 
-def get_ip_address(hostname):
-    """Get the IP address of given hostname.
+def get_ip_address(hostname=None):
+    """Get the IP address of given hostname or current machine.
 
-    @param hostname: Hostname of a DUT.
+    @param hostname: Hostname of a DUT, default value is None.
 
-    @return: The IP address of given hostname. None if failed to resolve
-             hostname.
+    @return: The IP address of given hostname. If hostname is not given then
+             we'll try to query the IP address of the current machine and
+             return.
     """
-    try:
-        if hostname:
+    if hostname:
+        try:
             return socket.gethostbyname(hostname)
-    except socket.gaierror as e:
-        logging.error('Failed to get IP address of %s, error: %s.', hostname, e)
+        except socket.gaierror as e:
+            logging.error(
+                'Failed to get IP address of %s, error: %s.', hostname, e)
+    else:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
 
 
 def get_servers_in_same_subnet(host_ip, mask_bits, servers=None,

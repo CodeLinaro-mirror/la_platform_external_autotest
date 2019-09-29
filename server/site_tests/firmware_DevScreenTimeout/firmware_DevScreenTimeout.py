@@ -42,7 +42,7 @@ class firmware_DevScreenTimeout(FirmwareTest):
         """
         timeout_time = time.time() + self.GET_BOOT_TIME_TIMEOUT_MARGIN
         while True:
-            [fw_time] = self.faft_client.system.run_shell_command_get_output(
+            [fw_time] = self.faft_client.System.RunShellCommandGetOutput(
                     'cat /tmp/firmware-boot-time')
             logging.info('Got firmware boot time [%s]: %s', tag, fw_time)
             if fw_time:
@@ -92,6 +92,7 @@ class firmware_DevScreenTimeout(FirmwareTest):
         self.setup_usbkey(usbkey=False)
 
     def run_once(self):
+        """Runs a single iteration of the test."""
         logging.info("Always expected developer mode firmware A boot.")
         self.check_state((self.checkers.crossystem_checker, {
                               'devsw_boot': '1',

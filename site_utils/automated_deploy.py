@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 
 # Copyright (c) 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -45,6 +45,7 @@ _CIPD_PACKAGES = (
         'chromiumos/infra/skylab/linux-amd64',
         'chromiumos/infra/skylab-inventory',
         'chromiumos/infra/skylab_swarming_worker/linux-amd64',
+        'chromiumos/infra/autotest_status_parser/linux-amd64',
 )
 
 

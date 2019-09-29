@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import contextlib
 import logging
 
 from autotest_lib.server import autotest
@@ -11,41 +12,29 @@ from autotest_lib.server.cros import tradefed_constants as constants
 class ChromeLogin(object):
     """Context manager to handle Chrome login state."""
 
-    def need_reboot(self):
+    def need_reboot(self, hard_reboot=False):
         """Marks state as "dirty" - reboot needed during/after test."""
         logging.info('Will reboot DUT when Chrome stops.')
         self._need_reboot = True
+        if hard_reboot and self._host.servo:
+            self._hard_reboot_on_failure = True
 
-    def need_restart(self):
-        """Marks state as "dirty" - restart needed after test."""
-        self._need_restart = True
+    def __init__(self, host, board=None, dont_override_profile=False,
+                 enable_default_apps=False):
+        """Initializes the ChromeLogin object.
 
-    def __init__(self, host, kwargs):
-        """Initializes the _ChromeLogin object.
-
-        @param reboot: indicate if a reboot before destruction is required.
-        @param restart: indicate if a restart before destruction is required.
         @param board: optional parameter to extend timeout for login for slow
                       DUTs. Used in particular for virtual machines.
+        @param dont_override_profile: reuses the existing test profile if any
+        @param enable_default_apps: enables default apps (like Files app)
         """
         self._host = host
-        self._cts_helper_kwargs = kwargs
-        # We will override reboot/restart options to some degree. Keep track
-        # of them in a local copy.
+        self._timeout = constants.LOGIN_BOARD_TIMEOUT.get(
+            board, constants.LOGIN_DEFAULT_TIMEOUT)
+        self._dont_override_profile = dont_override_profile
+        self._enable_default_apps = enable_default_apps
         self._need_reboot = False
-        if kwargs.get('reboot'):
-            self.need_reboot()
-        self._need_restart = False
-        if kwargs.get('restart'):
-            self.need_restart()
-        self._timeout = constants.LOGIN_DEFAULT_TIMEOUT
-        board = kwargs.get('board')
-        if board in constants.LOGIN_BOARD_TIMEOUT:
-            self._timeout = constants.LOGIN_BOARD_TIMEOUT[board]
-        # DUT power off -> on cycle will still adhere DUT's reboot preference.
         self._hard_reboot_on_failure = False
-        if kwargs.get('hard_reboot_on_failure') and self._need_reboot:
-            self._hard_reboot_on_failure = True
 
     def _cmd_builder(self, verbose=False):
         """Gets remote command to start browser with ARC enabled."""
@@ -53,150 +42,113 @@ class ChromeLogin(object):
         # getting the autodir will raise an exception.
         cmd = autotest.Autotest.get_installed_autodir(self._host)
         cmd += '/bin/autologin.py --arc'
-        if self._cts_helper_kwargs.get('dont_override_profile'):
-            logging.info('Using --dont_override_profile to start Chrome.')
+        # We want to suppress the Google doodle as it is not part of the image
+        # and can be different content every day interacting with testing.
+        cmd += ' --no-startup-window'
+        # Disable several forms of auto-installation to stablize the tests.
+        cmd += ' --no-arc-syncs'
+        if self._dont_override_profile:
+            logging.info('Starting Chrome with a possibly reused profile.')
             cmd += ' --dont_override_profile'
         else:
-            logging.info('Not using --dont_override_profile to start Chrome.')
+            logging.info('Starting Chrome with a fresh profile.')
+        if self._enable_default_apps:
+            logging.info('Using --enable_default_apps to start Chrome.')
+            cmd += ' --enable_default_apps'
         if not verbose:
             cmd += ' > /dev/null 2>&1'
         return cmd
 
-    def login(self, timeout=None, raise_exception=False, verbose=False):
-        """Logs into Chrome."""
-        if not timeout:
-            timeout = self._timeout
-        try:
-            # We used to call cheets_StartAndroid, but it is a little faster to
-            # call a script on the DUT. This also saves CPU time on the server.
-            self._host.run(
-                self._cmd_builder(verbose=verbose),
-                ignore_status=False,
-                verbose=verbose,
-                timeout=timeout)
-            return True
-        except autotest.AutodirNotFoundError:
-            # Autotest is not installed (can happen on moblab after image
-            # install). Run dummy_Pass to foce autotest install, before trying
-            # to login again.
-            logging.warning(
-                'Autotest not installed, forcing install using dummy_Pass...')
+    def _login_by_script(self, timeout, verbose):
+        """Runs the autologin.py script on the DUT to log in."""
+        self._host.run(
+            self._cmd_builder(verbose=verbose),
+            ignore_status=False,
+            verbose=verbose,
+            timeout=timeout)
+
+    def _login(self, timeout, verbose=False, install_autotest=False):
+        """Logs into Chrome. Raises an exception on failure."""
+        if not install_autotest:
             try:
-                autotest.Autotest(self._host).run_timed_test(
-                    'dummy_Pass',
-                    timeout=2 * timeout,
-                    check_client_result=True,
-                    **self._cts_helper_kwargs)
-                self._host.run(
-                    self._cmd_builder(),
-                    ignore_status=False,
-                    verbose=verbose,
-                    timeout=timeout)
-                return True
-            except:
-                # We were unable to start the browser/Android. Maybe we can
-                # salvage the DUT by rebooting. This can hide some failures.
-                self.reboot()
-                if raise_exception:
-                    raise
-        except:
-            # We were unable to start the browser/Android. Maybe we can
-            # salvage the DUT by rebooting. This can hide some failures.
-            self.reboot()
-            if raise_exception:
-                raise
-        return False
+                # Assume autotest to be already installed.
+                self._login_by_script(timeout=timeout, verbose=verbose)
+            except autotest.AutodirNotFoundError:
+                logging.warning('Autotest not installed, forcing install...')
+                install_autotest = True
+
+        if install_autotest:
+            # Installs the autotest client to the DUT by running a dummy test.
+            autotest.Autotest(self._host).run_timed_test(
+                'dummy_Pass', timeout=2 * timeout, check_client_result=True)
+            # The (re)run the login script.
+            self._login_by_script(timeout=timeout, verbose=verbose)
+
+        # Sanity check if Android has really started. When autotest client
+        # installed on the DUT was partially broken, the script may succeed
+        # without actually logging into Chrome/Android. See b/129382439.
+        self._host.run(
+            'android-sh -c "ls /data/misc/adb"', ignore_status=False, timeout=9)
 
     def enter(self):
         """Logs into Chrome with retry."""
         timeout = self._timeout
-        logging.info('Ensure Android is running (timeout=%d)...', timeout)
-        if not self.login(timeout=timeout):
+        try:
+            logging.info('Ensure Android is running (timeout=%d)...', timeout)
+            self._login(timeout=timeout)
+        except Exception as e:
+            logging.error('Login failed.', exc_info=e)
+            # Retry with more time, with refreshed client autotest installation,
+            # and the DUT cleanup by rebooting. This can hide some failures.
+            self._reboot()
             timeout *= 2
-            # The DUT reboots after unsuccessful login, try with more time.
             logging.info('Retrying failed login (timeout=%d)...', timeout)
-            self.login(timeout=timeout, raise_exception=True, verbose=True)
-        return self
+            self._login(timeout=timeout, verbose=True, install_autotest=True)
 
-    def __enter__(self):
-        """Logs into Chrome with retry."""
-        return self.enter()
-
-    def exit(self, exc_type=None, exc_value=None, traceback=None):
-        """On exit restart the browser or reboot the machine.
-
-        @param exc_type: Exception type if an exception is raised from the
-                         with-block.
-        @param exc_value: Exception instance if an exception is raised from
-                          the with-block.
-        @param traceback: Stack trace info if an exception is raised from
-                          the with-block.
-        @return None, indicating not to ignore an exception from the with-block
-                if raised.
-        """
+    def exit(self):
+        """On exit restart the browser or reboot the machine."""
         if not self._need_reboot:
-            logging.info('Skipping reboot, restarting browser.')
             try:
-                self.restart()
+                self._restart()
             except:
                 logging.error('Restarting browser has failed.')
                 self.need_reboot()
         if self._need_reboot:
-            self.reboot(exc_type, exc_value, traceback)
+            self._reboot()
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        """On exit restart the browser or reboot the machine.
-
-        @param exc_type: Exception type if an exception is raised from the
-                         with-block.
-        @param exc_value: Exception instance if an exception is raised from
-                          the with-block.
-        @param traceback: Stack trace info if an exception is raised from
-                          the with-block.
-        @return None, indicating not to ignore an exception from the with-block
-                if raised.
-        """
-        self.exit(exc_type, exc_value, traceback)
-
-    def restart(self):
+    def _restart(self):
         """Restart Chrome browser."""
         # We clean up /tmp (which is memory backed) from crashes and
         # other files. A reboot would have cleaned /tmp as well.
         # TODO(ihf): Remove "start ui" which is a nicety to non-ARC tests (i.e.
         # now we wait on login screen, but login() above will 'stop ui' again
         # before launching Chrome with ARC enabled).
+        logging.info('Skipping reboot, restarting browser.')
         script = 'stop ui'
         script += '&& find /tmp/ -mindepth 1 -delete '
         script += '&& start ui'
         self._host.run(script, ignore_status=False, verbose=False, timeout=120)
 
-    def reboot(self, exc_type=None, exc_value=None, traceback=None):
-        """Reboot the machine.
+    def _reboot(self):
+        """Reboot the machine."""
+        if self._hard_reboot_on_failure:
+            logging.info('Powering OFF the DUT: %s', self._host)
+            self._host.servo.get_power_state_controller().power_off()
+            logging.info('Powering ON the DUT: %s', self._host)
+            self._host.servo.get_power_state_controller().power_on()
+        else:
+            logging.info('Rebooting...')
+            self._host.reboot()
 
-        @param exc_type: Exception type if an exception is raised from the
-                         with-block.
-        @param exc_value: Exception instance if an exception is raised from
-                          the with-block.
-        @param traceback: Stack trace info if an exception is raised from
-                          the with-block.
-        @return None, indicating not to ignore an exception from the with-block
-                if raised.
-        """
-        logging.info('Rebooting...')
-        try:
-            if self._hard_reboot_on_failure and self._host.servo:
-                logging.info('Powering OFF the DUT: %s', self._host)
-                self._host.servo.get_power_state_controller().power_off()
-                logging.info('Powering ON the DUT: %s', self._host)
-                self._host.servo.get_power_state_controller().power_on()
-                self._hard_reboot_on_failure = False
-            else:
-                self._host.reboot()
-                self._need_reboot = False
-        except Exception:
-            if exc_type is None:
-                raise
-            # If an exception is raise from the with-block, just record the
-            # exception for the rebooting to avoid ignoring the original
-            # exception.
-            logging.exception('Rebooting failed.')
+
+@contextlib.contextmanager
+def login_chrome(hosts, **kwargs):
+    """Returns Chrome log-in context manager for multiple hosts. """
+    # TODO(pwang): Chromelogin takes 10+ seconds for it to successfully
+    #              enter. Parallelize if this becomes a bottleneck.
+    instances = [ChromeLogin(host, **kwargs) for host in hosts]
+    for instance in instances:
+        instance.enter()
+    yield instances
+    for instance in instances:
+        instance.exit()

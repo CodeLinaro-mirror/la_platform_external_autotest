@@ -20,6 +20,11 @@ class firmware_SoftwareSync(FirmwareTest):
         # This test tries to corrupt EC firmware. Should disable EC WP.
         super(firmware_SoftwareSync, self).initialize(host, cmdline_args,
                                                       ec_wp=False)
+
+        # Don't bother if there is no Chrome EC.
+        if not self.check_ec_capability():
+            raise error.TestNAError("Nothing needs to be tested on this device")
+
         # In order to test software sync, it must be enabled.
         self.clear_set_gbb_flags(vboot.GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC, 0)
         self.backup_firmware()
@@ -38,7 +43,7 @@ class firmware_SoftwareSync(FirmwareTest):
 
     def record_hash(self):
         """Record current EC hash."""
-        self._ec_hash = self.faft_client.ec.get_active_hash()
+        self._ec_hash = self.faft_client.Ec.GetActiveHash()
         logging.info("Stored EC hash: %s", self._ec_hash)
 
     def corrupt_active_rw(self):
@@ -52,11 +57,11 @@ class firmware_SoftwareSync(FirmwareTest):
             # TODO(waihong): Remove this except clause.
             pass
         logging.info("Corrupt the EC section: %s", section)
-        self.faft_client.ec.corrupt_body(section)
+        self.faft_client.Ec.CorruptBody(section)
 
     def software_sync_checker(self):
         """Check EC firmware is restored by software sync."""
-        ec_hash = self.faft_client.ec.get_active_hash()
+        ec_hash = self.faft_client.Ec.GetActiveHash()
         logging.info("Current EC hash: %s", ec_hash)
         if self._ec_hash != ec_hash:
             return False
@@ -72,6 +77,7 @@ class firmware_SoftwareSync(FirmwareTest):
             time.sleep(self.faft_config.software_sync_update)
 
     def run_once(self):
+        """Runs a single iteration of the test."""
         logging.info("Corrupt EC firmware RW body.")
         self.check_state((self.checkers.ec_act_copy_checker, 'RW'))
         self.record_hash()

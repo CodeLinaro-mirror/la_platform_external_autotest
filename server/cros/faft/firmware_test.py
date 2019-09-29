@@ -69,11 +69,12 @@ class FirmwareTest(FAFTBase):
     # Delay between closing and opening lid
     LID_DELAY = 1
 
-    _SERVOD_LOG = '/var/log/servod.log'
+    # UARTs that may be captured
+    UARTS = ('cpu', 'cr50', 'ec', 'servo_micro', 'servo_v4', 'usbpd')
 
     _ROOTFS_PARTITION_NUMBER = 3
 
-    _backup_firmware_sha = ()
+    _backup_firmware_identity = dict()
     _backup_kernel_sha = dict()
     _backup_cgpt_attr = dict()
     _backup_gbb_flags = None
@@ -122,24 +123,14 @@ class FirmwareTest(FAFTBase):
             match = re.search("^(\w+)=(.+)", arg)
             if match:
                 args[match.group(1)] = match.group(2)
-        if 'power_control' in args:
-            self.power_control = args['power_control']
-            if self.power_control not in host.POWER_CONTROL_VALID_ARGS:
-                raise error.TestError('Valid values for --args=power_control '
-                                      'are %s. But you entered wrong argument '
-                                      'as "%s".'
-                                       % (host.POWER_CONTROL_VALID_ARGS,
-                                       self.power_control))
+
         self._no_ec_sync = False
         if 'no_ec_sync' in args:
             if 'true' in args['no_ec_sync'].lower():
                 self._no_ec_sync = True
 
-        if not self.faft_client.system.dev_tpm_present():
-            raise error.TestError('/dev/tpm0 does not exist on the client')
-
         self.faft_config = FAFTConfig(
-                self.faft_client.system.get_platform_name())
+                self.faft_client.System.GetPlatformName())
         self.checkers = FAFTCheckers(self)
         self.switcher = mode_switcher.create_mode_switcher(self)
 
@@ -151,9 +142,21 @@ class FirmwareTest(FAFTBase):
         elif self.faft_config.chrome_ec:
             # If no separate USBPD console, then PD exists on EC console
             self.usbpd = self.ec
-        # Get plankton console
-        self.plankton = host.plankton
-        self.plankton_host = host._plankton_host
+        # Get pdtester console
+        self.pdtester = host.pdtester
+        self.pdtester_host = host._pdtester_host
+
+        if 'power_control' in args:
+            self.power_control = args['power_control']
+            if self.power_control not in host.POWER_CONTROL_VALID_ARGS:
+                raise error.TestError('Valid values for --args=power_control '
+                                      'are %s. But you entered wrong argument '
+                                      'as "%s".'
+                                      % (host.POWER_CONTROL_VALID_ARGS,
+                                         self.power_control))
+
+        if not self.faft_client.System.DevTpmPresent():
+            raise error.TestError('/dev/tpm0 does not exist on the client')
 
         # Create the BaseEC object. None if not available.
         self.base_ec = chrome_base_ec.create_base_ec(self.servo)
@@ -161,15 +164,15 @@ class FirmwareTest(FAFTBase):
         self._setup_uart_capture()
         self._setup_servo_log()
         self._record_system_info()
-        self.fw_vboot2 = self.faft_client.system.get_fw_vboot2()
+        self.fw_vboot2 = self.faft_client.System.GetFwVboot2()
         logging.info('vboot version: %d', 2 if self.fw_vboot2 else 1)
         if self.fw_vboot2:
-            self.faft_client.system.set_fw_try_next('A')
-            if self.faft_client.system.get_crossystem_value('mainfw_act') == 'B':
+            self.faft_client.System.SetFwTryNext('A')
+            if self.faft_client.System.GetCrossystemValue('mainfw_act') == 'B':
                 logging.info('mainfw_act is B. rebooting to set it A')
                 self.switcher.mode_aware_reboot()
         self._setup_gbb_flags()
-        self.faft_client.updater.stop_daemon()
+        self.faft_client.Updater.StopDaemon()
         self._create_faft_lockfile()
         self._setup_ec_write_protect(ec_wp)
         # See chromium:239034 regarding needing this sync.
@@ -181,7 +184,7 @@ class FirmwareTest(FAFTBase):
         # Unset state checker in case it's set by subclass
         logging.info('FirmwareTest cleaning up (id=%s)', self.run_id)
         try:
-            self.faft_client.system.is_available()
+            self.faft_client.System.IsAvailable()
         except:
             # Remote is not responding. Revive DUT so that subsequent tests
             # don't fail.
@@ -190,8 +193,8 @@ class FirmwareTest(FAFTBase):
         self._restore_ec_write_protect()
         self._restore_servo_v4_role()
         self._restore_gbb_flags()
-        self.faft_client.updater.start_daemon()
-        self.faft_client.updater.cleanup()
+        self.faft_client.Updater.StartDaemon()
+        self.faft_client.Updater.Cleanup()
         self._remove_faft_lockfile()
         self._record_servo_log()
         self._record_faft_client_log()
@@ -205,12 +208,12 @@ class FirmwareTest(FAFTBase):
         This info is used by generate_test_report later.
         """
         system_info = {
-            'hwid': self.faft_client.system.get_crossystem_value('hwid'),
-            'ec_version': self.faft_client.ec.get_version(),
-            'ro_fwid': self.faft_client.system.get_crossystem_value('ro_fwid'),
-            'rw_fwid': self.faft_client.system.get_crossystem_value('fwid'),
-            'servod_version': self._client._servo_host.run(
-                'servod --version').stdout.strip(),
+            'hwid': self.faft_client.System.GetCrossystemValue('hwid'),
+            'ec_version': self.faft_client.Ec.GetVersion(),
+            'ro_fwid': self.faft_client.System.GetCrossystemValue('ro_fwid'),
+            'rw_fwid': self.faft_client.System.GetCrossystemValue('fwid'),
+            'servo_host_os_version' : self.servo.get_os_version(),
+            'servod_version': self.servo.get_servod_version(),
             'os_version': self._client.get_release_builder_path(),
             'servo_type': self.servo.get_servo_version()
         }
@@ -252,7 +255,7 @@ class FirmwareTest(FAFTBase):
 
         try:
             self.switcher.wait_for_client()
-            lines = self.faft_client.system.run_shell_command_get_output(
+            lines = self.faft_client.System.RunShellCommandGetOutput(
                         'crossystem recovery_reason')
             recovery_reason = int(lines[0])
             logging.info('Got the recovery reason %d.', recovery_reason)
@@ -313,7 +316,7 @@ class FirmwareTest(FAFTBase):
         # DUT may be broken by a corrupted OS image. Restore OS image.
         self._ensure_client_in_recovery()
         logging.info('Try restore the OS image...')
-        self.faft_client.system.run_shell_command('chromeos-install --yes')
+        self.faft_client.System.RunShellCommand('chromeos-install --yes')
         self.switcher.mode_aware_reboot(wait_for_dut_up=False)
         self.switcher.wait_for_client_offline()
         self.switcher.bypass_dev_mode()
@@ -393,8 +396,8 @@ class FirmwareTest(FAFTBase):
             usb_lsb = self.servo.system_output('cat %s' %
                 os.path.join(tmpd, 'etc/lsb-release'))
             logging.debug('Dumping lsb-release on USB stick:\n%s', usb_lsb)
-            dut_lsb = '\n'.join(self.faft_client.system.
-                run_shell_command_get_output('cat /etc/lsb-release'))
+            dut_lsb = '\n'.join(self.faft_client.System.
+                RunShellCommandGetOutput('cat /etc/lsb-release'))
             logging.debug('Dumping lsb-release on DUT:\n%s', dut_lsb)
             if not re.search(r'RELEASE_TRACK=.*test', usb_lsb):
                 raise error.TestError('USB stick in servo is no test image')
@@ -408,6 +411,28 @@ class FirmwareTest(FAFTBase):
                 self.servo.system(cmd)
 
         self.mark_setup_done('usb_check')
+
+    def setup_pdtester(self, flip_cc=False):
+        """Setup the PDTester to a given state.
+
+        @param flip_cc: True to flip CC polarity; False to not flip it.
+        @raise TestError: If Servo v4 not setup properly.
+        """
+        # Servo v4 by default has dts_mode enabled. Enabling dts_mode affects
+        # the behaviors of what PD FAFT tests. So we want it disabled.
+        if 'servo_v4' in self.pdtester.servo_type:
+            self.pdtester.set('servo_v4_dts_mode', 'off')
+
+        self.pdtester.set('usbc_polarity', 'cc2' if flip_cc else 'cc1')
+        # Make it sourcing max voltage.
+        self.pdtester.charge(self.pdtester.USBC_MAX_VOLTAGE)
+
+        # Servo v4 requires an external charger to source power. Make sure
+        # this setup is correct.
+        if ('servo_v4' in self.pdtester.servo_type and
+            self.pdtester.get('servo_v4_role') != 'src'):
+            raise error.TestError('Servo v4 failed sourcing power! Check '
+                    'the "DUT POWER" port connecting a valid charger.')
 
     def setup_usbkey(self, usbkey, host=None, used_for_recovery=None):
         """Setup the USB disk for the test.
@@ -479,13 +504,13 @@ class FirmwareTest(FAFTBase):
         # Make the dut unable to see the USB disk.
         self.servo.switch_usbkey('off')
         no_usb_set = set(
-            self.faft_client.system.run_shell_command_get_output(cmd))
+            self.faft_client.System.RunShellCommandGetOutput(cmd))
 
         # Make the dut able to see the USB disk.
         self.servo.switch_usbkey('dut')
         time.sleep(self.faft_config.usb_plug)
         has_usb_set = set(
-            self.faft_client.system.run_shell_command_get_output(cmd))
+            self.faft_client.System.RunShellCommandGetOutput(cmd))
 
         # Back to its original value.
         if original_value != self.servo.get_usbkey_direction():
@@ -501,13 +526,13 @@ class FirmwareTest(FAFTBase):
         """Creates the FAFT lockfile."""
         logging.info('Creating FAFT lockfile...')
         command = 'touch %s' % (self.lockfile)
-        self.faft_client.system.run_shell_command(command)
+        self.faft_client.System.RunShellCommand(command)
 
     def _remove_faft_lockfile(self):
         """Removes the FAFT lockfile."""
         logging.info('Removing FAFT lockfile...')
         command = 'rm -f %s' % (self.lockfile)
-        self.faft_client.system.run_shell_command(command)
+        self.faft_client.System.RunShellCommand(command)
 
     def clear_set_gbb_flags(self, clear_mask, set_mask):
         """Clear and set the GBB flags in the current flashrom.
@@ -515,14 +540,14 @@ class FirmwareTest(FAFTBase):
         @param clear_mask: A mask of flags to be cleared.
         @param set_mask: A mask of flags to be set.
         """
-        gbb_flags = self.faft_client.bios.get_gbb_flags()
+        gbb_flags = self.faft_client.Bios.GetGbbFlags()
         new_flags = gbb_flags & ctypes.c_uint32(~clear_mask).value | set_mask
         self.gbb_flags = new_flags
         if new_flags != gbb_flags:
             self._backup_gbb_flags = gbb_flags
             logging.info('Changing GBB flags from 0x%x to 0x%x.',
                          gbb_flags, new_flags)
-            self.faft_client.bios.set_gbb_flags(new_flags)
+            self.faft_client.Bios.SetGbbFlags(new_flags)
             # If changing FORCE_DEV_SWITCH_ON or DISABLE_EC_SOFTWARE_SYNC flag,
             # reboot to get a clear state
             if ((gbb_flags ^ new_flags) &
@@ -597,15 +622,15 @@ class FirmwareTest(FAFTBase):
         @param from_part: A string of partition number to be copied from.
         @param to_part: A string of partition number to be copied to.
         """
-        root_dev = self.faft_client.system.get_root_dev()
+        root_dev = self.faft_client.System.GetRootDev()
         logging.info('Copying kernel from %s to %s. Please wait...',
                      from_part, to_part)
-        self.faft_client.system.run_shell_command('dd if=%s of=%s bs=4M' %
+        self.faft_client.System.RunShellCommand('dd if=%s of=%s bs=4M' %
                 (self._join_part(root_dev, self.KERNEL_MAP[from_part]),
                  self._join_part(root_dev, self.KERNEL_MAP[to_part])))
         logging.info('Copying rootfs from %s to %s. Please wait...',
                      from_part, to_part)
-        self.faft_client.system.run_shell_command('dd if=%s of=%s bs=4M' %
+        self.faft_client.System.RunShellCommand('dd if=%s of=%s bs=4M' %
                 (self._join_part(root_dev, self.ROOTFS_MAP[from_part]),
                  self._join_part(root_dev, self.ROOTFS_MAP[to_part])))
 
@@ -618,7 +643,7 @@ class FirmwareTest(FAFTBase):
         @param part: A string of kernel partition number or 'a'/'b'.
         """
         if not self.checkers.root_part_checker(part):
-            if self.faft_client.kernel.diff_a_b():
+            if self.faft_client.Kernel.DiffAB():
                 self.copy_kernel_and_rootfs(
                         from_part=self.OTHER_KERNEL_MAP[part],
                         to_part=part)
@@ -634,9 +659,9 @@ class FirmwareTest(FAFTBase):
         @param original_dev_boot_usb: Original dev_boot_usb value.
         """
         logging.info('Checking internal device boot.')
-        if self.faft_client.system.is_removable_device_boot():
+        if self.faft_client.System.IsRemovableDeviceBoot():
             logging.info('Reboot into internal disk...')
-            self.faft_client.system.set_dev_boot_usb(original_dev_boot_usb)
+            self.faft_client.System.SetDevBootUsb(original_dev_boot_usb)
             self.switcher.mode_aware_reboot()
         self.check_state((self.checkers.dev_boot_usb_checker, False,
                           'Device not booted from internal disk properly.'))
@@ -671,7 +696,7 @@ class FirmwareTest(FAFTBase):
         if self.faft_config.chrome_ec:
             self.set_chrome_ec_write_protect_and_reboot(enable)
         else:
-            self.faft_client.ec.set_write_protect(enable)
+            self.faft_client.Ec.SetWriteProtect(enable)
             self.switcher.mode_aware_reboot()
 
     def set_chrome_ec_write_protect_and_reboot(self, enable):
@@ -735,7 +760,9 @@ class FirmwareTest(FAFTBase):
                            'wpsw_boot': '1' if self._old_wpsw_boot else '0'}))
 
     def _setup_uart_capture(self):
-        """Setup the CPU/EC/PD UART capture."""
+        """Set up the CPU/EC/PD UART capture."""
+
+        # If adding another capture, make sure to update the UARTS constant.
         self.cpu_uart_file = os.path.join(self.resultsdir, 'cpu_uart.txt')
         self.servo.set('cpu_uart_capture', 'on')
         self.cr50_uart_file = None
@@ -743,6 +770,7 @@ class FirmwareTest(FAFTBase):
         self.servo_micro_uart_file = None
         self.servo_v4_uart_file = None
         self.usbpd_uart_file = None
+
         try:
             # Check that the console works before declaring the cr50 console
             # connection exists and enabling uart capture.
@@ -790,44 +818,23 @@ class FirmwareTest(FAFTBase):
 
     def _record_uart_capture(self):
         """Record the CPU/EC/PD UART output stream to files."""
-        if self.cpu_uart_file:
-            with open(self.cpu_uart_file, 'a') as f:
-                f.write(ast.literal_eval(self.servo.get('cpu_uart_stream')))
-        if self.cr50_uart_file:
-            with open(self.cr50_uart_file, 'a') as f:
-                f.write(ast.literal_eval(self.servo.get('cr50_uart_stream')))
-        if self.ec_uart_file and self.faft_config.chrome_ec:
-            with open(self.ec_uart_file, 'a') as f:
-                f.write(ast.literal_eval(self.servo.get('ec_uart_stream')))
-        if self.servo_micro_uart_file:
-            with open(self.servo_micro_uart_file, 'a') as f:
-                f.write(ast.literal_eval(self.servo.get(
-                        'servo_micro_uart_stream')))
-        if self.servo_v4_uart_file:
-            with open(self.servo_v4_uart_file, 'a') as f:
-                f.write(ast.literal_eval(self.servo.get(
-                        'servo_v4_uart_stream')))
-        if (self.usbpd_uart_file and self.faft_config.chrome_ec and
-            self.check_ec_capability(['usbpd_uart'], suppress_warning=True)):
-            with open(self.usbpd_uart_file, 'a') as f:
-                f.write(ast.literal_eval(self.servo.get('usbpd_uart_stream')))
+        for uart in self.UARTS:
+            # Attribute will be nonexistent or empty if capture wasn't set up.
+            uart_file = getattr(self, '%s_uart_file' % uart, None)
+            if uart_file:
+                with open(uart_file, 'a') as f:
+                    f.write(ast.literal_eval(
+                        self.servo.get('%s_uart_stream' % uart)))
 
     def _cleanup_uart_capture(self):
         """Cleanup the CPU/EC/PD UART capture."""
-        # Flush the remaining UART output.
+        # Flush the remaining UART output first.
         self._record_uart_capture()
-        self.servo.set('cpu_uart_capture', 'off')
-        if self.cr50_uart_file:
-            self.servo.set('cr50_uart_capture', 'off')
-        if self.ec_uart_file and self.faft_config.chrome_ec:
-            self.servo.set('ec_uart_capture', 'off')
-        if self.servo_micro_uart_file:
-            self.servo.set('servo_micro_uart_capture', 'off')
-        if self.servo_v4_uart_file:
-            self.servo.set('servo_v4_uart_capture', 'off')
-        if (self.usbpd_uart_file and self.faft_config.chrome_ec and
-            self.check_ec_capability(['usbpd_uart'], suppress_warning=True)):
-            self.servo.set('usbpd_uart_capture', 'off')
+        for uart in self.UARTS:
+            # Attribute will be nonexistent or empty if capture wasn't set up.
+            uart_file = getattr(self, '%s_uart_file' % uart, None)
+            if uart_file:
+                self.servo.set('%s_uart_capture' % uart, 'off')
 
     def _get_power_state(self, power_state):
         """
@@ -858,39 +865,38 @@ class FirmwareTest(FAFTBase):
     def suspend(self):
         """Suspends the DUT."""
         cmd = '(sleep %d; powerd_dbus_suspend) &' % self.EC_SUSPEND_DELAY
-        self.faft_client.system.run_shell_command(cmd)
+        self.faft_client.System.RunShellCommand(cmd)
         time.sleep(self.EC_SUSPEND_DELAY)
 
-    def _fetch_servo_log(self):
-        """Fetch the servo log."""
-        cmd = '[ -e %s ] && cat %s || echo NOTFOUND' % ((self._SERVOD_LOG,) * 2)
-        servo_log = self.servo.system_output(cmd)
-        return None if servo_log == 'NOTFOUND' else servo_log
-
     def _setup_servo_log(self):
-        """Setup the servo log capturing."""
-        self.servo_log_original_len = -1
+        """Set up the servo log capturing."""
+        self.servo_log_original_size = 0
+        self.servo_log_original_inode = None
         if self.servo.is_localhost():
             # No servo log recorded when servod runs locally.
             return
 
-        servo_log = self._fetch_servo_log()
-        if servo_log:
-            self.servo_log_original_len = len(servo_log)
-        else:
-            logging.warn('Servo log file not found.')
+        self.servo.fetch_servod_log(None, skip_old=False)
 
     def _record_servo_log(self):
+        """Record the new portion of the servo log to the results directory."""
+        if self.servo.is_localhost():
+            # No servo log recorded when servod runs locally.
+            return
+
+        results_servod_log = os.path.join(self.resultsdir, 'servod.log')
+        self.servo.fetch_servod_log(results_servod_log, skip_old=True)
         """Record the servo log to the results directory."""
-        if self.servo_log_original_len != -1:
-            servo_log = self._fetch_servo_log()
-            servo_log_file = os.path.join(self.resultsdir, 'servod.log')
-            with open(servo_log_file, 'a') as f:
-                f.write(servo_log[self.servo_log_original_len:])
+        if hasattr(self, 'servo_log_original_len'):
+            if self.servo_log_original_len != -1:
+                servo_log = self._fetch_servo_log()
+                servo_log_file = os.path.join(self.resultsdir, 'servod.log')
+                with open(servo_log_file, 'a') as f:
+                    f.write(servo_log[self.servo_log_original_len:])
 
     def _record_faft_client_log(self):
         """Record the faft client log to the results directory."""
-        client_log = self.faft_client.system.dump_log(True)
+        client_log = self.faft_client.System.DumpLog(True)
         client_log_file = os.path.join(self.resultsdir, 'faft_client.log')
         with open(client_log_file, 'w') as f:
             f.write(client_log)
@@ -944,7 +950,7 @@ class FirmwareTest(FAFTBase):
             if not self.checkers.crossystem_checker({'tried_fwb': '1'}):
                 logging.info(
                     'Firmware is not booted with tried_fwb. Reboot into it.')
-                self.faft_client.system.set_try_fw_b()
+                self.faft_client.System.SetTryFwB()
         else:
             if not self.checkers.crossystem_checker({'tried_fwb': '0'}):
                 logging.info(
@@ -970,10 +976,10 @@ class FirmwareTest(FAFTBase):
 
         @param section: A firmware section, either 'a' or 'b'.
         """
-        flags = self.faft_client.bios.get_preamble_flags(section)
+        flags = self.faft_client.Bios.GetPreambleFlags(section)
         if flags & vboot.PREAMBLE_USE_RO_NORMAL:
             flags = flags ^ vboot.PREAMBLE_USE_RO_NORMAL
-            self.faft_client.bios.set_preamble_flags(section, flags)
+            self.faft_client.Bios.SetPreambleFlags(section, flags)
             self.switcher.mode_aware_reboot()
 
     def setup_kernel(self, part):
@@ -986,8 +992,8 @@ class FirmwareTest(FAFTBase):
         """
         self.ensure_kernel_boot(part)
         logging.info('Checking the integrity of kernel B and rootfs B...')
-        if (self.faft_client.kernel.diff_a_b() or
-                not self.faft_client.rootfs.verify_rootfs('B')):
+        if (self.faft_client.Kernel.DiffAB() or
+                not self.faft_client.Rootfs.VerifyRootfs('B')):
             logging.info('Copying kernel and rootfs from A to B...')
             self.copy_kernel_and_rootfs(from_part=part,
                                         to_part=self.OTHER_KERNEL_MAP[part])
@@ -1000,14 +1006,14 @@ class FirmwareTest(FAFTBase):
 
         @param part: A string of partition number to be prioritized.
         """
-        root_dev = self.faft_client.system.get_root_dev()
+        root_dev = self.faft_client.System.GetRootDev()
         # Reset kernel A and B to bootable.
-        self.faft_client.system.run_shell_command(
+        self.faft_client.System.RunShellCommand(
             'cgpt add -i%s -P1 -S1 -T0 %s' % (self.KERNEL_MAP['a'], root_dev))
-        self.faft_client.system.run_shell_command(
+        self.faft_client.System.RunShellCommand(
             'cgpt add -i%s -P1 -S1 -T0 %s' % (self.KERNEL_MAP['b'], root_dev))
         # Set kernel part highest priority.
-        self.faft_client.system.run_shell_command('cgpt prioritize -i%s %s' %
+        self.faft_client.System.RunShellCommand('cgpt prioritize -i%s %s' %
                 (self.KERNEL_MAP[part], root_dev))
 
     def do_blocking_sync(self, device):
@@ -1017,7 +1023,7 @@ class FirmwareTest(FAFTBase):
         if 'mmcblk' in device:
             # For mmc devices, use `mmc status get` command to send an
             # empty command to wait for the disk to be available again.
-            self.faft_client.system.run_shell_command('mmc status get %s' %
+            self.faft_client.System.RunShellCommand('mmc status get %s' %
                                                       device)
         elif 'nvme' in device:
             # For NVMe devices, use `nvme flush` command to commit data
@@ -1028,7 +1034,7 @@ class FirmwareTest(FAFTBase):
             # [ 0]:0x1
             # [ 1]:0x2
             list_ns_cmd = "nvme list-ns %s" % device
-            available_ns = self.faft_client.system.run_shell_command_get_output(
+            available_ns = self.faft_client.System.RunShellCommandGetOutput(
                 list_ns_cmd)
 
             if not available_ns:
@@ -1039,7 +1045,7 @@ class FirmwareTest(FAFTBase):
             for ns in available_ns:
                 ns = ns.split(':')[-1]
                 flush_cmd = 'nvme flush %s -n %s' % (device, ns)
-                flush_rc = self.faft_client.system.run_shell_command_get_status(
+                flush_rc = self.faft_client.System.RunShellCommandGetStatus(
                     flush_cmd)
                 if flush_rc != 0:
                     raise error.TestError(
@@ -1048,7 +1054,7 @@ class FirmwareTest(FAFTBase):
         else:
             # For other devices, hdparm sends TUR to check if
             # a device is ready for transfer operation.
-            self.faft_client.system.run_shell_command('hdparm -f %s' % device)
+            self.faft_client.System.RunShellCommand('hdparm -f %s' % device)
 
     def blocking_sync(self):
         """Sync root device and internal device."""
@@ -1056,17 +1062,17 @@ class FirmwareTest(FAFTBase):
         # since the first call returns before the flush
         # is complete, but the second will wait for the
         # first to finish.
-        self.faft_client.system.run_shell_command('sync')
-        self.faft_client.system.run_shell_command('sync')
+        self.faft_client.System.RunShellCommand('sync')
+        self.faft_client.System.RunShellCommand('sync')
 
         # sync only sends SYNCHRONIZE_CACHE but doesn't check the status.
         # This function will perform a device-specific sync command.
-        root_dev = self.faft_client.system.get_root_dev()
+        root_dev = self.faft_client.System.GetRootDev()
         self.do_blocking_sync(root_dev)
 
         # Also sync the internal device if booted from removable media.
-        if self.faft_client.system.is_removable_device_boot():
-            internal_dev = self.faft_client.system.get_internal_device()
+        if self.faft_client.System.IsRemovableDeviceBoot():
+            internal_dev = self.faft_client.System.GetInternalDevice()
             self.do_blocking_sync(internal_dev)
 
     def sync_and_ec_reboot(self, flags=''):
@@ -1085,7 +1091,7 @@ class FirmwareTest(FAFTBase):
     def reboot_and_reset_tpm(self):
         """Reboot into recovery mode, reset TPM, then reboot back to disk."""
         self.switcher.reboot_to_mode(to_mode='rec')
-        self.faft_client.system.run_shell_command('chromeos-tpm-recovery')
+        self.faft_client.System.RunShellCommand('chromeos-tpm-recovery')
         self.switcher.mode_aware_reboot()
 
     def full_power_off_and_on(self):
@@ -1132,7 +1138,11 @@ class FirmwareTest(FAFTBase):
 
         This will cause the AP to ignore power button presses sent by the EC.
         """
-        self.faft_client.system.run_shell_command("stop powerd")
+        powerd_running = self.faft_client.System.RunShellCommandCheckOutput(
+                'status powerd', 'start/running')
+        if powerd_running:
+            logging.debug('Stopping powerd')
+            self.faft_client.System.RunShellCommand("stop powerd")
 
     def _modify_usb_kernel(self, usb_dev, from_magic, to_magic):
         """Modify the kernel header magic in USB stick.
@@ -1306,42 +1316,56 @@ class FirmwareTest(FAFTBase):
         self._call_action(func, check_status=True)
         logging.info("-[FAFT]-[ end state_checker ]----------------")
 
-    def get_current_firmware_sha(self):
-        """Get current firmware sha of body and vblock.
+    def get_current_firmware_identity(self):
+        """Get current firmware sha and fwids of body and vblock.
 
-        @return: Current firmware sha follows the order (
-                 vblock_a_sha, body_a_sha, vblock_b_sha, body_b_sha)
+        @return: Current firmware checksums and fwids, as a dict
         """
-        current_firmware_sha = (self.faft_client.bios.get_sig_sha('a'),
-                                self.faft_client.bios.get_body_sha('a'),
-                                self.faft_client.bios.get_sig_sha('b'),
-                                self.faft_client.bios.get_body_sha('b'))
-        if not all(current_firmware_sha):
-            raise error.TestError('Failed to get firmware sha.')
-        return current_firmware_sha
+
+        # TODO(dgoyette): add a way to avoid hardcoding the keys (section names)
+        current_checksums = {
+            'VBOOTA': self.faft_client.Bios.GetSigSha('a'),
+            'FVMAINA': self.faft_client.Bios.GetBodySha('a'),
+            'VBOOTB': self.faft_client.Bios.GetSigSha('b'),
+            'FVMAINB': self.faft_client.Bios.GetBodySha('b'),
+        }
+        if not all(current_checksums.values()):
+            raise error.TestError(
+                    'Failed to get firmware sha: %s', current_checksums)
+
+        current_fwids = {
+            'RO_FRID': self.faft_client.Bios.GetSectionFwid('ro'),
+            'RW_FWID_A': self.faft_client.Bios.GetSectionFwid('a'),
+            'RW_FWID_B': self.faft_client.Bios.GetSectionFwid('b'),
+        }
+        if not all(current_fwids.values()):
+            raise error.TestError(
+                    'Failed to get firmware fwid(s): %s', current_fwids)
+
+        identifying_info = dict(current_fwids)
+        identifying_info.update(current_checksums)
+        return identifying_info
 
     def is_firmware_changed(self):
-        """Check if the current firmware changed, by comparing its SHA.
+        """Check if the current firmware changed, by comparing its SHA and fwid.
 
-        @return: True if it is changed, otherwise Flase.
+        @return: True if it is changed, otherwise False.
         """
         # Device may not be rebooted after test.
-        self.faft_client.bios.reload()
+        self.faft_client.Bios.Reload()
 
-        current_sha = self.get_current_firmware_sha()
+        current_info = self.get_current_firmware_identity()
+        prev_info = self._backup_firmware_identity
 
-        if current_sha == self._backup_firmware_sha:
+        if current_info == prev_info:
             return False
         else:
-            corrupt_VBOOTA = (current_sha[0] != self._backup_firmware_sha[0])
-            corrupt_FVMAIN = (current_sha[1] != self._backup_firmware_sha[1])
-            corrupt_VBOOTB = (current_sha[2] != self._backup_firmware_sha[2])
-            corrupt_FVMAINB = (current_sha[3] != self._backup_firmware_sha[3])
-            logging.info('Firmware changed:')
-            logging.info('VBOOTA is changed: %s', corrupt_VBOOTA)
-            logging.info('VBOOTB is changed: %s', corrupt_VBOOTB)
-            logging.info('FVMAIN is changed: %s', corrupt_FVMAIN)
-            logging.info('FVMAINB is changed: %s', corrupt_FVMAINB)
+            changed = set()
+            for section in set(current_info.keys()) | set(prev_info.keys()):
+                if current_info.get(section) != prev_info.get(section):
+                    changed.add(section)
+
+            logging.info('Firmware changed: %s', ', '.join(sorted(changed)))
             return True
 
     def backup_firmware(self, suffix='.original'):
@@ -1349,15 +1373,15 @@ class FirmwareTest(FAFTBase):
 
         @param suffix: a string appended to backup file name
         """
-        remote_temp_dir = self.faft_client.system.create_temp_dir()
+        remote_temp_dir = self.faft_client.System.CreateTempDir()
         remote_bios_path = os.path.join(remote_temp_dir, 'bios')
-        self.faft_client.bios.dump_whole(remote_bios_path)
+        self.faft_client.Bios.DumpWhole(remote_bios_path)
         self._client.get_file(remote_bios_path,
                               os.path.join(self.resultsdir, 'bios' + suffix))
 
         if self.faft_config.chrome_ec:
             remote_ec_path = os.path.join(remote_temp_dir, 'ec')
-            self.faft_client.ec.dump_whole(remote_ec_path)
+            self.faft_client.Ec.DumpWhole(remote_ec_path)
             self._client.get_file(remote_ec_path,
                               os.path.join(self.resultsdir, 'ec' + suffix))
 
@@ -1365,47 +1389,49 @@ class FirmwareTest(FAFTBase):
         logging.info('Backup firmware stored in %s with suffix %s',
             self.resultsdir, suffix)
 
-        self._backup_firmware_sha = self.get_current_firmware_sha()
+        self._backup_firmware_identity = self.get_current_firmware_identity()
 
     def is_firmware_saved(self):
         """Check if a firmware saved (called backup_firmware before).
 
-        @return: True if the firmware is backuped; otherwise False.
+        @return: True if the firmware is backed up; otherwise False.
         """
-        return self._backup_firmware_sha != ()
+        return bool(self._backup_firmware_identity)
 
     def clear_saved_firmware(self):
         """Clear the firmware saved by the method backup_firmware."""
-        self._backup_firmware_sha = ()
+        self._backup_firmware_identity = {}
 
     def restore_firmware(self, suffix='.original', restore_ec=True):
         """Restore firmware from host in resultsdir.
 
         @param suffix: a string appended to backup file name
         @param restore_ec: True to restore the ec firmware; False not to do.
+        @return: True if firmware needed to be restored
         """
         if not self.is_firmware_changed():
-            return
+            return False
 
         # Backup current corrupted firmware.
         self.backup_firmware(suffix='.corrupt')
 
         # Restore firmware.
-        remote_temp_dir = self.faft_client.system.create_temp_dir()
+        remote_temp_dir = self.faft_client.System.CreateTempDir()
         self._client.send_file(os.path.join(self.resultsdir, 'bios' + suffix),
                                os.path.join(remote_temp_dir, 'bios'))
 
-        self.faft_client.bios.write_whole(
+        self.faft_client.Bios.WriteWhole(
             os.path.join(remote_temp_dir, 'bios'))
 
         if self.faft_config.chrome_ec and restore_ec:
             self._client.send_file(os.path.join(self.resultsdir, 'ec' + suffix),
                 os.path.join(remote_temp_dir, 'ec'))
-            self.faft_client.ec.write_whole(
+            self.faft_client.Ec.WriteWhole(
                 os.path.join(remote_temp_dir, 'ec'))
 
         self.switcher.mode_aware_reboot()
-        logging.info('Successfully restore firmware.')
+        logging.info('Successfully restored firmware.')
+        return True
 
     def setup_firmwareupdate_shellball(self, shellball=None):
         """Setup a shellball to use in firmware update test.
@@ -1424,28 +1450,28 @@ class FirmwareTest(FAFTBase):
             if is_shellball:
                 logging.info('Device will update firmware with shellball %s',
                              shellball)
-                temp_path = self.faft_client.updater.get_temp_path()
+                temp_path = self.faft_client.Updater.GetTempPath()
                 working_shellball = os.path.join(temp_path,
                                                  'chromeos-firmwareupdate')
                 self._client.send_file(shellball, working_shellball)
-                self.faft_client.updater.extract_shellball()
+                self.faft_client.Updater.ExtractShellball()
             else:
                 raise error.TestFail(
                     'The given shellball is not a shell script.')
         else:
             logging.info('No shellball given, use the original shellball and '
                          'replace its BIOS and EC images.')
-            work_path = self.faft_client.updater.get_work_path()
+            work_path = self.faft_client.Updater.GetWorkPath()
             bios_in_work_path = os.path.join(
-                work_path, self.faft_client.updater.get_bios_relative_path())
+                work_path, self.faft_client.Updater.GetBiosRelativePath())
             ec_in_work_path = os.path.join(
-                work_path, self.faft_client.updater.get_ec_relative_path())
+                work_path, self.faft_client.Updater.GetEcRelativePath())
             logging.info('Writing current BIOS to: %s', bios_in_work_path)
-            self.faft_client.bios.dump_whole(bios_in_work_path)
+            self.faft_client.Bios.DumpWhole(bios_in_work_path)
             if self.faft_config.chrome_ec:
                 logging.info('Writing current EC to: %s', ec_in_work_path)
-                self.faft_client.ec.dump_firmware(ec_in_work_path)
-            self.faft_client.updater.repack_shellball()
+                self.faft_client.Ec.DumpFirmware(ec_in_work_path)
+            self.faft_client.Updater.RepackShellball()
 
     def is_kernel_changed(self):
         """Check if the current kernel is changed, by comparing its SHA1 hash.
@@ -1455,7 +1481,7 @@ class FirmwareTest(FAFTBase):
         changed = False
         for p in ('A', 'B'):
             backup_sha = self._backup_kernel_sha.get(p, None)
-            current_sha = self.faft_client.kernel.get_sha(p)
+            current_sha = self.faft_client.Kernel.GetSha(p)
             if backup_sha != current_sha:
                 changed = True
                 logging.info('Kernel %s is changed', p)
@@ -1466,14 +1492,14 @@ class FirmwareTest(FAFTBase):
 
         @param suffix: a string appended to backup file name.
         """
-        remote_temp_dir = self.faft_client.system.create_temp_dir()
+        remote_temp_dir = self.faft_client.System.CreateTempDir()
         for p in ('A', 'B'):
             remote_path = os.path.join(remote_temp_dir, 'kernel_%s' % p)
-            self.faft_client.kernel.dump(p, remote_path)
+            self.faft_client.Kernel.Dump(p, remote_path)
             self._client.get_file(
                     remote_path,
                     os.path.join(self.resultsdir, 'kernel_%s%s' % (p, suffix)))
-            self._backup_kernel_sha[p] = self.faft_client.kernel.get_sha(p)
+            self._backup_kernel_sha[p] = self.faft_client.Kernel.GetSha(p)
         logging.info('Backup kernel stored in %s with suffix %s',
             self.resultsdir, suffix)
 
@@ -1500,30 +1526,31 @@ class FirmwareTest(FAFTBase):
         self.backup_kernel(suffix='.corrupt')
 
         # Restore kernel.
-        remote_temp_dir = self.faft_client.system.create_temp_dir()
+        remote_temp_dir = self.faft_client.System.CreateTempDir()
         for p in ('A', 'B'):
             remote_path = os.path.join(remote_temp_dir, 'kernel_%s' % p)
             self._client.send_file(
                     os.path.join(self.resultsdir, 'kernel_%s%s' % (p, suffix)),
                     remote_path)
-            self.faft_client.kernel.write(p, remote_path)
+            self.faft_client.Kernel.Write(p, remote_path)
 
         self.switcher.mode_aware_reboot()
         logging.info('Successfully restored kernel.')
 
     def backup_cgpt_attributes(self):
         """Backup CGPT partition table attributes."""
-        self._backup_cgpt_attr = self.faft_client.cgpt.get_attributes()
+        self._backup_cgpt_attr = self.faft_client.Cgpt.GetAttributes()
 
     def restore_cgpt_attributes(self):
         """Restore CGPT partition table attributes."""
-        current_table = self.faft_client.cgpt.get_attributes()
+        current_table = self.faft_client.Cgpt.GetAttributes()
         if current_table == self._backup_cgpt_attr:
             return
         logging.info('CGPT table is changed. Original: %r. Current: %r.',
                      self._backup_cgpt_attr,
                      current_table)
-        self.faft_client.cgpt.set_attributes(self._backup_cgpt_attr)
+        self.faft_client.Cgpt.SetAttributes(
+                self._backup_cgpt_attr['A'], self._backup_cgpt_attr['B'])
 
         self.switcher.mode_aware_reboot()
         logging.info('Successfully restored CGPT table.')
@@ -1538,10 +1565,138 @@ class FirmwareTest(FAFTBase):
                       fwb_tries(vb1)/fw_try_next(vb2)
         """
         if self.fw_vboot2:
-            self.faft_client.system.set_fw_try_next('B', count)
+            self.faft_client.System.SetFwTryNext('B', count)
         else:
             # vboot1: we need to boot into fwb at least once
             if not count:
                 count = count + 1
-            self.faft_client.system.set_try_fw_b(count)
+            self.faft_client.System.SetTryFwB(count)
 
+    def identify_shellball(self, include_ec=None):
+        """Get the FWIDs of all targets and sections in the shellball
+
+        @param include_ec: if True, get EC fwids.
+                           If None (default), assume True if board has an EC
+        @return: the dict of versions in the shellball
+        """
+        fwids = dict()
+        fwids['bios'] = self.faft_client.Updater.GetAllFwids('bios')
+
+        if include_ec is None:
+            if self.faft_config.platform == 'Samus':
+                include_ec = False  # no ec.bin in shellball
+            else:
+                include_ec = self.faft_config.chrome_ec
+
+        if include_ec:
+            fwids['ec'] = self.faft_client.Updater.GetAllFwids('ec')
+        return fwids
+
+    def modify_shellball(self, append, modify_ro=True, modify_ec=False):
+        """Modify the FWIDs of targets and sections in the shellball
+
+        @return: the full path of the shellball
+        """
+
+        if modify_ro:
+            self.faft_client.Updater.ModifyFwids('bios', ['ro', 'a', 'b'])
+        else:
+            self.faft_client.Updater.ModifyFwids('bios', ['a', 'b'])
+
+        if modify_ec:
+            if modify_ro:
+                self.faft_client.Updater.ModifyFwids('ec', ['ro', 'rw'])
+            else:
+                self.faft_client.Updater.ModifyFwids('ec', ['rw'])
+
+        modded_shellball = self.faft_client.Updater.RepackShellball(append)
+
+        return modded_shellball
+
+    @staticmethod
+    def check_fwids_written(before_fwids, image_fwids, after_fwids,
+                            expected_written):
+        """Check the dicts of fwids for correctness after an update is applied.
+
+        The targets checked come from the keys of expected_written.
+        The sections checked come from the inner dicts of the fwids parameters.
+
+        The fwids should be keyed by target (flash type), then by section:
+        {'bios': {'ro': '<fwid>', 'a': '<fwid>', 'b': '<fwid>'},
+         'ec': {'ro': '<fwid>', 'rw': '<fwid>'}
+
+        For expected_written, the dict should be keyed by flash type only:
+        {'bios': ['ro'], 'ec': ['ro', 'rw']}
+
+        @param before_fwids: dict of versions from before the update
+        @param image_fwids: dict of versions in the update
+        @param after_fwids: dict of actual versions after the update
+        @param expected_written: dict indicating which ones should have changed
+        @return: list of error lines for mismatches
+
+        @type before_fwids: dict
+        @type image_fwids: dict
+        @type after_fwids: dict
+        @type expected_written: dict
+        @rtype: list
+        """
+        errors = []
+
+        for target in sorted(expected_written.keys()):
+            # target is BIOS or EC
+
+            before_missing = (target not in before_fwids)
+            after_missing = (target not in after_fwids)
+            if before_missing or after_missing:
+                if before_missing:
+                    errors.append("...no before_fwids[%s]" % target)
+                if after_missing:
+                    errors.append("...no after_fwids[%s]" % target)
+                continue
+
+            written_sections = expected_written.get(target) or list()
+            written_sections = set(written_sections)
+
+            before_sections = set(before_fwids.get(target) or dict())
+            image_sections = set(image_fwids.get(target) or dict())
+            after_sections = set(after_fwids.get(target) or dict())
+
+            for section in before_sections | image_sections | after_sections:
+                # section is RO, RW, A, or B
+
+                before_fwid = before_fwids[target][section]
+                image_fwid = image_fwids[target][section]
+                actual_fwid = after_fwids[target][section]
+
+                if section in written_sections:
+                    expected_fwid = image_fwid
+                    expected_desc = 'rewritten fwid (%s)' % expected_fwid
+                    if image_fwid == before_fwid:
+                        expected_desc = ('rewritten (no changes) fwid (%s)' %
+                                         expected_fwid)
+                else:
+                    expected_fwid = before_fwid
+                    expected_desc = 'original fwid (%s)' % expected_fwid
+
+                if actual_fwid == expected_fwid:
+                    actual_desc = 'correct value'
+
+                elif actual_fwid == image_fwid:
+                    actual_desc = 'rewritten fwid (%s)' % actual_fwid
+                    if image_fwid == before_fwid:
+                        # The flash could have been rewritten with the same fwid
+                        actual_desc = 'possibly written fwid (%s)' % actual_fwid
+
+                elif actual_fwid == before_fwid:
+                    actual_desc = 'original fwid (%s)' % actual_fwid
+
+                else:
+                    actual_desc = 'unknown fwid (%s)' % actual_fwid
+
+                msg = ("...FWID (%s %s): expected %s, got %s" %
+                       (target.upper(), section.upper(),
+                        expected_desc, actual_desc))
+
+                if actual_fwid != expected_fwid:
+                    errors.append(msg)
+        return errors

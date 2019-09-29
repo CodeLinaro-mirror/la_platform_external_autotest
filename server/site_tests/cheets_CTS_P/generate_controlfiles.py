@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -63,6 +63,9 @@ _CONTROLFILE_TEMPLATE = Template(
     {%- if max_retries != None %}
             max_retry={{max_retries}},
     {%- endif %}
+    {%- if enable_default_apps %}
+            enable_default_apps=True,
+    {%- endif %}
             needs_push_media={{needs_push_media}},
             tag='{{tag}}',
             test_name='{{name}}',
@@ -98,13 +101,9 @@ _COLLECT = 'tradefed-run-collect-tests-only-internal'
 _PUBLIC_COLLECT = 'tradefed-run-collect-tests-only'
 _CTS_QUAL_RETRIES = 9
 _CTS_MAX_RETRIES = {
-    # TODO(ihf): Remove all once Nocturne stable.
-    'CtsAccessibilityServiceTestCases':  12,
-    'CtsActivityManagerDeviceTestCases': 12,
-    'CtsDeqpTestCases':   _CTS_QUAL_RETRIES,
-    'CtsGraphicsTestCases':              12,
-    'CtsIncidentHostTestCases':          12,
-    'CtsSensorTestCases':                30,  # TODO(ihf): Lower this once flakes are fixed.
+    'CtsDeqpTestCases':         15,  # TODO(b/126787654)
+    'CtsIncidentHostTestCases': 30,  # TODO(b/128695132)
+    'CtsSensorTestCases':       30,  # TODO(b/124528412)
 }
 
 # TODO(ihf): Update timeouts once P is more stable.
@@ -135,6 +134,7 @@ _CTS_TIMEOUT = {
     'CtsSensorTestCases':                3.0,  # TODO(ihf): Remove once Nocturne stable.
     'CtsShortcutHostTestCases':          1.5,
     'CtsThemeHostTestCases':             6.0,
+    'CtsVideoTestCases':                 1.5,
     'CtsWidgetTestCases':                2.0,
     'vm-tests-tf':                       2.0,
     # Without media kevin runs 40h. :-(
@@ -177,8 +177,7 @@ _QUAL_BOOKMARKS = sorted([
 ])
 
 _SMOKE = [
-    'CtsAccountManagerTestCases',
-    'CtsAdminTestCases',
+    'CtsUsbTests',
 ]
 
 _BVT_ARC = [
@@ -206,6 +205,12 @@ _BVT_PERBUILD = [
     'CtsVoiceSettingsTestCases',
 ]
 
+_HARDWARE_DEPENDENT_MODULES = [
+    'CtsSensorTestCases',
+    'CtsCameraTestCases',
+    'CtsBluetoothTestCases',
+]
+
 # The suite is divided based on the run-time hint in the *.config file.
 VMTEST_INFO_SUITES = collections.OrderedDict()
 # This is the default suite for all the modules that are not specified below.
@@ -225,6 +230,11 @@ _MEDIA_MODULES = [
     'CtsMediaBitstreamsTestCases',
 ]
 _NEEDS_PUSH_MEDIA = _MEDIA_MODULES + [_ALL]
+
+# Modules that are known to need the default apps of Chrome (eg. Files.app).
+_ENABLE_DEFAULT_APPS = [
+    'CtsAppSecurityHostTestCases',
+]
 
 # Run `eject` for (and only for) each device with RM=1 in lsblk output.
 _EJECT_REMOVABLE_DISK_COMMAND = (
@@ -326,6 +336,7 @@ _DISABLE_LOGCAT_ON_FAILURE = set([
     'CtsDeqpTestCases.dEQP-GLES3',
     'CtsDeqpTestCases.dEQP-GLES31',
     'CtsDeqpTestCases.dEQP-VK',
+    'CtsLibcoreTestCases',
 ])
 
 _EXTRA_MODULES = {
@@ -371,6 +382,12 @@ _PUBLIC_EXTRA_MODULES = {
         'CtsDeqpTestCases.dEQP-VK.spirv_assembly',
         'CtsDeqpTestCases.dEQP-VK.ssbo',
         'CtsDeqpTestCases.dEQP-VK.subgroups',
+        'CtsDeqpTestCases.dEQP-VK.subgroups.b',
+        'CtsDeqpTestCases.dEQP-VK.subgroups.s',
+        'CtsDeqpTestCases.dEQP-VK.subgroups.vote',
+        'CtsDeqpTestCases.dEQP-VK.subgroups.arithmetic',
+        'CtsDeqpTestCases.dEQP-VK.subgroups.clustered',
+        'CtsDeqpTestCases.dEQP-VK.subgroups.quad',
         'CtsDeqpTestCases.dEQP-VK.synchronization',
         'CtsDeqpTestCases.dEQP-VK.tessellation',
         'CtsDeqpTestCases.dEQP-VK.texture',
@@ -378,6 +395,15 @@ _PUBLIC_EXTRA_MODULES = {
         'CtsDeqpTestCases.dEQP-VK.wsi',
         'CtsDeqpTestCases.dEQP-VK.ycbcr'
     ]
+}
+# TODO(haddowk,kinaba): Hack for b/138622686. Clean up later.
+_EXTRA_SUBMODULE_OVERRIDE = {
+    'x86': {
+         'CtsDeqpTestCases.dEQP-VK.subgroups.arithmetic': [
+             'CtsDeqpTestCases.dEQP-VK.subgroups.arithmetic.32',
+             'CtsDeqpTestCases.dEQP-VK.subgroups.arithmetic.64',
+         ]
+    }
 }
 
 _EXTRA_COMMANDLINE = {
@@ -500,6 +526,43 @@ _EXTRA_COMMANDLINE = {
     'CtsDeqpTestCases.dEQP-VK.subgroups': [
         '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
         '--test', 'dEQP-VK.subgroups.*'
+    ],
+    # Splitting VK.subgroups to smaller pieces to workaround b/138622686.
+    # TODO(kinaba,haddowk): remove them once the root cause is fixed, or
+    # reconsider the sharding strategy.
+    'CtsDeqpTestCases.dEQP-VK.subgroups.b': [
+        '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
+        '--test', 'dEQP-VK.subgroups.b*'
+    ],
+    'CtsDeqpTestCases.dEQP-VK.subgroups.s': [
+        '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
+        '--test', 'dEQP-VK.subgroups.s*'
+    ],
+    'CtsDeqpTestCases.dEQP-VK.subgroups.vote': [
+        '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
+        '--test', 'dEQP-VK.subgroups.vote#*'
+    ],
+    'CtsDeqpTestCases.dEQP-VK.subgroups.arithmetic': [
+        '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
+        '--test', 'dEQP-VK.subgroups.arithmetic#*'
+    ],
+    # TODO(haddowk,kinaba): Hack for b/138622686. Clean up later.
+    'CtsDeqpTestCases.dEQP-VK.subgroups.arithmetic.32': [
+        '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
+        '--test', 'dEQP-VK.subgroups.arithmetic#*', '--abi', 'x86'
+    ],
+    # TODO(haddowk,kinaba): Hack for b/138622686. Clean up later.
+    'CtsDeqpTestCases.dEQP-VK.subgroups.arithmetic.64': [
+        '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
+        '--test', 'dEQP-VK.subgroups.arithmetic#*', '--abi', 'x86_64'
+    ],
+    'CtsDeqpTestCases.dEQP-VK.subgroups.clustered': [
+        '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
+        '--test', 'dEQP-VK.subgroups.clustered#*'
+    ],
+    'CtsDeqpTestCases.dEQP-VK.subgroups.quad': [
+        '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
+        '--test', 'dEQP-VK.subgroups.quad#*'
     ],
     'CtsDeqpTestCases.dEQP-VK.synchronization': [
         '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
@@ -680,8 +743,9 @@ def get_suites(modules, abi, is_public):
         return ['suite:cts_P']
 
     # As this is not called for the "all" runs we can safely assume that each
-    # module runs in suite:arc-cts.
-    suites = ['suite:arc-cts']
+    # module runs in suite:arc-cts on boards, and each module runs in
+    # suite:arc-cts-unibuild on selected models.
+    suites = ['suite:arc-cts', 'suite:arc-cts-unibuild']
     for module in modules:
         if module in get_collect_modules(is_public):
             # We collect all tests both in arc-cts and arc-cts-qual as both have
@@ -690,9 +754,12 @@ def get_suites(modules, abi, is_public):
         if module in _EXTRA_ATTRIBUTES:
             # Special cases come with their own suite definitions.
             suites += _EXTRA_ATTRIBUTES[module]
-        if module in _SMOKE:
+        if module in _SMOKE and abi == 'arm':
             # Handle VMTest by adding a few jobs to suite:smoke.
             suites += ['suite:smoke']
+        if module in _HARDWARE_DEPENDENT_MODULES:
+            # CTS modules to be run on all unibuild models.
+            suites += ['suite:arc-cts-unibuild-hw']
         if module not in get_collect_modules(is_public) and abi == 'x86':
             # Handle a special builder for running all of CTS in a betty VM.
             # TODO(ihf): figure out if this builder is still alive/needed.
@@ -961,23 +1028,32 @@ def get_retry_template(modules, is_public):
     return get_run_template(modules, is_public, retry=True)
 
 
-def get_extra_modules_dict(is_public):
+def get_extra_modules_dict(is_public, abi):
     if is_public:
+        if abi in _EXTRA_SUBMODULE_OVERRIDE:
+            new_dict  = dict()
+            for module, submodules in _PUBLIC_EXTRA_MODULES.items():
+                submodules = submodules[:]
+                for old, news in _EXTRA_SUBMODULE_OVERRIDE[abi].items():
+                    submodules.remove(old)
+                    submodules.extend(news)
+                new_dict[module] = submodules
+            return new_dict
         return _PUBLIC_EXTRA_MODULES
     return _EXTRA_MODULES
 
 
-def get_extra_modules(is_public):
-    extra_modules_dict = get_extra_modules_dict(is_public)
+def get_extra_modules(is_public, abi):
+    extra_modules_dict = get_extra_modules_dict(is_public, abi)
     modules = []
     for _, extra_modules in extra_modules_dict.items():
         modules += extra_modules
     return set(modules)
 
 
-def get_modules_to_remove(is_public):
+def get_modules_to_remove(is_public, abi):
     if is_public:
-        return get_extra_modules_dict(is_public).keys()
+        return get_extra_modules_dict(is_public, abi).keys()
     return []
 
 
@@ -1019,6 +1095,13 @@ def needs_push_media(modules):
     return False
 
 
+def enable_default_apps(modules):
+    """Oracle to determine if to enable default apps (eg. Files.app)."""
+    if modules.intersection(set(_ENABLE_DEFAULT_APPS)):
+        return True
+    return False
+
+
 def get_controlfile_content(combined,
                             modules,
                             abi,
@@ -1050,7 +1133,7 @@ def get_controlfile_content(combined,
     target_module = None
     if combined not in get_collect_modules(is_public):
         target_module = combined
-    for target, m in get_extra_modules_dict(is_public).items():
+    for target, m in get_extra_modules_dict(is_public, abi).items():
         if combined in m:
             target_module = target
     return _CONTROLFILE_TEMPLATE.render(
@@ -1067,6 +1150,7 @@ def get_controlfile_content(combined,
         build=build,
         abi=abi,
         needs_push_media=needs_push_media(modules),
+        enable_default_apps=enable_default_apps(modules),
         tag=tag,
         uri=uri,
         DOC=get_doc(modules, abi, is_public),
@@ -1083,7 +1167,7 @@ def get_controlfile_content(combined,
         camera_facing=camera_facing)
 
 
-def get_tradefed_data(path, is_public):
+def get_tradefed_data(path, is_public, abi):
     """Queries tradefed to provide us with a list of modules.
 
     Notice that the parsing gets broken at times with major new CTS drops.
@@ -1122,7 +1206,7 @@ def get_tradefed_data(path, is_public):
             logging.warning('Ignoring "%s"', line)
     p.kill()
     p.wait()
-    for module in get_modules_to_remove(is_public):
+    for module in get_modules_to_remove(is_public, abi):
         modules.remove(module)
     return modules, build, revision
 
@@ -1342,7 +1426,7 @@ def write_extra_deqp_controlfiles(_modules, abi, revision, build, uri,
     This is used in particular by moblab to load balance. A similar approach
     was also used during bringup of grunt to split media tests.
     """
-    submodules = get_extra_modules_dict(is_public)['CtsDeqpTestCases']
+    submodules = get_extra_modules_dict(is_public, abi)['CtsDeqpTestCases']
     suites = ['suite:arc-cts-deqp', 'suite:graphics_per-day']
     if is_public:
         suites = ['suite:cts_P']
@@ -1379,7 +1463,7 @@ def main(uris, is_public):
             bundle = os.path.join(tmp, os.path.basename(uri))
             logging.info('Extracting %s.', bundle)
             unzip(bundle, tmp)
-            modules, build, revision = get_tradefed_data(tmp, is_public)
+            modules, build, revision = get_tradefed_data(tmp, is_public, abi)
             if not revision:
                 raise Exception('Could not determine revision.')
 

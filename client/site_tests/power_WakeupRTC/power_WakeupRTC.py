@@ -10,13 +10,13 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros import rtc
 from autotest_lib.client.cros.power import sys_power
 
-
 def read_rtc_wakeup(rtc_device):
     """
-    Read the wakeup setting for the RTC device.
+    Read the wakeup setting for for the RTC device.
     """
     sysfs_path = '/sys/class/rtc/%s/device/power/wakeup' % rtc_device
-    return file(sysfs_path).read().strip()
+    if os.path.isfile(sysfs_path):
+        return file(sysfs_path).read().strip()
 
 
 def read_rtc_wakeup_active_count(rtc_device):
@@ -42,14 +42,23 @@ class power_WakeupRTC(test.test):
 
     def run_once(self):
         """
-        Tests that RTC device generates wakeup events.
-        /dev/rtc device should be adequate for anything that wants
-        to schedule a wakeup.
+        Tests that RTC devices generate wakeup events.
+        We require /dev/rtc0 to work since there are many things which rely
+        on the rtc0 wakeup alarm. For all the other RTCs, only test those
+        that have wakeup alarm capabilities.
         """
-        dev_rtc = "/dev/rtc"
-        if not os.path.exists(dev_rtc):
-            raise error.TestFail('RTC device %s does not exist' % dev_rtc)
-        self.run_once_rtc(os.readlink(dev_rtc))
+        default_rtc = "/dev/rtc0"
+        if not os.path.exists(default_rtc):
+            raise error.TestFail('RTC device %s does not exist' % default_rtc)
+        default_rtc_device = os.path.basename(default_rtc)
+        if read_rtc_wakeup(default_rtc_device) != 'enabled':
+            raise error.TestFail('RTC wakeup is not enabled: %s' % default_rtc_device)
+        for rtc_device in rtc.get_rtc_devices():
+            if read_rtc_wakeup(rtc_device) != 'enabled':
+                logging.info('RTC wakeup is not enabled: %s' % rtc_device)
+            else:
+                logging.info('RTC wakeup is enabled for: %s' % rtc_device)
+                self.run_once_rtc(rtc_device)
 
     def run_once_rtc(self, rtc_device):
         """Tests that a RTC device generate wakeup events.
@@ -57,11 +66,6 @@ class power_WakeupRTC(test.test):
         @param rtc_device: RTC device to be tested.
         """
         logging.info('testing rtc device %s', rtc_device)
-
-        # Test that RTC wakeup is enabled
-        rtc_wakeup = read_rtc_wakeup(rtc_device)
-        if rtc_wakeup != 'enabled':
-            raise error.TestError('RTC wakeup is not enabled: %s' % rtc_device)
 
         # Test that RTC can generate wake events
         old_sys_wakeup_count = sys_power.read_wakeup_count()
