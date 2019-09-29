@@ -104,7 +104,13 @@ class _PowerStateController(object):
         Generally, this causes the board to restart.
 
         """
-        self._servo.set_get_all(['warm_reset:on',
+        # TODO: warm_reset support has added to power_state.py. Once it
+        # available to labstation remove fallback method.
+        try:
+            self._servo.set_nocheck('power_state', 'warm_reset')
+        except error.TestFail as err:
+            logging.info("Fallback to warm_reset control method")
+            self._servo.set_get_all(['warm_reset:on',
                                  'sleep:%.4f' % self._RESET_HOLD_TIME,
                                  'warm_reset:off'])
 
@@ -157,23 +163,33 @@ class _Uart(object):
         @param uart:  The UART name to start/stop capturing.
         @param start:  True to start capturing, otherwise stop.
 
-        @returns True if the operation completes successfully. False if the UART
-                 capturing is not supported or failed due to an error.
+        @returns True if the operation completes successfully.
+                 False if the UART capturing is not supported or failed due to
+                 an error.
         """
         logging.debug('%s capturing %s UART.', 'Start' if start else 'Stop',
                       uart)
-        try:
-            self._servo.set('%s_uart_capture' % uart,
-                            'on' if start else 'off')
-        except error.TestFail as err:
-            if 'No control named' in str(err):
-                logging.debug("The servod doesn't support %s_uart_capture.",
-                              uart)
+        uart_cmd = '%s_uart_capture' % uart
+        target_level = 'on' if start else 'off'
+        level = None
+        if self._servo.has_control(uart_cmd):
+            # Do our own implementation of set() here as not_applicable
+            # should also count as a valid control.
+            logging.debug('Trying to set %s to %s.', uart_cmd, target_level)
+            try:
+                self._servo.set_nocheck(uart_cmd, target_level)
+                level = self._servo.get(uart_cmd)
+            except error.TestFail as e:
+                # Any sort of test failure here should not stop the test. This
+                # is just to capture more output. Log and move on.
+                logging.warning('Failed to set %s to %s. %s. Ignoring.',
+                                uart_cmd, target_level, str(e))
+            if level == target_level:
+              logging.debug('Managed to set %s to %s.', uart_cmd, level)
             else:
-                logging.debug("Can't caputre UART for %s: %s", uart, err)
-            return False
-
-        return True
+              logging.debug('Failed to set %s to %s. Got %s.', uart_cmd,
+                            target_level, level)
+        return level == target_level
 
     def start_capture(self):
         """Start capturing UART streams."""
@@ -195,11 +211,19 @@ class _Uart(object):
                 logging.warn('Failed to get UART log for %s: %s', stream, err)
                 continue
 
+            if content == 'not_applicable':
+                logging.warn('%s is not applicable', stream)
+                continue
+
             # The UART stream may contain non-printable characters, and servo
             # returns it in string representation. We use `ast.leteral_eval`
             # to revert it back.
             with open(logfile_fullname, 'a') as fd:
-                fd.write(ast.literal_eval(content))
+                try:
+                    fd.write(ast.literal_eval(content))
+                except ValueError:
+                    logging.exception('Invalid value for %s: %r', stream,
+                                      content)
 
     def stop_capture(self):
         """Stop capturing UART streams."""
@@ -345,19 +369,14 @@ class Servo(object):
             self._power_state.reset()
         logging.debug('Servo initialized, version is %s',
                       self._server.get_version())
-        try:
+        if self.has_control('init_keyboard'):
+            # This indicates the servod version does not
+            # have explicit keyboard initialization yet.
+            # Ignore this.
             # TODO(coconutruben): change this back to set() about a month
             # after crrev.com/c/1586239 has been merged (or whenever that
             # logic is in the labstation images).
             self.set_nocheck('init_keyboard','on')
-        except error.TestFail as err:
-            if 'No control named' in str(err):
-                # This indicates the servod version does not
-                # have explicit keyboard initialization yet.
-                # Ignore this.
-                pass
-            else:
-                raise err
 
 
     def is_localhost(self):
@@ -802,19 +821,14 @@ class Servo(object):
         # to do to the device after hotplug.  To avoid surprises,
         # force the DUT to be off.
         self._server.hwinit()
-        try:
+        if self.has_control('init_keyboard'):
+            # This indicates the servod version does not
+            # have explicit keyboard initialization yet.
+            # Ignore this.
             # TODO(coconutruben): change this back to set() about a month
             # after crrev.com/c/1586239 has been merged (or whenever that
             # logic is in the labstation images).
             self.set_nocheck('init_keyboard','on')
-        except error.TestFail as err:
-            if 'No control named' in str(err):
-                # This indicates the servod version does not
-                # have explicit keyboard initialization yet.
-                # Ignore this.
-                pass
-            else:
-                raise err
         self._power_state.power_off()
 
         if image_path:
@@ -907,13 +921,27 @@ class Servo(object):
                                     args=args).stdout.strip()
 
 
-    def get_servo_version(self):
+    def get_servo_version(self, active=False):
         """Get the version of the servo, e.g., servo_v2 or servo_v3.
 
+        @param active: Only return the servo type with the active device.
         @return: The version of the servo.
 
         """
-        return self._server.get_version()
+        servo_type = self._server.get_version()
+        if '_and_' not in servo_type or not active:
+            return servo_type
+
+        # If servo v4 is using ccd and servo micro, modify the servo type to
+        # reflect the active device.
+        active_device = self.get('active_v4_device')
+        if active_device in servo_type:
+            logging.info('%s is active', active_device)
+            return 'servo_v4_with_' + active_device
+
+        logging.warn("%s is active even though it's not in servo type",
+                     active_device)
+        return servo_type
 
 
     def running_through_ccd(self):
@@ -993,7 +1021,10 @@ class Servo(object):
 
         @raise: TestError if cannot extract firmware from the tarball.
         """
-        dest_dir = os.path.dirname(tarball_path)
+        dest_dir = os.path.join(os.path.dirname(tarball_path), firmware_name)
+        # Create the firmware_name subdirectory if it doesn't exist.
+        if not os.path.exists(dest_dir):
+            os.mkdir(dest_dir)
         image = _extract_image_from_tarball(tarball_path, dest_dir,
                                             image_candidates)
         if not image:
@@ -1140,6 +1171,35 @@ class Servo(object):
                 logging.debug('Already in the role: %s.', role)
         else:
             logging.debug('Not a servo v4, unable to set role to %s.', role)
+
+
+    def set_servo_v4_dts_mode(self, state):
+        """Set servo v4 dts mode to off or on.
+
+        It does nothing if not a servo v4. Disable the ccd watchdog if we're
+        disabling dts mode. CCD will disconnect. The watchdog only allows CCD
+        to disconnect for 10 seconds until it kills servod. Disable the
+        watchdog, so CCD can stay disconnected indefinitely.
+
+        @param state: Set servo v4 dts mode 'off' or 'on'.
+        """
+        servo_version = self.get_servo_version()
+        if not servo_version.startswith('servo_v4'):
+            logging.debug('Not a servo v4, unable to set dts mode %s.', state)
+            return
+
+        # TODO(mruthven): remove watchdog check once the labstation has been
+        # updated to have support for modifying the watchdog.
+        set_watchdog = self.has_control('watchdog') and 'ccd' in servo_version
+        enable_watchdog = state == 'on'
+
+        if set_watchdog and not enable_watchdog:
+            self.set_nocheck('watchdog_remove', 'ccd')
+
+        self.set_nocheck('servo_v4_dts_mode', state)
+
+        if set_watchdog and enable_watchdog:
+            self.set_nocheck('watchdog_add', 'ccd')
 
 
     @property

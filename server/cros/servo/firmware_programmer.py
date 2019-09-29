@@ -131,14 +131,19 @@ class FlashromProgrammer(_BaseProgrammer):
         super(FlashromProgrammer, self).__init__(servo, ['flashrom',])
         self._keep_ro = keep_ro
         self._fw_path = None
-        self._tmp_path = '/tmp'
+        self.init_section_paths('/tmp')
+        self._servo_version = self._servo.get_servo_version(active=True)
+        self._servo_serials = self._servo._server.get_servo_serials()
+
+
+    def init_section_paths(self, tmp_path):
+        """Update section paths to use the tmp directory"""
+        self._tmp_path = tmp_path
         self._fw_main = os.path.join(self._tmp_path, 'fw_main')
         self._wp_ro = os.path.join(self._tmp_path, 'wp_ro')
         self._ro_vpd = os.path.join(self._tmp_path, 'ro_vpd')
         self._rw_vpd = os.path.join(self._tmp_path, 'rw_vpd')
         self._gbb = os.path.join(self._tmp_path, 'gbb')
-        self._servo_version = self._servo.get_servo_version()
-        self._servo_serials = self._servo._server.get_servo_serials()
 
 
     def program(self):
@@ -160,6 +165,7 @@ class FlashromProgrammer(_BaseProgrammer):
             servo_v3_programmer = 'linux_spi'
             servo_v4_with_micro_programmer = 'raiden_debug_spi'
             servo_v4_with_ccd_programmer = 'raiden_debug_spi:target=AP'
+
             if self._servo_version == 'servo_v2':
                 programmer = servo_v2_programmer
                 servo_serial = self._servo_serials.get('main')
@@ -183,8 +189,8 @@ class FlashromProgrammer(_BaseProgrammer):
             # Save needed sections from current firmware
             for section in preserved_sections + gbb_section:
                 self._servo_host.run(' '.join([
-                    'flashrom', '-V', '-p', programmer,
-                    '-r', self._fw_main, '-i', '%s:%s' % section]),
+                    'flashrom', '-V', '-p', programmer, '-r',
+                    '-i', '%s:%s' % section]),
                     timeout=FIRMWARE_PROGRAM_TIMEOUT_SEC)
 
             # Pack the saved VPD into new firmware
@@ -227,6 +233,12 @@ class FlashromProgrammer(_BaseProgrammer):
         @param path: a string, name of the file containing the firmware image.
         """
         self._fw_path = path
+        self.init_section_paths(os.path.dirname(path))
+
+        # If servo is running with servo v4, there may be two programming
+        # devices. Determine the programmer based on the active one.
+        self._servo_version = self._servo.get_servo_version(active=True)
+
         # CCD takes care holding AP/EC. Don't need the following steps.
         if self._servo_version != 'servo_v4_with_ccd_cr50':
             faft_config = FAFTConfig(self._servo.get_board())
@@ -269,6 +281,10 @@ class FlashECProgrammer(_BaseProgrammer):
         """
         if self._ec_chip is None:
             self._ec_chip = self._servo.get('ec_chip')
+
+        # If servo is running with servo v4, there may be two programming
+        # devices. Determine the programmer based on the active one.
+        self._servo_version = self._servo.get_servo_version(active=True)
 
         # Get the port of servod. flash_ec may use it to talk to servod.
         port = self._servo._servo_host.servo_port

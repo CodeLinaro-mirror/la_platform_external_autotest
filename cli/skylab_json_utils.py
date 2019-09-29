@@ -1,21 +1,34 @@
 from __future__ import unicode_literals
 
-# NOTE: send bvt to BVT
-#       send everything else to SUITES
-#
-# This decision has to be made on a pool by pool basis.
-
+# Source of truth is DUTPool enum at
+# https://cs.chromium.org/chromium/infra/go/src/infra/libs/skylab/inventory/device.proto
 MANAGED_POOLS = {
+    "cq": "DUT_POOL_CQ",
     "bvt": "DUT_POOL_BVT",
     "suites": "DUT_POOL_SUITES",
     "cts": "DUT_POOL_CTS",
+    "cts-perbuild": "DUT_POOL_CTS_PERBUILD",
+    "continuous": "DUT_POOL_CONTINUOUS",
+    "arc-presubmit": "DUT_POOL_ARC_PRESUBMIT",
+    "quota": "DUT_POOL_QUOTA",
 }
 
-UNMANAGED_POOLS = {
-    "labstation_main",
-    "lab_automation",
-    "wificell",
+
+VIDEO_ACCELERATION_WHITELIST = {
+    "VIDEO_ACCELERATION_H264",
+    "VIDEO_ACCELERATION_ENC_H264",
+    "VIDEO_ACCELERATION_VP8",
+    "VIDEO_ACCELERATION_ENC_VP8",
+    "VIDEO_ACCELERATION_VP9",
+    "VIDEO_ACCELERATION_ENC_VP9",
+    "VIDEO_ACCELERATION_VP9_2",
+    "VIDEO_ACCELERATION_ENC_VP9_2",
+    "VIDEO_ACCELERATION_H265",
+    "VIDEO_ACCELERATION_ENC_H265",
+    "VIDEO_ACCELERATION_MJPG",
+    "VIDEO_ACCELERATION_ENC_MJPG",
 }
+
 
 
 def _normalize_pools(l):
@@ -27,16 +40,29 @@ def _normalize_pools(l):
         if pool in MANAGED_POOLS:
             # convert name to prototype enum for skylab-managed pools
             out["criticalPools"].append(MANAGED_POOLS[pool])
-        elif pool in UNMANAGED_POOLS:
+        else:
             # for unmanaged pools preserve the name
             out["self_serve_pools"].append(pool)
-        else:
-            raise ValueError("pool '%s' is not recognized" % pool)
     #TODO(gregorynisbet): reject empty pools too.
-    if len(out["criticalPools"]) + len(out["self_serve_pools"]) > 1:
-        raise ValueError("multiple pools %s" % pools)
+    if len(out["criticalPools"]) > 1:
+        raise ValueError("multiple critical pools %s" % pools)
     return out
 
+
+def _get_chameleon(l):
+    out = l.get_enum("chameleon", prefix="CHAMELEON_TYPE_")
+    # send CHAMELEON_TYPE_['HDMI'] -> CHAMELEON_TYPE_HDMI
+    out = "".join(ch for ch in out if ch not in "[']")
+    if out == "CHAMELEON_TYPE_":
+        return None
+    good_val = False
+    for ch in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMOPQRSTUVWXYZ0123456789":
+        if out.startswith("CHAMELEON_TYPE_" + ch):
+            good_val = True
+    if good_val:
+        return out
+    else:
+        return None
 
 
 EC_TYPE_ATEST_TO_SK = {
@@ -136,6 +162,14 @@ def _cts_abi(l):
     return out
 
 
+def _cts_cpu(l):
+    out = []
+    for abi in ["cts_cpu_x86", "cts_cpu_arm"]:
+        if l.get_bool(abi):
+            out.append(abi.upper())
+    return out
+
+
 def _os_type(l):
     """Get the operating system type"""
     return l.get_enum("os", prefix="OS_TYPE_")
@@ -152,10 +186,13 @@ def _video_acceleration(l):
     to the video_acc_ keys in the atest format
     """
     out = []
-    for key in l.bool_keys_starting_with("video_acc"):
-        _, delim, suffix = key.rpartition("video_acc_")
-        assert delim == "video_acc_"
-        out.append("VIDEO_ACCELERATION" + _ + suffix.upper())
+    for prefix in ["video_acc", "hw_video_acc"]:
+        for key in l.bool_keys_starting_with(prefix=prefix):
+            _, delim, suffix = key.rpartition("video_acc_")
+            assert delim == "video_acc_"
+            new_label = "VIDEO_ACCELERATION" + "_" + suffix.upper()
+            if new_label in VIDEO_ACCELERATION_WHITELIST:
+                out.append(new_label)
     return out
 
 
@@ -177,7 +214,7 @@ def validate_required_fields_for_skylab(skylab_fields):
         raise ValueError(
             'skylab_fields["common"]["labels"] = { ... } is not present')
     for label in REQUIRED_LABELS:
-        if label not in labels:
+        if label not in labels or labels[label] is None:
             raise SkylabMissingLabelException(label)
     return
 
@@ -204,6 +241,7 @@ def process_labels(labels, platform):
         "board": l.get_string("board", default=None),
         "brand": l.get_string("brand-code", default=None),
         "cr50Phase": _cr50_phase(l),
+        "hwidSku": l.get_string("sku", default=None),
         "model": l.get_string("model", default=None),
         "platform": platform,
         "referenceDesign": l.get_string("reference_design"),
@@ -217,6 +255,7 @@ def process_labels(labels, platform):
         # list of enum keys
         "criticalPools": pools["criticalPools"],
         "ctsAbi": _cts_abi(l),
+        "ctsCpu": _cts_cpu(l),
         # list of string keys
         "self_serve_pools": pools["self_serve_pools"],
         # capabilities substructure
@@ -232,12 +271,16 @@ def process_labels(labels, platform):
             "touchpad": l.get_bool("touchpad"),
             "webcam": l.get_bool("webcam"),
             # string keys in capabilities
+            "graphics": l.get_string("graphics", default=None),
+            "gpuFamily": l.get_string("gpu_family", default=None),
             "modem": l.get_string("modem", default=""),
             "power": l.get_string("power", default=None),
             "storage": l.get_string("storage", default=None),
             "telephony": l.get_string("telephony", default=""),
             # enum keys in capabilities
             "carrier": l.get_enum("carrier", prefix="CARRIER_"),
+            # video acceleration is its own thing.
+            "videoAcceleration": _video_acceleration(l),
         },
         # peripherals substructure
         "peripherals": {
@@ -245,7 +288,7 @@ def process_labels(labels, platform):
             "audioBox": l.get_bool("audio_box"),
             "audioLoopbackDongle": l.get_bool("audio_loopback_dongle"),
             "chameleon": l.get_bool("chameleon"),
-            "chameleonType": l.get_enum("chameleon", prefix="CHAMELEON_TYPE_"),
+            "chameleonType": _get_chameleon(l),
             "conductive": l.get_bool("conductive"),
             "huddly": l.get_bool("huddly"),
             "mimo": l.get_bool("mimo"),

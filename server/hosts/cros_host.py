@@ -208,7 +208,17 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         @param args_dict Dictionary from which to extract the chameleon
           arguments.
         """
-        return {key: args_dict[key]
+        if 'chameleon_host_list' in args_dict:
+            result = []
+            for chameleon in args_dict['chameleon_host_list'].split(','):
+                result.append({key: value for key,value in
+                    zip(('chameleon_host','chameleon_port'),
+                    chameleon.split(':'))})
+
+            logging.info(result)
+            return result
+        else:
+           return {key: args_dict[key]
                 for key in ('chameleon_host', 'chameleon_port')
                 if key in args_dict}
 
@@ -308,15 +318,28 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         self._default_power_method = None
 
         # TODO(waihong): Do the simplication on Chameleon too.
-        self._chameleon_host = chameleon_host.create_chameleon_host(
-                dut=self.hostname, chameleon_args=chameleon_args)
-        # Add pdtester host if pdtester args were added on command line
-        self._pdtester_host = pdtester_host.create_pdtester_host(pdtester_args)
+        if type(chameleon_args) is list:
+            self.multi_chameleon = True
+            chameleon_args_list = chameleon_args
+        else:
+            self.multi_chameleon = False
+            chameleon_args_list = [chameleon_args]
 
-        if self._chameleon_host:
-            self.chameleon = self._chameleon_host.create_chameleon_board()
+        self._chameleon_host_list = [
+            chameleon_host.create_chameleon_host(
+            dut=self.hostname, chameleon_args=_args)
+            for _args in chameleon_args_list]
+
+        self.chameleon_list = [_host.create_chameleon_board() for _host in
+                               self._chameleon_host_list if _host is not None]
+        if len(self.chameleon_list) > 0:
+            self.chameleon = self.chameleon_list[0]
         else:
             self.chameleon = None
+
+        # Add pdtester host if pdtester args were added on command line
+        self._pdtester_host = pdtester_host.create_pdtester_host(
+                pdtester_args, servo_args)
 
         if self._pdtester_host:
             self.pdtester_servo = self._pdtester_host.get_servo()
@@ -592,7 +615,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             self._AFE.run('label_add_hosts', id=fw_label, hosts=[self.hostname])
 
 
-    def firmware_install(self, build=None, rw_only=False):
+    def firmware_install(self, build=None, rw_only=False, dest=None):
         """Install firmware to the DUT.
 
         Use stateful update if the DUT is already running the same build.
@@ -610,6 +633,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                       e.g. 'link-firmware/R22-2695.1.144'.
         @param rw_only: True to only install firmware to its RW portions. Keep
                         the RO portions unchanged.
+        @param dest: Directory to store the firmware in.
 
         TODO(dshi): After bug 381718 is fixed, update here with corresponding
                     exceptions that could be raised.
@@ -627,6 +651,9 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         if board is None or board == '':
             board = self.servo.get_board()
 
+        if model is None or model == '':
+            model = self.get_platform_from_fwid()
+
         # If build is not set, try to install firmware from stable CrOS.
         if not build:
             build = afe_utils.get_stable_faft_version(board)
@@ -639,10 +666,13 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         ds = dev_server.ImageServer.resolve(build, self.hostname)
         ds.stage_artifacts(build, ['firmware'])
 
-        tmpd = autotemp.tempdir(unique_id='fwimage')
+        tmpd = None
+        if not dest:
+            tmpd = autotemp.tempdir(unique_id='fwimage')
+            dest = tmpd.name
         try:
             fwurl = self._FW_IMAGE_URL_PATTERN % (ds.url(), build)
-            local_tarball = os.path.join(tmpd.name, os.path.basename(fwurl))
+            local_tarball = os.path.join(dest, os.path.basename(fwurl))
             ds.download_file(fwurl, local_tarball)
 
             self._clear_fw_version_labels(rw_only)
@@ -650,7 +680,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             if utils.host_is_in_lab_zone(self.hostname):
                 self._add_fw_version_label(build, rw_only)
         finally:
-            tmpd.clean()
+            if tmpd:
+                tmpd.clean()
 
 
     def servo_install(self, image_url=None, usb_boot_timeout=USB_BOOT_TIMEOUT,
@@ -796,8 +827,10 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
     def close(self):
         """Close connection."""
         super(CrosHost, self).close()
-        if self._chameleon_host:
-            self._chameleon_host.close()
+
+        for chameleon_host in self._chameleon_host_list:
+            if chameleon_host:
+                chameleon_host.close()
 
         if self._servo_host:
             self._servo_host.close()
@@ -1633,6 +1666,21 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             rpm_client.set_power(self, 'CYCLE')
 
 
+    def get_platform_from_fwid(self):
+        """Determine the platform from the crossystem fwid.
+
+        @returns a string representing this host's platform.
+        """
+        # Look at the firmware for non-unibuild cases or if mosys fails.
+        crossystem = utils.Crossystem(self)
+        crossystem.init()
+        # Extract fwid value and use the leading part as the platform id.
+        # fwid generally follow the format of {platform}.{firmware version}
+        # Example: Alex.X.YYY.Z or Google_Alex.X.YYY.Z
+        platform = crossystem.fwid().split('.')[0].lower()
+        # Newer platforms start with 'Google_' while the older ones do not.
+        return platform.replace('google_', '')
+
     def get_platform(self):
         """Determine the correct platform label for this host.
 
@@ -1647,18 +1695,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             result = self.run(command=cmd, ignore_status=True)
             if result.exit_status == 0:
                 platform = result.stdout.strip()
-
-        if not platform:
-            # Look at the firmware for non-unibuild cases or if mosys fails.
-            crossystem = utils.Crossystem(self)
-            crossystem.init()
-            # Extract fwid value and use the leading part as the platform id.
-            # fwid generally follow the format of {platform}.{firmware version}
-            # Example: Alex.X.YYY.Z or Google_Alex.X.YYY.Z
-            platform = crossystem.fwid().split('.')[0].lower()
-            # Newer platforms start with 'Google_' while the older ones do not.
-            platform = platform.replace('google_', '')
-        return platform
+        return platform if platform else self.get_platform_from_fwid()
 
 
     def get_architecture(self):

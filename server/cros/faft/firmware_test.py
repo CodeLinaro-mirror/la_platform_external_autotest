@@ -13,6 +13,7 @@ import uuid
 
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
+from autotest_lib.client.common_lib.cros import tpm_utils
 from autotest_lib.server import test
 from autotest_lib.server.cros import vboot_constants as vboot
 from autotest_lib.server.cros.faft.config.config import Config as FAFTConfig
@@ -22,6 +23,7 @@ from autotest_lib.server.cros.faft.utils.faft_checkers import FAFTCheckers
 from autotest_lib.server.cros.servo import chrome_base_ec
 from autotest_lib.server.cros.servo import chrome_cr50
 from autotest_lib.server.cros.servo import chrome_ec
+from autotest_lib.server.cros.servo import servo
 
 ConnectionError = mode_switcher.ConnectionError
 
@@ -68,6 +70,11 @@ class FirmwareTest(FAFTBase):
 
     # Delay between closing and opening lid
     LID_DELAY = 1
+
+    # FWMP space constants
+    FWMP_CLEARED_EXIT_STATUS = 1
+    FWMP_CLEARED_ERROR_MSG = ('CRYPTOHOME_ERROR_FIRMWARE_MANAGEMENT_PARAMETERS'
+                              '_INVALID')
 
     # UARTs that may be captured
     UARTS = ('cpu', 'cr50', 'ec', 'servo_micro', 'servo_v4', 'usbpd')
@@ -558,6 +565,30 @@ class FirmwareTest(FAFTBase):
             logging.info('Current GBB flags look good for test: 0x%x.',
                          gbb_flags)
 
+
+    def _check_capability(self, target, required_cap, suppress_warning):
+        """Check if current platform has required capabilities for the target.
+
+        @param required_cap: A list containing required capabilities.
+        @param suppress_warning: True to suppress any warning messages.
+        @return: True if requirements are met. Otherwise, False.
+        """
+        if not required_cap:
+            return True
+
+        if target not in ['ec', 'cr50']:
+            raise error.TestError('Invalid capability target %r' % target)
+
+        for cap in required_cap:
+            if cap not in getattr(self.faft_config, target + '_capability'):
+                if not suppress_warning:
+                    logging.warn('Requires %s capability "%s" to run this '
+                                 'test.', target, cap)
+                return False
+
+        return True
+
+
     def check_ec_capability(self, required_cap=None, suppress_warning=False):
         """Check if current platform has required EC capabilities.
 
@@ -570,18 +601,23 @@ class FirmwareTest(FAFTBase):
             if not suppress_warning:
                 logging.warn('Requires Chrome EC to run this test.')
             return False
+        return self._check_capability('ec', required_cap, suppress_warning)
 
-        if not required_cap:
-            return True
 
-        for cap in required_cap:
-            if cap not in self.faft_config.ec_capability:
-                if not suppress_warning:
-                    logging.warn('Requires EC capability "%s" to run this '
-                                 'test.', cap)
-                return False
+    def check_cr50_capability(self, required_cap=None, suppress_warning=False):
+        """Check if current platform has required Cr50 capabilities.
 
-        return True
+        @param required_cap: A list containing required Cr50 capabilities. Pass
+                             in None to only check for presence of cr50 uart.
+        @param suppress_warning: True to suppress any warning messages.
+        @return: True if requirements are met. Otherwise, False.
+        """
+        if not hasattr(self, 'cr50'):
+            if not suppress_warning:
+                logging.warn('Requires Chrome Cr50 to run this test.')
+            return False
+        return self._check_capability('cr50', required_cap, suppress_warning)
+
 
     def check_root_part_on_non_recovery(self, part):
         """Check the partition number of root device and on normal/dev boot.
@@ -778,43 +814,31 @@ class FirmwareTest(FAFTBase):
             self.servo.set('cr50_uart_capture', 'on')
             self.cr50_uart_file = os.path.join(self.resultsdir, 'cr50_uart.txt')
             self.cr50 = chrome_cr50.ChromeCr50(self.servo, self.faft_config)
+        except servo.ControlUnavailableError:
+            logging.warn('cr50 console not supported.')
         except error.TestFail as e:
-            if 'No control named' in str(e):
-                logging.warn('cr50 console not supported.')
-        if self.faft_config.chrome_ec:
-            try:
-                self.servo.set('ec_uart_capture', 'on')
-                self.ec_uart_file = os.path.join(self.resultsdir, 'ec_uart.txt')
-            except error.TestFail as e:
-                if 'No control named' in str(e):
-                    logging.warn('The servod is too old that ec_uart_capture '
-                                 'not supported.')
+            logging.warn('Unknown cr50 uart capture error: %s', str(e))
+        if (self.faft_config.chrome_ec and
+            self.servo.has_control('ec_uart_capture')):
+            self.servo.set('ec_uart_capture', 'on')
+            self.ec_uart_file = os.path.join(self.resultsdir, 'ec_uart.txt')
             # Log separate PD console if supported
-            if self.check_ec_capability(['usbpd_uart'], suppress_warning=True):
-                try:
-                    self.servo.set('usbpd_uart_capture', 'on')
-                    self.usbpd_uart_file = os.path.join(self.resultsdir,
-                                                        'usbpd_uart.txt')
-                except error.TestFail as e:
-                    if 'No control named' in str(e):
-                        logging.warn('The servod is too old that '
-                                     'usbpd_uart_capture is not supported.')
+            if (self.check_ec_capability(['usbpd_uart'], suppress_warning=True)
+                and self.servo.has_control('usb_pd_uart_capture')):
+                self.servo.set('usbpd_uart_capture', 'on')
+                self.usbpd_uart_file = os.path.join(self.resultsdir,
+                                                    'usbpd_uart.txt')
         else:
             logging.info('Not a Google EC, cannot capture ec console output.')
-        try:
-            self.servo.set('servo_micro_uart_capture', 'on')
-            self.servo_micro_uart_file = os.path.join(self.resultsdir,
-                                                      'servo_micro_uart.txt')
-        except error.TestFail as e:
-            if 'No control named' in str(e):
-                logging.warn('servo micro console not supported.')
-        try:
-            self.servo.set('servo_v4_uart_capture', 'on')
-            self.servo_v4_uart_file = os.path.join(self.resultsdir,
-                                                   'servo_v4_uart.txt')
-        except error.TestFail as e:
-            if 'No control named' in str(e):
-                logging.warn('servo v4 console not supported.')
+
+        for servo_console in ['servo_micro', 'servo_v4']:
+            capture_cmd = '%s_uart_capture' % servo_console
+            uart_file_attr = '%s_uart_file' % servo_console
+            if self.servo.has_control(capture_cmd):
+                self.servo.set(capture_cmd, 'on')
+                outfile = '%s_uart.txt' % servo_console
+                setattr(self, uart_file_attr, os.path.join(self.resultsdir,
+                                                           outfile))
 
     def _record_uart_capture(self):
         """Record the CPU/EC/PD UART output stream to files."""
@@ -1700,3 +1724,27 @@ class FirmwareTest(FAFTBase):
                 if actual_fwid != expected_fwid:
                     errors.append(msg)
         return errors
+
+
+    def fwmp_is_cleared(self):
+        """Return True if the FWMP has been created"""
+        res = self.host.run('cryptohome '
+                            '--action=get_firmware_management_parameters',
+                            ignore_status=True)
+        if res.exit_status and res.exit_status != self.FWMP_CLEARED_EXIT_STATUS:
+            raise error.TestError('Could not run cryptohome command %r' % res)
+        return self.FWMP_CLEARED_ERROR_MSG in res.stdout
+
+
+    def clear_fwmp(self):
+        """Clear the FWMP"""
+        if self.fwmp_is_cleared():
+            return
+        tpm_utils.ClearTPMOwnerRequest(self.host, wait_for_ready=True)
+        status = self.host.run('cryptohome --action=tpm_status').stdout
+        logging.debug(status)
+        if 'TPM Owned: true' not in status:
+            self.host.run('cryptohome --action=tpm_take_ownership')
+            self.host.run('cryptohome --action=tpm_wait_ownership')
+        self.host.run('cryptohome '
+                      '--action=remove_firmware_management_parameters')

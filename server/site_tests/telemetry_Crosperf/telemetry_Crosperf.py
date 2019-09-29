@@ -36,6 +36,7 @@ DUT_CHROME_RESULTS_DIR = '/usr/local/telemetry/src/tools/perf'
 TURBOSTAT_LOG = 'turbostat.log'
 CPUSTATS_LOG = 'cpustats.log'
 CPUINFO_LOG = 'cpuinfo.log'
+TOP_LOG = 'top.log'
 
 # Result Statuses
 SUCCESS_STATUS = 'SUCCESS'
@@ -53,6 +54,8 @@ HISTOGRAM_REGEX = re.compile(r'(?P<IMPORTANT>\*)?HISTOGRAM '
                              r'(?P<GRAPH>[^:]*): (?P<TRACE>[^=]*)= '
                              r'(?P<VALUE_JSON>{.*})(?P<UNITS>.+)?')
 
+
+CHARTJSON_ALLOWLIST = ('loading.desktop')
 
 def _find_chrome_root_dir():
     # Look for chrome source root, either externally mounted, or inside
@@ -156,6 +159,7 @@ class telemetry_Crosperf(test.test):
 
     @contextmanager
     def no_background(self, *args):
+      """Background stub."""
       yield
 
     @contextmanager
@@ -191,7 +195,12 @@ class telemetry_Crosperf(test.test):
           # Stop background processes.
           logging.info('Killing background process, pid %s', pid)
           # Kill the process blindly. OK if it's already gone.
-          dut.run('kill %s 2>/dev/null' % pid, ignore_status=True)
+          # There is an issue when underlying child processes stay alive while
+          # the parent master process is killed.
+          # The solution is to kill the chain of processes via process group
+          # id.
+          dut.run('pgid=$(cat /proc/%s/stat | cut -d")" -f2 | cut -d" " -f4)'
+                  ' && kill -- -$pgid 2>/dev/null' % pid, ignore_status=True)
 
           # Copy the results to results directory with silenced failure.
           scp_res = self.scp_telemetry_results(
@@ -202,9 +211,9 @@ class telemetry_Crosperf(test.test):
                 'with error %d.', scp_res)
 
     def run_cpustats_in_background(self, dut, log_name):
-      # Explicit separator is intentional.
-      # os.sep is not dut.sep.
-      log_path = '/'.join(['/tmp', log_name])
+      """Run command to collect CPU stats in background."""
+
+      log_path = '/tmp/%s' % log_name
       cpu_stats_cmd = (
           'cpulog=%s; '
           'rm -f ${cpulog}; '
@@ -227,10 +236,24 @@ class telemetry_Crosperf(test.test):
 
       return self.run_in_background_with_log(cpu_stats_cmd, dut, log_path)
 
+    def run_top_in_background(self, dut, log_name, interval_in_sec):
+      """Run top in background."""
+
+      log_path = '/tmp/%s' % log_name
+      top_cmd = (
+          # Run top in batch mode with specified interval and filter out top
+          # system summary and processes not consuming %CPU.
+          # Output of each iteration is separated by a blank line.
+          'HOME=/usr/local COLUMNS=128 top -bi -d%.1f'
+          ' | grep -E "^[ 0-9]|^$" > %s;'
+      ) % (interval_in_sec, log_path)
+
+      return self.run_in_background_with_log(top_cmd, dut, log_path)
+
     def run_turbostat_in_background(self, dut, log_name):
-      # Explicit separator is intentional.
-      # os.sep is not dut.sep.
-      log_path = '/'.join(['/tmp', log_name])
+      """Run turbostat in background."""
+
+      log_path = '/tmp/%s' % log_name
       turbostat_cmd = (
           'nohup turbostat --quiet --interval 10 '
           '--show=CPU,Bzy_MHz,Avg_MHz,TSC_MHz,Busy%%,IRQ,CoreTmp '
@@ -240,6 +263,8 @@ class telemetry_Crosperf(test.test):
       return self.run_in_background_with_log(turbostat_cmd, dut, log_path)
 
     def run_cpuinfo(self, dut, log_name):
+      """Collect CPU info of "dut" into "log_name" file."""
+
       cpuinfo_cmd = (
           'for cpunum in '
           "   $(awk '/^processor/ { print $NF ; }' /proc/cpuinfo ) ; do "
@@ -286,27 +311,29 @@ class telemetry_Crosperf(test.test):
         test_args = args.get('test_args', '')
         profiler_args = args.get('profiler_args', '')
 
+        output_format = '--output-format=histograms'
+        if test_name in CHARTJSON_ALLOWLIST:
+            output_format += ' --output-format=chartjson'
         # Decide whether the test will run locally or by a remote server.
         if args.get('run_local', 'false').lower() == 'true':
             # The telemetry scripts will run on DUT.
             _ensure_deps(dut, test_name)
             format_string = ('python %s --browser=system '
-                             '--output-format=chartjson '
-                             '--output-format=histograms '
-                             '%s %s')
-            command = format_string % (os.path.join(
-                CLIENT_CHROME_ROOT, RUN_BENCHMARK), test_args, test_name)
+                             '%s %s %s')
+            command = format_string % (
+                os.path.join(
+                    CLIENT_CHROME_ROOT, RUN_BENCHMARK),
+                output_format, test_args, test_name)
             runner = dut
         else:
             # The telemetry scripts will run on server.
             format_string = ('python %s --browser=cros-chrome --remote=%s '
                              '--output-dir="%s" '
-                             '--output-format=chartjson '
-                             '--output-format=histograms '
-                             '%s %s')
+                             '%s %s %s')
             command = format_string % (os.path.join(_find_chrome_root_dir(),
                                                     RUN_BENCHMARK), client_ip,
-                                       self.resultsdir, test_args, test_name)
+                                       self.resultsdir,
+                                       output_format, test_args, test_name)
             runner = utils
 
         # Run the test. And collect profile if needed.
@@ -327,10 +354,15 @@ class telemetry_Crosperf(test.test):
             run_turbostat = self.run_turbostat_in_background if (
                 dut and args.get('turbostat', 'False') == 'True') \
                     else self.no_background
+            top_interval = float(args.get('top_interval', '0'))
+            run_top = self.run_top_in_background if (
+                dut and top_interval > 0) \
+                    else self.no_background
 
             # FIXME(denik): replace with ExitStack.
             with run_cpuinfo(dut, CPUSTATS_LOG) as cpu_cm, \
-                run_turbostat(dut, TURBOSTAT_LOG) as turbo_cm:
+                run_turbostat(dut, TURBOSTAT_LOG) as turbo_cm, \
+                run_top(dut, TOP_LOG, top_interval) as top_cm:
 
                 logging.info('CMD: %s', command)
                 result = runner.run(
@@ -369,19 +401,21 @@ class telemetry_Crosperf(test.test):
         # Copy the results-chart.json and histograms.json file into
         # the test_that results directory, if necessary.
         if args.get('run_local', 'false').lower() == 'true':
-            result = self.scp_telemetry_results(
-                client_ip, dut,
-                os.path.join(DUT_CHROME_RESULTS_DIR, 'results-chart.json'),
-                self.resultsdir)
+            if test_name in CHARTJSON_ALLOWLIST:
+                result = self.scp_telemetry_results(
+                    client_ip, dut,
+                    os.path.join(DUT_CHROME_RESULTS_DIR, 'results-chart.json'),
+                    self.resultsdir)
             result = self.scp_telemetry_results(
                 client_ip, dut,
                 os.path.join(DUT_CHROME_RESULTS_DIR, 'histograms.json'),
                 self.resultsdir)
         else:
-            filepath = os.path.join(self.resultsdir, 'results-chart.json')
-            if not os.path.exists(filepath):
-                exit_code = -1
-                raise RuntimeError('Missing results file: %s' % filepath)
+            if test_name in CHARTJSON_ALLOWLIST:
+                filepath = os.path.join(self.resultsdir, 'results-chart.json')
+                if not os.path.exists(filepath):
+                    exit_code = -1
+                    raise RuntimeError('Missing results file: %s' % filepath)
             filepath = os.path.join(self.resultsdir, 'histograms.json')
             if not os.path.exists(filepath):
                 exit_code = -1
