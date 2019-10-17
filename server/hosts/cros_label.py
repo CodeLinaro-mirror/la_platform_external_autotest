@@ -24,6 +24,10 @@ from autotest_lib.site_utils import hwid_lib
 # pylint: disable=missing-docstring
 LsbOutput = collections.namedtuple('LsbOutput', ['unibuild', 'board'])
 
+# fallback values if we can't contact the HWID server
+HWID_LABELS_FALLBACK = ['sku', 'phase', 'touchscreen', 'touchpad', 'variant', 'stylus']
+
+
 def _parse_lsb_output(host):
     """Parses the LSB output and returns key data points for labeling.
 
@@ -243,7 +247,24 @@ class ChameleonLabel(base_label.BaseLabel):
     _NAME = 'chameleon'
 
     def exists(self, host):
-        return host._chameleon_host is not None
+        # See crbug.com/1004500#2 for details.
+        # https://chromium.googlesource.com/chromiumos/third_party/autotest/+
+        # /refs/heads/master/server/hosts/cros_host.py#335 shows that
+        # _chameleon_host_list is not reliable.
+        has_chameleon = len(host.chameleon_list) > 0
+        # TODO(crbug.com/995900) -- debug why chameleon label is flipping
+        try:
+            logging.info("has_chameleon %s", has_chameleon)
+            logging.info("chameleon_host_list %s",
+                         getattr(host, "_chameleon_host_list", "NO_ATTRIBUTE"))
+            logging.info("chameleon_list %s",
+                         getattr(host, "chameleon_list", "NO_ATTRIBUTE"))
+            logging.info("multi_chameleon %s",
+                         getattr(host, "multi_chameleon", "NO_ATTRIBUTE"))
+        except:
+            pass
+        return has_chameleon
+
 
 
 class ChameleonConnectionLabel(base_label.StringPrefixLabel):
@@ -252,11 +273,11 @@ class ChameleonConnectionLabel(base_label.StringPrefixLabel):
     _NAME = 'chameleon'
 
     def exists(self, host):
-        return host._chameleon_host is not None
+        return len(host._chameleon_host_list) > 0
 
 
     def generate_labels(self, host):
-        return [host.chameleon.get_label()]
+        return [[chameleon.get_label()] for chameleon in host.chameleon_list]
 
 
 class ChameleonPeripheralsLabel(base_label.StringPrefixLabel):
@@ -272,33 +293,50 @@ class ChameleonPeripheralsLabel(base_label.StringPrefixLabel):
     _NAME = 'chameleon'
 
     def exists(self, host):
-        return host._chameleon_host is not None
+        return len(host._chameleon_host_list) > 0
 
 
     def generate_labels(self, host):
-        labels = []
-        try:
-            bt_hid_device = host.chameleon.get_bluetooth_hid_mouse()
-            if bt_hid_device.CheckSerialConnection():
-                labels.append('bt_hid')
-        except:
-            logging.error('Error with initializing bt_hid_mouse')
-        try:
-            ble_hid_device = host.chameleon.get_ble_mouse()
-            if ble_hid_device.CheckSerialConnection():
-                labels.append('bt_ble_hid')
-        except:
-            logging.error('Error with initializing bt_ble_hid')
-        try:
-            bt_a2dp_sink = host.chameleon.get_bluetooth_a2dp_sink()
-            if bt_a2dp_sink.CheckSerialConnection():
-                labels.append('bt_a2dp_sink')
-        except:
-            logging.error('Error with initializing bt_a2dp_sink')
-        if labels != []:
-            labels.append('bt_peer')
-        logging.info('Bluetooth labels are %s', labels)
-        return labels
+        labels_list = []
+
+        for chameleon, chameleon_host in \
+                        zip(host.chameleon_list, host._chameleon_host_list):
+            labels = []
+            try:
+                bt_hid_device = chameleon.get_bluetooth_hid_mouse()
+                if bt_hid_device.CheckSerialConnection():
+                    labels.append('bt_hid')
+            except:
+                logging.error('Error with initializing bt_hid_mouse on '
+                              'chameleon %s', chameleon_host.hostname)
+
+            try:
+                ble_hid_device = chameleon.get_ble_mouse()
+                if ble_hid_device.CheckSerialConnection():
+                    labels.append('bt_ble_hid')
+            except:
+                logging.error('Error with initializing ble_hid_mouse on '
+                              'chameleon %s', chameleon_host.hostname)
+
+            try:
+                bt_a2dp_sink = chameleon.get_bluetooth_a2dp_sink()
+                if bt_a2dp_sink.CheckSerialConnection():
+                    labels.append('bt_a2dp_sink')
+            except:
+                logging.error('Error with initializing bt_a2dp_sink on '
+                              'chameleon %s', chameleon_host.hostname)
+
+            if labels != []:
+                labels.append('bt_peer')
+
+            if host.multi_chameleon:
+                labels_list.append(labels)
+            else:
+                labels_list.extend(labels)
+
+
+        logging.info('Bluetooth labels are %s', labels_list)
+        return labels_list
 
 
 
@@ -476,6 +514,27 @@ class ServoLabel(base_label.BaseLabel):
     _NAME = 'servo'
 
     def exists(self, host):
+        # Based on crbug.com/995900, Servo sometimes flips.
+        # Ensure that ServoLabel.exists returns True
+        # forever, after it returns True *once*.
+        if self._cached_exists(host):
+            # If the current state is True, return it, don't run the command on
+            # the DUT and potentially flip the state.
+            return True
+        # If the current state is not True, run the command on
+        # the DUT. The new state will be set to whatever the command
+        # produces.
+        return self._host_run_exists(host)
+
+    def _cached_exists(self, host):
+        """Get the state of Servo in the data store"""
+        info = host.host_info_store.get()
+        for label in info.labels:
+            if label.startswith(self._NAME):
+                return True
+        return False
+
+    def _host_run_exists(self, host):
         """
         Check if the servo label should apply to the host or not.
 
@@ -585,6 +644,34 @@ class LucidSleepLabel(base_label.BaseLabel):
         return board in self.LUCID_SLEEP_BOARDS
 
 
+def _parse_hwid_labels(hwid_info_list):
+    if len(hwid_info_list) == 0:
+        return hwid_info_list
+
+    res = []
+    # See crbug.com/997816#c7 for details of two potential formats of returns
+    # from HWID server.
+    if isinstance(hwid_info_list[0], dict):
+        # Format of hwid_info:
+        # [{u'name': u'sku', u'value': u'xxx'}, ..., ]
+        for hwid_info in hwid_info_list:
+            value = hwid_info.get('value', '')
+            name = hwid_info.get('name', '')
+            # There should always be a name but just in case there is not.
+            if name:
+                new_label = name if not value else '%s:%s' % (name, value)
+                res.append(new_label)
+    else:
+        # Format of hwid_info:
+        # [<DUTLabel name: 'sku' value: u'xxx'>, ..., ]
+        for hwid_info in hwid_info_list:
+            new_label = str(hwid_info)
+            logging.info('processing hwid label: %s', new_label)
+            res.append(new_label)
+
+    return res
+
+
 class HWIDLabel(base_label.StringLabel):
     """Return all the labels generated from the hwid."""
 
@@ -596,24 +683,81 @@ class HWIDLabel(base_label.StringLabel):
                 'CROS', 'HWID_KEY', type=str)
 
 
-    def generate_labels(self, host):
-        hwid_labels = []
-        hwid = host.run_output('crossystem hwid').strip()
-        hwid_info_list = hwid_lib.get_hwid_info(hwid, hwid_lib.HWID_INFO_LABEL,
-                                                self.key_file).get('labels', [])
+    @staticmethod
+    def _merge_hwid_label_lists(new, old):
+        """merge a list of old and new values for hwid_labels.
+        preferring new values if available
 
-        for hwid_info in hwid_info_list:
-            # If it's a prefix, we'll have:
-            # {'name': prefix_label, 'value': postfix_label} and create
-            # 'prefix_label:postfix_label'; otherwise it'll just be
-            # {'name': label} which should just be 'label'.
-            value = hwid_info.get('value', '')
-            name = hwid_info.get('name', '')
-            # There should always be a name but just in case there is not.
-            if name:
-                hwid_labels.append(name if not value else
-                                   '%s:%s' % (name, value))
-        return hwid_labels
+        @returns: list of labels"""
+        # TODO(gregorynisbet): what is the appropriate way to merge
+        # old and new information?
+        retained = set(x for x in old)
+        for label in new:
+            key, sep, value = label.partition(':')
+            # If we have a key-value key such as variant:aaa,
+            # then we remove all the old labels with the same key.
+            if sep:
+                retained = set(x for x in retained if (not x.startswith(key + ':')))
+        return list(sorted(retained.union(new)))
+
+
+    def _hwid_label_names(self):
+        """get the labels that hwid_lib controls.
+
+        @returns: hwid_labels
+        """
+        all_hwid_labels, _ = self.get_all_labels()
+        # If and only if get_all_labels was unsuccessful,
+        # it will return a falsey value.
+        out = all_hwid_labels or HWID_LABELS_FALLBACK
+
+        # TODO(gregorynisbet): remove this
+        # TODO(crbug.com/999785)
+        if "sku" not in out:
+            logging.info("sku-less label names %s", out)
+
+        return out
+
+
+    def _old_label_values(self, host):
+        """get the hwid_lib labels on previous run
+
+        @returns: hwid_labels"""
+        out = []
+        info = host.host_info_store.get()
+        for hwid_label in self._hwid_label_names():
+            for label in info.labels:
+                # NOTE: we want *all* the labels starting
+                # with this prefix.
+                if label.startswith(hwid_label):
+                    out.append(label)
+        return out
+
+
+    def generate_labels(self, host):
+        # use previous values as default
+        old_hwid_labels = self._old_label_values(host)
+        logging.info("old_hwid_labels: %r", old_hwid_labels)
+        hwid = host.run_output('crossystem hwid').strip()
+        hwid_info_list = []
+        try:
+            hwid_info_response = hwid_lib.get_hwid_info(
+                hwid=hwid,
+                info_type=hwid_lib.HWID_INFO_LABEL,
+                key_file=self.key_file,
+            )
+            logging.info("hwid_info_response: %r", hwid_info_response)
+            hwid_info_list = hwid_info_response.get('labels', [])
+        except hwid_lib.HwIdException as e:
+            logging.info("HwIdException: %s", e)
+
+        new_hwid_labels = _parse_hwid_labels(hwid_info_list)
+        logging.info("new HWID labels: %r", new_hwid_labels)
+
+        return HWIDLabel._merge_hwid_label_lists(
+            old=old_hwid_labels,
+            new=new_hwid_labels,
+        )
 
 
     def get_all_labels(self):
@@ -701,4 +845,5 @@ LABSTATION_LABELS = [
     BoardLabel(),
     ModelLabel(),
     common_label.OSLabel(),
+    PowerSupplyLabel(),
 ]

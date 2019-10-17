@@ -76,7 +76,6 @@ RPC_CATEGORIES = [
             {
                 "method_names": [
                     "IsAvailable",
-                    "HasHost",
                     "GetPlatformName",
                     "DevTpmPresent",
                     "GetRootDev",
@@ -240,25 +239,6 @@ RPC_CATEGORIES = [
         ]
     },
     {
-        "category_name": "Host",
-        "test_cases": [
-            {
-                "method_names": [
-                    "RunShellCommand",
-                    "RunShellCommandGetOutput",
-                ],
-                "passing_args": [
-                    ("ls", ),
-                ],
-                "failing_args": [
-                    NO_ARGS,
-                    ("ls", "-l"),
-                ],
-                "allow_error_msg": "There is no host for DUT",
-            },
-        ]
-    },
-    {
         "category_name": "Bios",
         "test_cases": [
             {
@@ -353,6 +333,26 @@ RPC_CATEGORIES = [
             },
             {
                 "method_name": "StripModifiedFwids",
+                "passing_args": [NO_ARGS],
+                "failing_args": [ONE_INT_ARG, ONE_STR_ARG],
+                "expected_return_type": dict
+            },
+            {
+                "method_name": "SetWriteProtectRegion",
+                "passing_args": [
+                    ("WP_RO",),
+                    ("WP_RO", None),
+                    ("WP_RO", True),
+                    ("WP_RO", False)
+                ],
+                "failing_args": [
+                    NO_ARGS,
+                    (None,),
+                    ("WP_RO", None, "EXTRA")
+                ],
+            },
+            {
+                "method_name": "GetWriteProtectStatus",
                 "passing_args": [NO_ARGS],
                 "failing_args": [ONE_INT_ARG, ONE_STR_ARG],
                 "expected_return_type": dict

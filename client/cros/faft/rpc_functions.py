@@ -45,7 +45,6 @@ class RPCRouter(object):
         self.bios = BiosServicer(os_if)
         self.cgpt = CgptServicer(os_if)
         self.ec = EcServicer(os_if)
-        self.host = HostServicer(os_if)
         self.kernel = KernelServicer(os_if)
         self.rootfs = RootfsServicer(os_if)
         self.rpc_settings = RpcSettingsServicer(os_if)
@@ -57,7 +56,6 @@ class RPCRouter(object):
                 'Bios': self.bios,
                 'Cgpt': self.cgpt,
                 'Ec': self.ec,
-                'Host': self.host,
                 'Kernel': self.kernel,
                 'RpcSettings': self.rpc_settings,
                 'Rootfs': self.rootfs,
@@ -370,6 +368,32 @@ class BiosServicer(object):
         """
         return self._bios_handler.strip_modified_fwids()
 
+    def SetWriteProtectRegion(self, region, enabled=None):
+        """Modify software write protect region and flag in one operation.
+
+        @param region: Region to set (usually WP_RO)
+        @param enabled: If True, run --wp-enable; if False, run --wp-disable.
+                        If None (default), don't specify either one.
+        """
+        self._bios_handler.set_write_protect_region(region, enabled)
+
+    def SetWriteProtectRange(self, start, length, enabled=None):
+        """Modify software write protect range and flag in one operation.
+
+        @param start: offset (bytes) from start of flash to start of range
+        @param length: offset (bytes) from start of range to end of range
+        @param enabled: If True, run --wp-enable; if False, run --wp-disable.
+                        If None (default), don't specify either one.
+        """
+        self._bios_handler.set_write_protect_range(start, length, enabled)
+
+    def GetWriteProtectStatus(self):
+        """Get a dict describing the status of the write protection
+
+        @return: {'enabled': True/False, 'start': '0x0', 'length': '0x0', ...}
+        @rtype: dict
+        """
+        return self._bios_handler.get_write_protect_status()
 
 class CgptServicer(object):
     """Class to service all CGPT RPCs"""
@@ -515,31 +539,6 @@ class EcServicer(object):
     def StripModifiedFwids(self):
         """Strip any trailing suffixes (from modify_fwids) out of the FWIDs."""
         return self._ec_handler.strip_modified_fwids()
-
-
-class HostServicer(object):
-    """Class to service all Host RPCs (used only for Android DUTs) """
-
-    def __init__(self, os_if):
-        """
-        @type os_if: os_interface.OSInterface
-        """
-        self._os_if = os_if
-
-    def RunShellCommand(self, command):
-        """Run shell command on the host.
-
-        @param command: A shell command to be run.
-        """
-        self._os_if.run_host_shell_command(command)
-
-    def RunShellCommandGetOutput(self, command):
-        """Run shell command and get its console output on the host.
-
-        @param command: A shell command to be run.
-        @return: A list of strings stripped of the newline characters.
-        """
-        return self._os_if.run_host_shell_command_get_output(command)
 
 
 class KernelServicer(object):
@@ -694,10 +693,6 @@ class SystemServicer(object):
         @return: Always True.
         """
         return True
-
-    def HasHost(self):
-        """Return True if a host is connected to DUT."""
-        return self._os_if.has_host()
 
     def WaitForClient(self, timeout):
         """Wait for the client to come back online.

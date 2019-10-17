@@ -31,9 +31,10 @@ class firmware_ECCbiEeprom(FirmwareTest):
         # Don't bother if CBI isn't on this device.
         if not self.check_ec_capability(['cbi']):
             raise error.TestNAError("Nothing needs to be tested on this device")
-        cmd_out = self.faft_client.System.RunShellCommandGetOutput(
-                     'ectool locatechip %d %d' %
-                     (self.EEPROM_LOCATE_TYPE, self.EEPROM_LOCATE_INDEX))
+        cmd = 'ectool locatechip %d %d' % (self.EEPROM_LOCATE_TYPE,
+                                           self.EEPROM_LOCATE_INDEX)
+        cmd_out = self.faft_client.System.RunShellCommandGetOutput(cmd, True)
+        logging.debug('Ran %s on DUT, output was: %s', cmd, cmd_out)
 
         if len(cmd_out) > 0 and cmd_out[0].startswith('Usage'):
             raise error.TestNAError("I2C lookup not supported yet.")
@@ -43,11 +44,18 @@ class firmware_ECCbiEeprom(FirmwareTest):
 
         match = re.search('Bus: I2C; Port: (\w+); Address: (\w+)', cmd_out[0])
         if match is None:
-            raise error.TestFail("I2C lookup for EEPROM CBI Failed.")
+            raise error.TestFail("I2C lookup for EEPROM CBI Failed.  Check "
+                                 "debug log for output.")
 
         # Allow hex value parsing (i.e. base set to 0)
         self.i2c_port = int(match.group(1), 0)
         self.i2c_addr = int(match.group(2), 0)
+
+        # Ensure that the i2c mux is disabled on the servo as the CBI EEPROM
+        # i2c lines are shared with the servo lines on some HW designs. We do
+        # not want the servo to artificially drive the i2c lines during this
+        # test
+        self.servo.set('i2c_mux_en', 'off')
 
     def _gen_write_command(self, offset, data):
         return ('ectool i2cxfer %d %d %d %d %s' %

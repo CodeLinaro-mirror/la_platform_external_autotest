@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import collections
 import json
 import logging
 import os
@@ -87,11 +86,6 @@ class autoupdate_EndToEndTest(update_engine_test.UpdateEngineTest):
     _DEVSERVER_HOSTLOG_ROOTFS = 'devserver_hostlog_rootfs'
     _DEVSERVER_HOSTLOG_REBOOT = 'devserver_hostlog_reboot'
 
-    StagedURLs = collections.namedtuple('StagedURLs', ['source_url',
-                                                       'source_stateful_url',
-                                                       'target_url',
-                                                       'target_stateful_url'])
-
     def initialize(self):
         """Sets up variables that will be used by test."""
         super(autoupdate_EndToEndTest, self).initialize()
@@ -103,23 +97,16 @@ class autoupdate_EndToEndTest(update_engine_test.UpdateEngineTest):
 
         @param test_conf: a dictionary containing payload urls to stage.
 
-        @return a StagedURLs tuple containing the staged urls.
         """
         logging.info('Staging images onto autotest devserver (%s)',
                      self._autotest_devserver.url())
 
-        source_uri = test_conf['source_payload_uri']
-        staged_src_uri, staged_src_stateful = self._stage_payloads(
-            source_uri, test_conf['source_archive_uri'])
+        self._stage_payloads(test_conf['source_payload_uri'],
+                             test_conf['source_archive_uri'])
 
-        target_uri = test_conf['target_payload_uri']
-        staged_target_uri, staged_target_stateful = self._stage_payloads(
-            target_uri, test_conf['target_archive_uri'],
-            test_conf['update_type'])
-
-        return self.StagedURLs(staged_src_uri, staged_src_stateful,
-                               staged_target_uri, staged_target_stateful)
-
+        self._stage_payloads(test_conf['target_payload_uri'],
+                             test_conf['target_archive_uri'],
+                             test_conf['update_type'])
 
     def _get_hostlog_file(self, filename, pid):
         """Return the hostlog file location.
@@ -248,19 +235,24 @@ class autoupdate_EndToEndTest(update_engine_test.UpdateEngineTest):
             # Update the DUT to the target image.
             pid = cros_device.install_target_image(test_conf[
                 'target_payload_uri'])
+        except dev_server.DevServerException as e:
+            logging.fatal('ERROR: Failure occurred during the target update.')
+            raise error.TestFail(str(e))
 
-            # Verify the hostlog of events was returned from the update.
-            file_url = self._get_hostlog_file(self._DEVSERVER_HOSTLOG_ROOTFS,
-                                              pid)
+        # Verify the hostlog of events was returned from the update.
+        file_url = self._get_hostlog_file(self._DEVSERVER_HOSTLOG_ROOTFS,
+                                          pid)
 
+        try:
             # Call into base class to compare expected events against hostlog.
             self.verify_update_events(source_release, file_url)
-        except:
-            logging.fatal('ERROR: Failure occurred during the target update.')
+        except update_engine_test.UpdateEngineEventMissing:
+            self._dump_update_engine_log(cros_device)
             raise
 
         # Collect perf stats about this update run.
-        perf_file = cros_device.get_perf_stats_for_update(self.job.resultdir)
+        perf_file = cros_device.get_perf_stats_for_update(
+            self.job.resultdir)
         if perf_file is not None:
             self._report_perf_data(perf_file)
 
@@ -271,14 +263,21 @@ class autoupdate_EndToEndTest(update_engine_test.UpdateEngineTest):
             # post-reboot update check. So we just check the version from
             # lsb-release.
             logging.info('Skipping post reboot update check.')
-            self._verify_version(target_release, cros_device.get_cros_version())
+            self._verify_version(target_release,
+                                 cros_device.get_cros_version())
         else:
             # Verify we have a hostlog for the post-reboot update check.
-            file_url = self._get_hostlog_file(self._DEVSERVER_HOSTLOG_REBOOT,
-                                              pid)
+            file_url = self._get_hostlog_file(
+                self._DEVSERVER_HOSTLOG_REBOOT, pid)
 
-            # Call into base class to compare expected events against hostlog.
-            self.verify_update_events(source_release, file_url, target_release)
+            try:
+                # Compare expected events against hostlog.
+                self.verify_update_events(source_release, file_url,
+                                          target_release)
+            except update_engine_test.UpdateEngineEventMissing:
+                self._dump_update_engine_log(cros_device)
+                raise
+
 
         self._verify_active_slot_changed(source_active_slot,
                                          cros_device.get_active_slot(),
@@ -309,15 +308,14 @@ class autoupdate_EndToEndTest(update_engine_test.UpdateEngineTest):
         # Install source image
         source_payload_uri = test_conf['source_payload_uri']
         if source_payload_uri is not None:
-            cros_device.install_source_image(source_payload_uri)
+            try:
+                cros_device.install_source_image(source_payload_uri)
+            except dev_server.DevServerException as e:
+                raise error.TestFail(str(e))
             cros_device.check_login_after_source_update()
 
         # Start the update to the target image.
-        try:
-            self.run_update_test(cros_device, test_conf)
-        except update_engine_test.UpdateEngineEventMissing:
-            self._dump_update_engine_log(cros_device)
-            raise
+        self.run_update_test(cros_device, test_conf)
 
         # Check we can login after the update.
         cros_device.check_login_after_target_update()

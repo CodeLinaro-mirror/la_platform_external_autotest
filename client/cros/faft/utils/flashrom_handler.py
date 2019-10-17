@@ -160,7 +160,7 @@ class FlashromHandler(object):
                     'rec': FvSection(None, 'RECOVERY_MRC_CACHE'),
                     'ec_a': FvSection(None, 'ECMAINA'),
                     'ec_b': FvSection(None, 'ECMAINB'),
-                    'rw_legacy': FvSection(None, None, 'RW_LEGACY'),
+                    'rw_legacy': FvSection(None, 'RW_LEGACY'),
             }
         elif self.target == 'ec':
             self.fum = saft_flashrom_util.flashrom_util(
@@ -580,6 +580,44 @@ class FlashromHandler(object):
     def disable_write_protect(self):
         """Disable write protect of the flash chip"""
         self.fum.disable_write_protect()
+
+    def set_write_protect_region(self, region, enabled=None):
+        """
+        Set write protection region by name, using current image's layout.
+
+        The name should match those seen in `futility dump_fmap <image>`, and
+        is not checked against self.firmware_layout, due to different naming.
+
+        @param region: Region to set (usually WP_RO)
+        @param enabled: If True, run --wp-enable; if False, run --wp-disable.
+                        If None (default), don't specify either one.
+        """
+        if region is None:
+            raise FlashromHandlerError("Region must not be None")
+        image_file = self.os_if.create_temp_file('wp_')
+        self.os_if.write_file(image_file, self.image)
+
+        self.fum.set_write_protect_region(image_file, region, enabled)
+        self.os_if.remove_file(image_file)
+
+    def set_write_protect_range(self, start, length, enabled=None):
+        """
+        Set write protection range by offsets, using current image's layout.
+
+        @param start: offset (bytes) from start of flash to start of range
+        @param length: offset (bytes) from start of range to end of range
+        @param enabled: If True, run --wp-enable; if False, run --wp-disable.
+                        If None (default), don't specify either one.
+        """
+        self.fum.set_write_protect_range(start, length, enabled)
+
+    def get_write_protect_status(self):
+        """Get a dict describing the status of the write protection
+
+        @return: {'enabled': True/False, 'start': '0x0', 'length': '0x0', ...}
+        @rtype: dict
+        """
+        return self.fum.get_write_protect_status()
 
     def get_section_sig_sha(self, section):
         """Retrieve SHA1 hash of a firmware vblock section"""

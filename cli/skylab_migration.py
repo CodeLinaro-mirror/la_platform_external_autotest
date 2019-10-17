@@ -37,6 +37,9 @@ _LITERAL_MAP = {
 }
 
 
+TEXT = (unicode, str)
+
+
 def find_atest_path():
     """Get the path to the 'atest' executable.
 
@@ -202,11 +205,12 @@ class AtestCmd(object):
         return [_ATEST_EXE, 'host', 'list', '--parse', '-M', _TEMPPATH]
 
     @staticmethod
-    def brief_info(hostnames=[]):
+    def brief_info(hostnames=None):
         """Run brief info command.
 
         @return : iterator of dictionaries describing each hostname
         """
+        hostnames = hostnames or set()
         items = call_with_tempfile(AtestCmd.brief_info_cmd(), hostnames).output
         for item in AtestCmd.brief_info_filter(items):
             yield item
@@ -252,11 +256,12 @@ class AtestCmd(object):
         ]
 
     @staticmethod
-    def rename(hostnames=[], for_migration=True):
+    def rename(hostnames=None, for_migration=True):
         """Rename a list of hosts.
 
         @return : iterator of successfully renamed hosts
         """
+        hostnames = hostnames or set()
         stderr_log('begin rename', time.time(), _humantime())
         items = call_with_tempfile(
             AtestCmd.rename_cmd(for_migration=for_migration),
@@ -296,8 +301,16 @@ class AtestCmd(object):
         @return : 'atest host statjson' output as parsed json.
         """
         cmd = AtestCmd.statjson_cmd(hostname=hostname)
-        out = subprocess.check_output(cmd)
-        return json.loads(out.decode('utf-8'))
+        (out, exit_status) = backtick_out_err(cmd)
+        if exit_status == 0:
+            return json.loads(out.decode('utf-8'))
+        else:
+            if exit_status:
+                if "Failed to stat:" in out:
+                    assert "Unknown host" in out
+                return None
+            else:
+                assert "unexpected failure"
 
     @staticmethod
     def atest_lock_cmd(reason=None):
@@ -310,16 +323,18 @@ class AtestCmd(object):
         ]
 
     @staticmethod
-    def atest_lock(reason=None, hostnames=[]):
+    def atest_lock(reason=None, hostnames=None):
         """Try to lock hostnames via 'atest host mod --lock'.
 
         @return : Nothing
         """
+        hostnames = hostnames or set()
         assert isinstance(reason, unicode)
         cmd = AtestCmd.atest_lock_cmd(reason=reason)
-        exit_code = call_with_tempfile(cmd, hostnames).exit_code
-        if exit_code != 0:
-            raise MigrationException('failed to lock file')
+        # NOTE: attempting to lock a host can fail because the host
+        # is already locked. Therefore, atest_lock always succeeds
+        # regardless of the exit status of the command.
+        call_with_tempfile(cmd, hostnames)
 
     @staticmethod
     def atest_lock_filter(stream):
@@ -351,11 +366,12 @@ class AtestCmd(object):
         return [_ATEST_EXE, 'host', 'mod', '--unlock', '-M', _TEMPPATH]
 
     @staticmethod
-    def atest_unlock(reason=None, hostnames=[]):
+    def atest_unlock(reason=None, hostnames=None):
         """Unlock hostnames via 'atest host mod --unlock'.
 
         @return : iterator of successfully unlocked hosts
         """
+        hostnames = hostnames or set()
         cmd = AtestCmd.atest_unlock_cmd()
         items = call_with_tempfile(cmd, hostnames).output
         for item in AtestCmd.atest_unlock_filter(items):
@@ -395,10 +411,50 @@ class AtestCmd(object):
 
     @staticmethod
     def atest_get_migration_plan(ratio, hostnames=[]):
+        # optimizations in case the ratio is 1 or 0
+        hostnames = hostnames or set()
+        if ratio == 0:
+            return {
+                'transfer': [],
+                'retain': hostnames,
+            }
+        if ratio == 1:
+            return {
+                'transfer': hostnames,
+                'retain': [],
+            }
         cmd = AtestCmd.atest_get_migration_plan_cmd(ratio)
         output = call_with_tempfile(cmd, hostnames).output
         out = json.loads(''.join(output))
         return out
+
+
+def trywith(exn_type, f, *args, **kwargs):
+    out = None
+    exn = None
+    try:
+        out = f(*args, **kwargs)
+    except exn_type as e:
+        exn = e
+    return (out, exn)
+
+
+
+def backtick(*args, **kwargs):
+    output = None
+    exit_status = None
+    out, exn = trywith(subprocess.CalledProcessError, subprocess.check_output, *args, **kwargs)
+    if exn is None:
+        output = out
+        exit_status = 0
+    else:
+        output = exn.output
+        exit_status = exn.returncode
+    return (output, exit_status)
+
+
+def backtick_out_err(*args, **kwargs):
+    return backtick(*args, stderr=subprocess.STDOUT, **kwargs)
 
 
 class SkylabCmd(object):
@@ -436,6 +492,9 @@ class SkylabCmd(object):
 
     @staticmethod
     def add_many_duts(dut_contents):
+        stderr_log('begin add_many_duts', time.time(), _humantime())
+        for dut_content in dut_contents:
+            stderr_log("add many DUTs: ", str(dut_content)[:80] + "...")
         """Add multiple DUTs to skylab at once.
 
         @param dut_contents: a sequence of JSON-like objects describing DUTs as
@@ -452,20 +511,30 @@ class SkylabCmd(object):
         td = tempfile.mkdtemp()
         try:
             paths = []
-            for i, dut_content in enumerate(dut_contents):
+            for i in range(len(dut_contents)):
                 path_ = os.path.join(td, str(i))
                 with open(path_, 'w') as fh:
-                    json.dump(dut_contents, fh)
+                    json.dump(dut_contents[i], fh)
                 paths.append(path_)
             cmd = list(SkylabCmd.ADD_MANY_DUTS_CMD) + paths
-            subprocess.call(cmd)
+            print("log command")
+            stderr_log(cmd)
+            print("backtick_out_err")
+            # ignore cases where the hostname doesn't exist
+            (output, err) = backtick_out_err(cmd)
+            if err:
+                if "Failed to stat:" in output:
+                    assert "Unknown host" in output
+                    # then do nothing
+
+            # shutil.rmtree(td, ignore_errors=True)
         finally:
-            shutil.rmtree(td, ignore_errors=True)
+            stderr_log('end add_many_duts', time.time(), _humantime())
 
     @staticmethod
     def assign_one_dut(hostname=None):
         """Assign a DUT to a randomly chosen drone."""
-        assert isinstance(hostname, unicode)
+        assert isinstance(hostname, TEXT)
         cmd = SkylabCmd.assign_one_dut_cmd(hostname=hostname)
         # run command capturing stdout and stderr regardless of exit status
         def run(cmd):
@@ -488,32 +557,35 @@ class SkylabCmd(object):
         if already_present:
             return CommandOutput(exit_code=0, output=output)
         else:
-            return CommandOutput(exit_code=e.returncode, output=output)
+            return CommandOutput(exit_code=exit_code, output=output)
 
 
 class Migration(object):
 
     @staticmethod
-    def migration_plan(ratio, hostnames=[]):
+    def migration_plan(ratio, hostnames=None):
+        hostnames = hostnames or set()
         plan = AtestCmd.atest_get_migration_plan(
             ratio=ratio, hostnames=hostnames)
         return MigrationPlan(transfer=plan['transfer'], retain=plan['retain'])
 
     @staticmethod
-    def lock(hostnames=[], reason=None, retries=3):
+    def lock(hostnames=None, reason=None, retries=3):
         """Lock a list of hostnames with retries.
         """
+        hostnames = hostnames or set()
         assert isinstance(reason, unicode)
         to_lock = set(hostnames)
         for _ in range(retries):
             AtestCmd.atest_lock(hostnames=to_lock.copy(), reason=reason)
 
     @staticmethod
-    def ensure_lock(hostnames=[]):
+    def ensure_lock(hostnames=None):
         """Without changing the state of a DUT, determine which are locked.
 
         @return : LockCommandStatus
         """
+        hostnames = hostnames or set()
         dut_infos = AtestCmd.brief_info(hostnames=hostnames)
         all_hosts = set(hostnames)
         confirmed_locked = set()
@@ -529,12 +601,13 @@ class Migration(object):
         )
 
     @staticmethod
-    def rename(hostnames=[], for_migration=True, retries=1):
+    def rename(hostnames=None, for_migration=True, retries=1):
         """Rename a list of hosts with retry.
 
         @return : {"renamed": renamed hosts, "not-renamed": not renamed
         hosts}
         """
+        hostnames = hostnames or set()
         all_hosts = set(hostnames)
         needs_rename = all_hosts.copy()
         for _ in range(retries):
@@ -548,35 +621,56 @@ class Migration(object):
         return out
 
     @staticmethod
-    def add_to_skylab_inventory_and_drone(hostnames=[], rename_retries=3):
+    def add_to_skylab_inventory_and_drone(use_quick_add, hostnames=None, rename_retries=3):
         """@returns : AddToSkylabInventoryAndDroneStatus"""
+        hostnames = hostnames or set()
         assert not isinstance(hostnames, (unicode, bytes))
         stderr_log('begin add hostnames to inventory', time.time(),
                    _humantime())
         all_hosts = set(hostnames)
         moved = set()
-        renamed = set()
+        with_drone = set()
+
+        if use_quick_add:
+            dut_contents = []
+            good_hostnames = []
+            for hostname in hostnames:
+                out_json = dut_contents.append(AtestCmd.statjson(hostname=hostname))
+                if out_json is None:
+                    pass
+                else:
+                    good_hostnames.append(out_json)
+            # TODO(gregorynisbet): Currently we assume that
+            # SkylabCmd.add_many_duts worked for all DUTs.
+            # In the future, check the
+            # inventory or query Skylab in some way to check that the
+            # transfer was successful
+            SkylabCmd.add_many_duts(dut_contents=dut_contents)
+            moved.update(good_hostnames)
+
         for hostname in hostnames:
-            skylab_dut_descr = AtestCmd.statjson(hostname=hostname)
-            status = SkylabCmd.add_one_dut(add_dut_content=skylab_dut_descr)
-            if status.exit_code != 0:
-                continue
-            moved.add(hostname)
+            if hostname not in moved:
+                skylab_dut_descr = AtestCmd.statjson(hostname=hostname)
+                status = SkylabCmd.add_one_dut(add_dut_content=skylab_dut_descr)
+                if status.exit_code != 0:
+                    continue
+                moved.add(hostname)
             for _ in range(rename_retries):
                 status = SkylabCmd.assign_one_dut(hostname=hostname)
                 if status.exit_code == 0:
-                    renamed.add(hostname)
+                    with_drone.add(hostname)
                     break
         out = AddToSkylabInventoryAndDroneStatus(
-            complete=renamed,
-            without_drone=(moved - renamed),
-            not_started=((all_hosts - moved) - renamed),
+            complete=with_drone,
+            without_drone=(moved - with_drone),
+            not_started=((all_hosts - moved) - with_drone),
         )
         stderr_log('end add hostnames to inventory', time.time(), _humantime())
         return out
 
     @staticmethod
-    def migrate_known_good_duts_until_max_duration_sync(hostnames=[],
+    def migrate_known_good_duts_until_max_duration_sync(use_quick_add,
+                                                        hostnames=None,
                                                         max_duration=60 * 60,
                                                         min_ready_intervals=10,
                                                         interval_len=0):
@@ -584,15 +678,15 @@ class Migration(object):
 
         @param hostnames : list of hostnames
         @param max_duration : when to stop trying to safely migrate duts
-        @param atest : path to atest executable
         @param min_ready_intervals : the minimum number of intervals that a DUT
         must have a good status
         @param interval_len : the length in seconds of interval
-        @param skylab : path to skylab executable
+        @param use_quick_add : whether to use skylab quick-add-duts.
 
         @returns : {"success": successfuly migrated DUTS, "failure":
         non-migrated DUTS}
         """
+        hostnames = hostnames or set()
         assert interval_len is not None
         stderr_log('begin migrating only ready DUTs', time.time(), _humantime())
         start = time.time()
@@ -621,7 +715,7 @@ class Migration(object):
             # any dut that is declared ready to move at this point will definitely
             # reach a terminal state
             skylab_summary = Migration.add_to_skylab_inventory_and_drone(
-                hostnames=ready_to_move)
+                hostnames=ready_to_move, use_quick_add=use_quick_add)
             needs_add_to_skylab.update(skylab_summary.not_started)
             needs_drone.update(skylab_summary.without_drone)
             # rename the autotest entry all at once
@@ -642,11 +736,12 @@ class Migration(object):
         return out
 
     @staticmethod
-    def migrate_duts_unconditionally(hostnames):
+    def migrate_duts_unconditionally(hostnames, use_quick_add):
         """regardless of the DUTs' status, forcibly migrate all the DUTs to skylab.
 
         @returns: MigrateDutCommandStatus
         """
+        hostnames = hostnames or set()
         assert not isinstance(hostnames, (unicode, bytes))
         stderr_log('begin unconditional migration', time.time(), _humantime())
         successfully_moved = set()
@@ -654,7 +749,7 @@ class Migration(object):
         needs_drone = set()
         needs_rename = set()
         skylab_summary = Migration.add_to_skylab_inventory_and_drone(
-            hostnames=hostnames)
+            hostnames=hostnames, use_quick_add=use_quick_add)
         needs_add_to_skylab.update(skylab_summary.not_started)
         needs_drone.update(skylab_summary.without_drone)
         rename_summary = Migration.rename(
@@ -673,13 +768,14 @@ class Migration(object):
         return out
 
     @staticmethod
-    def migrate(hostnames=[],
+    def migrate(hostnames=None,
                 ratio=1,
                 reason=None,
                 max_duration=None,
                 interval_len=None,
                 min_ready_intervals=10,
-                immediately=None):
+                immediately=None,
+                use_quick_add=False):
         """Migrate duts from autotest to skylab.
 
         @param ratio : ratio of DUTs in hostnames to migrate.
@@ -688,20 +784,31 @@ class Migration(object):
         @param interval_len : length of time between checks for DUT readiness
         @param max_duration : the grace period to allow DUTs to finish their
         tasks
-        @param atest : path to atest command
-        @param skylab : path to skylab command
         @param min_ready_intervals : minimum number of intervals before a device
                 is healthy
 
         @return : nothing
         """
+        hostnames = hostnames or set()
         assert isinstance(reason, (unicode, bytes))
         assert interval_len is not None
         assert max_duration is not None
         assert immediately is not None
         reason = reason if isinstance(reason,
                                       unicode) else reason.decode('utf-8')
+        # log the parameters of the migration
         stderr_log('begin migrate', time.time(), _humantime())
+        stderr_log('number of hostnames', len(hostnames), time.time(), _humantime())
+        stderr_log('ratio', ratio, time.time(), _humantime())
+        stderr_log('max_duration', max_duration, time.time(), _humantime())
+        stderr_log('atest', _ATEST_EXE, time.time(), _humantime())
+        stderr_log('skylab', _SKYLAB_EXE, time.time(), _humantime())
+        stderr_log('minimum number of intervals', min_ready_intervals, time.time(), _humantime())
+        stderr_log('immediately', immediately, time.time(), _humantime())
+        stderr_log('use_quick_add', use_quick_add, time.time(), _humantime())
+
+        # import pdb; pdb.set_trace()
+
         all_hosts = tuple(hostnames)
         plan = Migration.migration_plan(ratio=ratio, hostnames=all_hosts)
         Migration.lock(hostnames=plan.transfer, reason=reason)
@@ -712,14 +819,18 @@ class Migration(object):
         to_migrate = plan.transfer
         migrate_status = None
         if not immediately:
-            migrate_status = Migration.migrate_known_good_duts_until_max_duration_sync(
-                hostnames=to_migrate,
-                max_duration=max_duration,
-                min_ready_intervals=min_ready_intervals,
-                interval_len=interval_len)
+            migrate_status = \
+                Migration.migrate_known_good_duts_until_max_duration_sync(
+                    hostnames=to_migrate,
+                    max_duration=max_duration,
+                    min_ready_intervals=min_ready_intervals,
+                    interval_len=interval_len,
+                    use_quick_add=use_quick_add)
             to_migrate = migrate_status.failure
         unconditionally_migrate_status = Migration.migrate_duts_unconditionally(
-            hostnames=to_migrate)
+            use_quick_add=use_quick_add,
+            hostnames=to_migrate,
+        )
         failed_step = None
         out = _migration_json_summary(
             failed_step=failed_step,

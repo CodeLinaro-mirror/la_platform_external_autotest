@@ -60,10 +60,6 @@ class OmahaDevserver(object):
         @param moblab: True if we are running on moblab.
 
         """
-        self._devserver_dir = global_config.global_config.get_config_value(
-            'CROS', 'devserver_dir',
-            default='/home/chromeos-test/chromiumos/src/platform/dev')
-
         self._critical_update = critical_update
         self._max_updates = max_updates
         self._omaha_host = omaha_host
@@ -78,8 +74,14 @@ class OmahaDevserver(object):
         self._devserver_pidfile = None
         self._devserver_static_dir = None
 
-        # Figure out the correct user for sshing to devserver.
-        ssh_user = 'moblab' if moblab else 'chromeos-test'
+        if moblab:
+            self._devserver_dir = global_config.global_config.get_config_value(
+                'CROS', 'devserver_dir')
+            ssh_user = 'moblab'
+        else:
+            self._devserver_dir = \
+                '/home/chromeos-test/chromiumos/src/platform/dev'
+            ssh_user = 'chromeos-test'
         self._devserver_ssh = hosts.SSHHost(self._omaha_host,
                                             user=ssh_user)
 

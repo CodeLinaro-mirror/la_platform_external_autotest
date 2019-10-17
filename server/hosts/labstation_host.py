@@ -11,7 +11,13 @@ from autotest_lib.server.hosts import base_label
 from autotest_lib.server.hosts import cros_label
 from autotest_lib.server.cros import autoupdater
 from autotest_lib.server.hosts import labstation_repair
+from autotest_lib.server.cros import provision
 from autotest_lib.server.hosts import base_servohost
+from autotest_lib.client.cros import constants as client_constants
+from autotest_lib.server.cros.dynamic_suite import constants as ds_constants
+from autotest_lib.server.cros.dynamic_suite import tools
+from autotest_lib.client.common_lib import lsbrelease_utils
+from autotest_lib.client.common_lib.cros import dev_server
 
 
 class LabstationHost(base_servohost.BaseServoHost):
@@ -23,6 +29,8 @@ class LabstationHost(base_servohost.BaseServoHost):
     # Uptime threshold to perform a labstation reboot, this is to prevent a
     # broken DUT keep trying to reboot a labstation. In hours
     UP_TIME_THRESH_HOLD_HOURS = 24
+
+    VERSION_PREFIX = provision.CROS_VERSION_PREFIX
 
     @staticmethod
     def check_host(host, timeout=10):
@@ -106,6 +114,83 @@ class LabstationHost(base_servohost.BaseServoHost):
 
     def get_os_type(self):
         return 'labstation'
+
+
+    def prepare_for_update(self):
+        """Prepares the DUT for an update.
+        Subclasses may override this to perform any special actions
+        required before updating.
+        """
+        pass
+
+
+    def _get_lsb_release_content(self):
+        """Return the content of lsb-release file of host."""
+        return self.run(
+            'cat "%s"' % client_constants.LSB_RELEASE).stdout.strip()
+
+
+    def get_release_version(self):
+        """Get the value of attribute CHROMEOS_RELEASE_VERSION from lsb-release.
+
+        @returns The version string in lsb-release, under attribute
+                 CHROMEOS_RELEASE_VERSION.
+        """
+        return lsbrelease_utils.get_chromeos_release_version(
+            lsb_release_content=self._get_lsb_release_content())
+
+    def verify_job_repo_url(self, tag=''):
+        """
+        Make sure job_repo_url of this host is valid.
+
+        Eg: The job_repo_url "http://lmn.cd.ab.xyx:8080/static/\
+        lumpy-release/R29-4279.0.0/autotest/packages" claims to have the
+        autotest package for lumpy-release/R29-4279.0.0. If this isn't the case,
+        download and extract it. If the devserver embedded in the url is
+        unresponsive, update the job_repo_url of the host after staging it on
+        another devserver.
+
+        @param job_repo_url: A url pointing to the devserver where the autotest
+            package for this build should be staged.
+        @param tag: The tag from the server job, in the format
+                    <job_id>-<user>/<hostname>, or <hostless> for a server job.
+
+        @raises DevServerException: If we could not resolve a devserver.
+        @raises AutoservError: If we're unable to save the new job_repo_url as
+            a result of choosing a new devserver because the old one failed to
+            respond to a health check.
+        @raises urllib2.URLError: If the devserver embedded in job_repo_url
+                                  doesn't respond within the timeout.
+        """
+        info = self.host_info_store.get()
+        job_repo_url = info.attributes.get(ds_constants.JOB_REPO_URL, '')
+        if not job_repo_url:
+            logging.warning('No job repo url set on host %s', self.hostname)
+            return
+
+        logging.info('Verifying job repo url %s', job_repo_url)
+        devserver_url, image_name = tools.get_devserver_build_from_package_url(
+            job_repo_url)
+
+        ds = dev_server.ImageServer(devserver_url)
+
+        logging.info('Staging autotest artifacts for %s on devserver %s',
+                     image_name, ds.url())
+
+        ds.stage_artifacts(image_name, ['autotest_packages'])
+
+
+    def host_version_prefix(self, image):
+        """Return version label prefix.
+
+        In case the CrOS provisioning version is something other than the
+        standard CrOS version e.g. CrOS TH version, this function will
+        find the prefix from provision.py.
+
+        @param image: The image name to find its version prefix.
+        @returns: A prefix string for the image type.
+        """
+        return provision.get_version_label_prefix(image)
 
 
     def repair(self):

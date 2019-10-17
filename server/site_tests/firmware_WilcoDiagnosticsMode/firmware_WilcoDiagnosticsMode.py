@@ -6,6 +6,7 @@ import logging
 import time
 import os
 
+from autotest_lib.client.common_lib import error
 from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
 
 
@@ -35,7 +36,12 @@ class firmware_WilcoDiagnosticsMode(FirmwareTest):
         super(firmware_WilcoDiagnosticsMode, self).initialize(
                 host, cmdline_args)
 
+        if not self.faft_config.has_diagnostics_image:
+            raise error.TestNAError('No diagnostics image for this board.')
+
         self.setup_firmwareupdate_shellball(shellball=None)
+        # Make sure that the shellball is retained over subsequent power cycles.
+        self.blocking_sync()
         self.switcher.setup_mode('normal')
 
     def cleanup(self):
@@ -87,8 +93,17 @@ class firmware_WilcoDiagnosticsMode(FirmwareTest):
 
     def run_once(self):
         """Run the body of the test."""
-        # TODO(b/132072431): Enter and exit diagnostics mode before messing with
-        # firmware.
+        logging.info('Attempting to enter diagnostics mode')
+        self._enter_diagnostics_mode()
+        # Wait long enough that DUT would have rebooted to normal mode if
+        # diagnostics mode failed.
+        time.sleep(self.DIAGNOSTICS_CONFIRM_REBOOT_DELAY_SECONDS +
+                self.DIAGNOSTICS_FAIL_REBOOT_DELAY_SECONDS +
+                self.faft_config.delay_reboot_to_ping)
+        self.switcher.wait_for_client_offline(timeout=5)
+        logging.info('DUT offline after entering diagnostics mode')
+        self.servo.get_power_state_controller().reset()
+        self.switcher.wait_for_client()
 
         # Corrupt the diagnostics image, try to reboot into diagnostics mode,
         # and verify that the DUT ends up in normal mode (indicating failure to
@@ -102,8 +117,7 @@ class firmware_WilcoDiagnosticsMode(FirmwareTest):
         # diagnostics mode, and verify that the DUT goes down (indicating
         # success).
         logging.info('Updating firmware')
-        # TODO(b/132073076): Use --mode=autoupdate.
-        self.faft_client.Updater.RunFirmwareupdate('legacy')
+        self.faft_client.Updater.RunAutoupdate(None)
         logging.info('Rebooting to apply firmware update')
         self.switcher.mode_aware_reboot()
 

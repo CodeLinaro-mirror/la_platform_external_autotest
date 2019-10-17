@@ -34,9 +34,6 @@ class Cr50Test(FirmwareTest):
     # images are needed to be able to restore the original image and board id.
     IMAGES = 1 << 1
     PP_SHORT_INTERVAL = 3
-    CLEARED_FWMP_EXIT_STATUS = 1
-    CLEARED_FWMP_ERROR_MSG = ('CRYPTOHOME_ERROR_FIRMWARE_MANAGEMENT_PARAMETERS'
-                              '_INVALID')
     # Cr50 may have flash operation errors during the test. Here's an example
     # of one error message.
     # do_flash_op:245 errors 20 fsh_pe_control 40720004
@@ -373,8 +370,6 @@ class Cr50Test(FirmwareTest):
         elif self.original_ccd_level != self.cr50.get_ccd_level():
             self.cr50.set_ccd_level(self.original_ccd_level)
 
-
-
     def cleanup(self):
         """Attempt to cleanup the cr50 state. Then run firmware cleanup"""
         try:
@@ -422,7 +417,7 @@ class Cr50Test(FirmwareTest):
 
         end_time = time.time() + self.RESPONSE_TIMEOUT
         while not self.host.ping_wait_up(
-                self.faft_config.delay_reboot_to_ping):
+                self.faft_config.delay_reboot_to_ping * 2):
             if time.time() > end_time:
                 logging.warn('DUT is unresponsive after trying to bring it up')
                 return
@@ -726,7 +721,6 @@ class Cr50Test(FirmwareTest):
                                          nickname='ccd_open',
                                          stdout_tee=self._ccd_open_stdout,
                                          stderr_tee=utils.TEE_TO_LOGS)
-
         if self._ccd_open_job == None:
             raise error.TestFail('could not start ccd open')
 
@@ -811,12 +805,17 @@ class Cr50Test(FirmwareTest):
 
         @param enable_testlab: If True, enable testlab mode after cr50 is open.
         """
+        if not self.faft_config.has_power_button:
+            logging.warning('No power button', exc_info=True)
+            enable_testlab = False
         # Try to use testlab open first, so we don't have to wait for the
         # physical presence check.
         self.cr50.send_command('ccd testlab open')
         if self.cr50.get_ccd_level() == 'open':
             return
 
+        if self.servo.has_control('chassis_open'):
+            self.servo.set('chassis_open','yes')
         # Use the console to open cr50 without entering dev mode if possible. It
         # takes longer and relies on more systems to enter dev mode and ssh into
         # the AP. Skip the steps that aren't required.
@@ -827,6 +826,9 @@ class Cr50Test(FirmwareTest):
             self.cr50.set_ccd_level(self.cr50.OPEN)
         else:
             self.ccd_open_from_ap()
+
+        if self.servo.has_control('chassis_open'):
+            self.servo.set('chassis_open','no')
 
         if enable_testlab:
             self.cr50.set_ccd_testlab('on')
@@ -892,6 +894,11 @@ class Cr50Test(FirmwareTest):
 
     def set_ccd_password(self, password, expect_error=False):
         """Set the ccd password"""
+        # Testlab mode can't be enabled if there is no power button, so we
+        # shouldn't allow setting the password.
+        if not self.faft_config.has_power_button:
+            raise error.TestError('No power button')
+
         # If for some reason the test sets a password and is interrupted before
         # we can clear it, we want testlab mode to be enabled, so it's possible
         # to clear the password without knowing it.
@@ -922,29 +929,6 @@ class Cr50Test(FirmwareTest):
 
         if (mode == 'dev') != self.cr50.in_dev_mode():
             raise error.TestError('Unable to enter %r mode' % mode)
-
-
-    def _fwmp_is_cleared(self):
-        """Return True if the FWMP has been created"""
-        res = self.host.run('cryptohome '
-                            '--action=get_firmware_management_parameters',
-                            ignore_status=True)
-        if res.exit_status and res.exit_status != self.CLEARED_FWMP_EXIT_STATUS:
-            raise error.TestError('Could not run cryptohome command %r' % res)
-        return self.CLEARED_FWMP_ERROR_MSG in res.stdout
-
-
-    def clear_fwmp(self):
-        """Clear the FWMP"""
-        if self._fwmp_is_cleared():
-            return
-        status = self.host.run('cryptohome --action=tpm_status').stdout
-        logging.debug(status)
-        if 'TPM Owned: true' not in status:
-            self.host.run('cryptohome --action=tpm_take_ownership')
-            self.host.run('cryptohome --action=tpm_wait_ownership')
-        self.host.run('cryptohome '
-                      '--action=remove_firmware_management_parameters')
 
     def tpm_is_responsive(self):
         """Check TPM responsiveness by running tpm_version."""

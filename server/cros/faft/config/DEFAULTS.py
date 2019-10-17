@@ -15,7 +15,6 @@ class Values(object):
     """
 
     mode_switcher_type = 'keyboard_dev_switcher'
-    fw_bypasser_type = 'ctrl_d_bypasser'
 
     chrome_ec = False
     chrome_usbpd = False
@@ -26,7 +25,15 @@ class Values(object):
     power_button_dev_switch = False
     rec_button_dev_switch = False
     ec_capability = list()
+    cr50_capability = list()
     spi_voltage = 'pp1800'
+
+    # The max input voltage for USB Type-C port
+    usbc_input_voltage_limit = 20
+
+    # Has a custom charger profile, which takes over the control of voltage/
+    # current limit
+    charger_profile_override = False
 
     # Has eventlog support including proper timestamps. (Only for old boards!
     # Never disable this "temporarily, until we get around to implementing it"!)
@@ -116,3 +123,9 @@ class Values(object):
     # Length of serial number that can be set in firmware; if serial number
     # cannot be set then 0
     serial_number_length = 0
+
+    # True if the chrome devices has power button.
+    has_power_button = True
+
+    # True if altfw/diag is built into RW_LEGACY.
+    has_diagnostics_image = False
