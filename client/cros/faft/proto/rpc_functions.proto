@@ -187,12 +187,6 @@ service System {
   rpc IsAvailable
     (SystemIsAvailableRequest)
     returns (SystemIsAvailableResponse);
-  rpc WaitForClient
-    (SystemWaitForClientRequest)
-    returns (SystemWaitForClientResponse);
-  rpc WaitForClientOffline
-    (SystemWaitForClientOfflineRequest)
-    returns (SystemWaitForClientOfflineResponse);
   rpc DumpLog
     (SystemDumpLogRequest)
     returns (SystemDumpLogResponse);
@@ -211,6 +205,9 @@ service System {
   rpc GetPlatformName
     (SystemGetPlatformNameRequest)
     returns (SystemGetPlatformNameResponse);
+  rpc GetModelName
+    (SystemGetModelNameRequest)
+    returns (SystemGetModelNameResponse);
   rpc DevTpmPresent
     (SystemDevTpmPresentRequest)
     returns (SystemDevTpmPresentResponse);
@@ -274,6 +271,9 @@ service Tpm {
   rpc GetKernelDatakeyVersion
     (TpmGetKernelDatakeyVersionRequest)
     returns (TpmGetKernelDatakeyVersionResponse);
+  rpc GetTpmVersion
+    (TpmGetTpmVersionRequest)
+    returns (TpmGetTpmVersionResponse);
   rpc StopDaemon
     (TpmStopDaemonRequest)
     returns (TpmStopDaemonResponse);
@@ -370,6 +370,12 @@ service Updater {
   rpc CopyBios
     (UpdaterCopyBiosRequest)
     returns (UpdaterCopyBiosResponse);
+  rpc GetImageGbbFlags
+    (UpdaterGetImageGbbFlagsRequest)
+    returns (UpdaterGetImageGbbFlagsResponse);
+  rpc SetImageGbbFlags
+      (UpdaterSetImageGbbFlagsRequest)
+      returns (UpdaterSetImageGbbFlagsResponse);
 }
 
 // Bios messages
@@ -710,20 +716,6 @@ message SystemIsAvailableResponse {
   bool response = 1;
 }
 
-message SystemWaitForClientRequest {
-  int32 timeout = 1; // seconds
-}
-message SystemWaitForClientResponse {
-  bool success = 1;
-}
-
-message SystemWaitForClientOfflineRequest {
-  int32 timeout = 1; // seconds
-}
-message SystemWaitForClientOfflineResponse {
-  bool success = 1;
-}
-
 message SystemDumpLogRequest {
   bool remove_log = 1; // optional
 }
@@ -761,6 +753,11 @@ message SystemRunShellCommandGetStatusResponse {
 
 message SystemGetPlatformNameRequest {}
 message SystemGetPlatformNameResponse {
+  string name = 1;
+}
+
+message SystemGetModelNameRequest {}
+message SystemGetModelNameResponse {
   string name = 1;
 }
 
@@ -873,6 +870,11 @@ message TpmGetKernelVersionResponse {
 message TpmGetKernelDatakeyVersionRequest {}
 message TpmGetKernelDatakeyVersionResponse {
   int32 version = 1;
+}
+
+message TpmGetTpmVersionRequest {}
+message TpmGetTpmVersionResponse {
+  string version = 1;
 }
 
 message TpmStopDaemonRequest {}
@@ -1061,3 +1063,17 @@ message UpdaterCopyBiosRequest {
 message UpdaterCopyBiosResponse {
   string full_path = 1;
 }
+
+
+message UpdaterGetImageGbbFlagsRequest {
+  string filename = 1; // optional
+}
+message UpdaterGetImageGbbFlagsResponse {
+  int32 flags = 1;
+}
+
+message UpdaterSetImageGbbFlagsRequest {
+  int32 flags = 1;
+  string filename = 2; // optional
+}
+message UpdaterSetImageGbbFlagsResponse {}

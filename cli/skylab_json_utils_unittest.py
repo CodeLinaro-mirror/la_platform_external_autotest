@@ -97,7 +97,9 @@ class skylab_json_utils_unittest(unittest.TestCase):
         l = sky.Labels()
         l._add_label("cr50:0.3.18")
         out = sky.process_labels(l, platform=None)
-        self.assertEqual(out["cr50Phase"], "CR50_PHASE_0.3.18")
+        # TODO(gregorynisbet): note! strictly speaking this is wrong,
+        # but skylab does not support version numbers in the CR50_PHASE
+        self.assertEqual(out["cr50Phase"], "CR50_PHASE_INVALID")
 
     def test_cr50phase_absent(self):
         l = sky.Labels()
@@ -140,7 +142,7 @@ class skylab_json_utils_unittest(unittest.TestCase):
     def test_ec_absent(self):
         l = sky.Labels()
         out = sky.process_labels(l, platform=None)
-        self.assertIsNone(out["ecType"])
+        self.assertEqual(out["ecType"], "EC_TYPE_INVALID")
 
     def test_os_present(self):
         l = sky.Labels()
@@ -443,17 +445,22 @@ class skylab_json_utils_unittest(unittest.TestCase):
     def test_chameleon_type_absent(self):
         l = sky.Labels()
         out = sky.process_labels(l, platform=None)
-        self.assertEqual(out["peripherals"]["chameleonType"],
-                         "CHAMELEON_TYPE_INVALID")
+        self.assertIsNone(out["peripherals"]["chameleonType"])
 
     def test_conductive_present(self):
         l = sky.Labels()
-        l._add_label("conductive")
+        l._add_label("conductive:True")
         out = sky.process_labels(l, platform=None)
         self.assertEqual(out["peripherals"]["conductive"], True)
 
     def test_conductive_absent(self):
         l = sky.Labels()
+        out = sky.process_labels(l, platform=None)
+        self.assertEqual(out["peripherals"]["conductive"], False)
+
+    def test_conductive_false(self):
+        l = sky.Labels()
+        l._add_label("conductive:False")
         out = sky.process_labels(l, platform=None)
         self.assertEqual(out["peripherals"]["conductive"], False)
 

@@ -24,12 +24,13 @@ import json
 import random
 import re
 import socket
+import sys
 import time
 
-from autotest_lib.cli import action_common, rpc, topic_common, skylab_utils, skylab_migration
+from autotest_lib.cli import action_common, rpc, topic_common, skylab_utils, skylab_migration, skylab_migration2
 from autotest_lib.cli import fair_partition
 from autotest_lib.client.bin import utils as bin_utils
-from autotest_lib.cli.skylab_json_utils import process_labels
+from autotest_lib.cli.skylab_json_utils import process_labels, print_textpb, write, writeln
 from autotest_lib.cli import skylab_rollback
 from autotest_lib.cli.skylab_json_utils import process_labels, validate_required_fields_for_skylab
 from autotest_lib.client.common_lib import error, host_protections
@@ -423,10 +424,16 @@ class host_statjson(host_stat):
                                help='Verify that required fields are provided',
                                action='store_true',
                                dest='verify')
+        self.parser.add_option('--textpb',
+                               default=False,
+                               help='Print in best effort textpb format',
+                               action='store_true',
+                               dest='textpb')
 
     def parse(self):
         (options, leftover) = super(host_statjson, self).parse()
         self.verify = options.verify
+        self.textpb = options.textpb
         return (options, leftover)
 
     def output(self, results):
@@ -472,7 +479,12 @@ class host_statjson(host_stat):
             # has all the required fields for skylab.
             if self.verify:
                 validate_required_fields_for_skylab(skylab_json)
-            print json.dumps(skylab_json, indent=4, sort_keys=True)
+            if self.textpb:
+                # need leading "duts" preamble
+                write("duts ")
+                print_textpb(skylab_json)
+            else:
+                print json.dumps(skylab_json, indent=4, sort_keys=True)
 
 
 class host_jobs(host):
@@ -1604,9 +1616,14 @@ class host_skylab_migrate(action_common.atest_list, host):
                                action='store_true')
         self.parser.add_option('-s',
                                '--slow',
-                               help='don\' use quick-add-duts',
+                               help='don\'t use quick-add-duts',
                                dest='no_use_quick_add',
                                action='store_true')
+        self.parser.add_option('-b',
+                               '--batch-size',
+                               help='process n duts at a time',
+                               dest="batch_size",
+                               default=None)
 
     def parse(self):
         (options, leftover) = super(host_skylab_migrate, self).parse()
@@ -1629,6 +1646,7 @@ class host_skylab_migrate(action_common.atest_list, host):
                 self.use_quick_add = False
             else:
                 self.invalid_syntax('must include either --quick or --slow.')
+        self.batch_size = options.batch_size
 
         return (options, leftover)
 
@@ -1684,6 +1702,7 @@ class host_skylab_migrate(action_common.atest_list, host):
             min_ready_intervals=10,
             immediately=True,
             use_quick_add=self.use_quick_add,
+            batch_size=self.batch_size,
         )
         return res
 
@@ -1731,3 +1750,198 @@ class host_skylab_rollback(action_common.atest_list, host):
 
     def output(self, result):
         print result
+
+
+class host_skylab_verify(action_common.atest_list, host):
+    usage_action = "skylab_verify"
+
+    def __init__(self):
+        super(host_skylab_verify, self).__init__()
+
+    def parse(self):
+        (options, leftover) = super(host_skylab_verify, self).parse()
+        self.model = getattr(options, 'model', None)
+        self.pool = getattr(options, 'pool', None)
+        self.board = getattr(options, 'board', None)
+        return (options, leftover)
+
+    def execute(self):
+        if self.hosts:
+            hostnames = self.hosts
+        else:
+            hostnames = _host_skylab_migrate_get_hostnames(
+                obj=self,
+                class_=host_skylab_migrate,
+                model=self.model,
+                board=self.board,
+                pool=self.pool,
+            )
+        if not hostnames:
+            return {'error': 'no hosts to migrate'}
+        res = skylab_migration.hostname_migrated_status(
+            hostnames=hostnames,
+        )
+        return res
+
+
+    def output(self, result):
+        json.dump(result, sys.stdout, indent=4)
+
+
+class host_dump_duts(action_common.atest_list, host):
+    usage_action = "host_dump_duts"
+
+    def __init__(self):
+        super(host_dump_duts, self).__init__()
+        self.parser.add_option('--output-dir',
+                               help='directory to dump the board json files',
+                               dest='output_dir',
+                               default=None)
+
+    def parse(self):
+        (options, leftover) = super(host_dump_duts, self).parse()
+        self.output_dir = options.output_dir
+        self.model = getattr(options, 'model', None)
+        self.pool = getattr(options, 'pool', None)
+        self.board = getattr(options, 'board', None)
+        return (options, leftover)
+
+    def execute(self):
+        if not hasattr(self, 'output_dir') or not self.output_dir:
+            return {'error': "must specify output directory"}
+
+        if self.hosts:
+            hostnames = self.hosts
+        else:
+            hostnames = _host_skylab_migrate_get_hostnames(
+                obj=self,
+                class_=host_dump_duts,
+                model=self.model,
+                board=self.board,
+                pool=self.pool,
+            )
+
+        good, bad, err = skylab_migration2.write_statjson_hostnames(hostnames=hostnames, outdir=self.output_dir)
+
+        if err is not None:
+            return {"error": err}
+
+        hostname_err_map, err = skylab_migration2.validate_output(self.output_dir)
+
+        if err is not None:
+            return {"error": err}
+
+        invalid_entries = {}
+        for hostname in hostname_err_map:
+            if hostname_err_map[hostname] is not None:
+                invalid_entries[hostname] = hostname_err_map[hostname]
+
+        return {
+            "not-processed": bad,
+            "errors": invalid_entries,
+        }
+
+
+
+    def output(self, result):
+        json.dump(result, sys.stdout, indent=4)
+
+
+class host_read_dump(action_common.atest_list, host):
+    usage_action = "host_read_dump"
+
+    def __init__(self):
+        super(host_read_dump, self).__init__()
+        self.parser.add_option('--output-dir',
+                               help='directory to read json files from',
+                               dest='output_dir',
+                               default=None)
+
+    def parse(self):
+        (options, leftover) = super(host_read_dump, self).parse()
+        self.output_dir = options.output_dir
+        self.model = getattr(options, 'model', None)
+        self.pool = getattr(options, 'pool', None)
+        self.board = getattr(options, 'board', None)
+        return (options, leftover)
+
+    def execute(self):
+        if not hasattr(self, 'output_dir') or not self.output_dir:
+            return {'error': "must specify output directory"}
+
+        json_obj, err = skylab_migration2.assemble_output_dir(output_dir=self.output_dir)
+
+        if err is not None:
+            return {"error": err}
+        else:
+            return json_obj
+
+    def output(self, result):
+        json.dump(result, sys.stdout, indent=4)
+
+
+class host_do_quick_add(action_common.atest_list, host):
+    usage_action = "do_quick_add"
+
+    def __init__(self):
+        super(host_do_quick_add, self).__init__()
+        self.parser.add_option('--data',
+                               help='directory to read json files from',
+                               dest='data',
+                               default=None)
+
+    def parse(self):
+        (options, leftover) = super(host_do_quick_add, self).parse()
+        self.data_dir = options.data
+        self.model = getattr(options, 'model', None)
+        self.pool = getattr(options, 'pool', None)
+        self.board = getattr(options, 'board', None)
+        return (options, leftover)
+
+    def execute(self):
+        if self.hosts:
+            hostnames = self.hosts
+        else:
+            hostnames = _host_skylab_migrate_get_hostnames(
+                obj=self,
+                class_=host_do_quick_add,
+                model=self.model,
+                board=self.board,
+                pool=self.pool,
+            )
+        if not hostnames:
+            return {'error': 'no hosts to add'}
+        error_msg = skylab_migration2.do_quick_add_duts(hostnames=hostnames, dirpath=self.data_dir)
+        return {'error' : error_msg}
+
+    def output(self, result):
+        json.dump(result, sys.stdout, indent=4)
+
+
+class host_lock_rename(action_common.atest_list, host):
+    usage_action = "lock_rename"
+
+    def __init__(self):
+        super(host_lock_rename, self).__init__()
+
+    def parse(self):
+        (options, leftover) = super(host_lock_rename, self).parse()
+        self.model = getattr(options, 'model', None)
+        self.pool = getattr(options, 'pool', None)
+        self.board = getattr(options, 'board', None)
+        return (options, leftover)
+
+    def execute(self):
+        if self.hosts:
+            hostnames = self.hosts
+        else:
+            hostnames = _host_skylab_migrate_get_hostnames(
+                obj=self,
+                class_=host_lock_rename,
+                model=self.model,
+                board=self.board,
+                pool=self.pool,
+            )
+        if not hostnames:
+            return {'error': 'no hostnames'}
+        skylab_migration2.atest_lock_rename(hostnames=hostnames)

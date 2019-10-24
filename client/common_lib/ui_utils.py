@@ -28,12 +28,13 @@ class UI_Handler(object):
         @param isRegex: bool, if the item is a regex.
         @param role: Parameter to provide to the 'role' attribute.
 
-         """
-        self._set_obj_var(name, isRegex, role)
-
+        """
+        FindParams = self._get_FindParams_str(name=name,
+                                              role=role,
+                                              isRegex=isRegex)
         try:
-            restriction = self.ext.EvaluateJavaScript("""
-                tempVar.restriction;""")
+            restriction = self.ext.EvaluateJavaScript(
+                "{}.restriction;".format(FindParams))
         except Exception:
             raise error.TestError(
                 'Could not find object {}.'.format(name))
@@ -58,21 +59,28 @@ class UI_Handler(object):
             True if object is not present and flip is True.
 
         """
-        self._set_obj_var(name, isRegex, role)
-        item = self.ext.EvaluateJavaScript("tempVar;")
+        FindParams = self._get_FindParams_str(name=name,
+                                              role=role,
+                                              isRegex=isRegex)
 
-        if item is None:
-            return False if not flip else True
-        return True if not flip else False
+        if flip is True:
+            return not self._is_item_present(FindParams)
+        return self._is_item_present(FindParams)
 
-    def wait_for_ui_obj(self, name, isRegex=False, remove=False, role=None):
+    def wait_for_ui_obj(self,
+                        name,
+                        isRegex=False,
+                        remove=False,
+                        role=None,
+                        timeout=10):
         """
         Waits for the UI object specified.
 
         @param name: Parameter to provide to the 'name' attribute.
         @param isRegex: bool, if the 'name' is a regex.
-        @param remove: bool, if wait for the item to be removed.
+        @param remove: bool, if you are waiting for the item to be removed.
         @param role: Parameter to provide to the 'role' attribute.
+        @param timeout: int, time to wait for the item.
 
         @raises error.TestError if the element is not loaded (or removed).
 
@@ -82,7 +90,7 @@ class UI_Handler(object):
                                                 isRegex=isRegex,
                                                 flip=remove,
                                                 role=role),
-            timeout=10,
+            timeout=timeout,
             exception=error.TestError('{} did not load'.format(name)))
 
     def did_obj_not_load(self, name, isRegex=False, timeout=5):
@@ -112,13 +120,17 @@ class UI_Handler(object):
 
     def doDefault_on_obj(self, name, isRegex=False, role=None):
         """Runs the .doDefault() js command on the element."""
-        self._set_obj_var(name, isRegex, role)
-        self.ext.EvaluateJavaScript("tempVar.doDefault();")
+        FindParams = self._get_FindParams_str(name=name,
+                                              role=role,
+                                              isRegex=isRegex)
+        self.ext.EvaluateJavaScript("{}.doDefault();".format(FindParams))
 
     def doCommand_on_obj(self, name, cmd, isRegex=False, role=None):
         """Runs the specified command on the element."""
-        self._set_obj_var(name, isRegex, role)
-        return self.ext.EvaluateJavaScript("tempVar.{};".format(cmd))
+        FindParams = self._get_FindParams_str(name=name,
+                                              role=role,
+                                              isRegex=isRegex)
+        return self.ext.EvaluateJavaScript("{}.{};".format(FindParams, cmd))
 
     def list_screen_items(self,
                           role=None,
@@ -189,17 +201,72 @@ class UI_Handler(object):
         else:
             return '"{}"'.format(name)
 
-    def _set_obj_var(self, name, isRegex, role):
-        """Sets a variable within the extension to be used later."""
+    def _get_FindParams_str(self, name, role, isRegex):
+        """Returns the FindParms string, so that automation node functions
+        can be run on it
+
+        @param role: The role of the items to use (ie button).
+        @param name: Parameter to provide to the 'name' attribute.
+        @param isRegex: bool, if the obj is a regex.
+
+        @returns: The ".find($FindParams)" string, which can be used to run
+            automation node commands, such as .doDefault()
+
+        """
+        FINDPARAMS_BASE = """
+        root.find({attributes:
+                  {name: %s,
+                   role: %s}}
+                 )"""
+
         name = self._format_obj(name, isRegex)
         if role is None:
             role = self.REGEX_ALL
         else:
             role = self._format_obj(role, False)
+        return (FINDPARAMS_BASE % (name, role))
 
-        self.ext.EvaluateJavaScript("""
-            var tempVar;
-            tempVar = root.find({attributes:
-                {name: %s,
-                 role: %s}}
-             );""" % (name, role))
+    def _is_item_present(self, findParams):
+        """Returns False if tempVar is None, else True."""
+        if self.ext.EvaluateJavaScript("{};".format(findParams)) is None:
+            return False
+        return True
+
+    def click_and_wait_for_item_with_retries(self,
+                                             item_to_click,
+                                             item_to_wait_for,
+                                             isRegex_click=False,
+                                             isRegex_wait=False,
+                                             click_role=None,
+                                             wait_role=None):
+        """
+        Click on an item, and wait for a subsequent item to load. If the new
+        item does not load, we attempt to click the button again.
+
+        This being done to remove the corner case of button being visually
+        loaded, but not fully ready to be clicked yet. In simple terms:
+            Click button --> Check for next button to appear
+            IF button does not appear, its likely the original button click did
+            not work, thus reclick that button --> recheck for the next button.
+
+            If button did appear, stop clicking.
+
+        """
+
+        self.doDefault_on_obj(item_to_click,
+                                 role=click_role,
+                                 isRegex=isRegex_click)
+        for retry in xrange(2):
+            try:
+                self.wait_for_ui_obj(item_to_wait_for,
+                                        role=wait_role,
+                                        isRegex=isRegex_wait,
+                                        timeout=3)
+                break
+            except error.TestError:
+                self.doDefault_on_obj(item_to_click,
+                                         role=click_role,
+                                         isRegex=isRegex_click)
+        else:
+            raise error.TestError('Item {} did not load after 2 tries'.format(
+                                  item_to_wait_for))

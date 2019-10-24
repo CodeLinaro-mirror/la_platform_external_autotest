@@ -1,10 +1,15 @@
 from __future__ import unicode_literals
+from __future__ import print_function
+import sys
+import json
+import uuid
 
 # Source of truth is DUTPool enum at
 # https://cs.chromium.org/chromium/infra/go/src/infra/libs/skylab/inventory/device.proto
 MANAGED_POOLS = {
     "cq": "DUT_POOL_CQ",
-    "bvt": "DUT_POOL_BVT",
+    # TODO(gregorynisbet): BVT is obsolete, send stuff to QUOTA intead
+    "bvt": "DUT_POOL_QUOTA",
     "suites": "DUT_POOL_SUITES",
     "cts": "DUT_POOL_CTS",
     "cts-perbuild": "DUT_POOL_CTS_PERBUILD",
@@ -30,6 +35,25 @@ VIDEO_ACCELERATION_WHITELIST = {
 }
 
 
+PHASE_WHITELIST = {
+    "PHASE_INVALID",
+    "PHASE_EVT",
+    "PHASE_EVT2",
+    "PHASE_DVT",
+    "PHASE_DVT2",
+    "PHASE_PVT",
+    "PHASE_PVT2",
+    "PHASE_PVT3",
+    "PHASE_MP",
+}
+
+
+CR50_PHASE_WHITELIST = {
+    "CR50_PHASE_INVALID",
+    "CR50_PHASE_PREPVT",
+    "CR50_PHASE_PVT",
+}
+
 
 def _normalize_pools(l):
     """take in the list of pools and distribute them between criticalPools and
@@ -45,7 +69,8 @@ def _normalize_pools(l):
             out["self_serve_pools"].append(pool)
     #TODO(gregorynisbet): reject empty pools too.
     if len(out["criticalPools"]) > 1:
-        raise ValueError("multiple critical pools %s" % pools)
+        sys.stderr.write("multiple critical pools %s\n" % pools)
+        out["criticalPools"] = ["DUT_POOL_SUITES"]
     return out
 
 
@@ -53,6 +78,8 @@ def _get_chameleon(l):
     out = l.get_enum("chameleon", prefix="CHAMELEON_TYPE_")
     # send CHAMELEON_TYPE_['HDMI'] -> CHAMELEON_TYPE_HDMI
     out = "".join(ch for ch in out if ch not in "[']")
+    if out == "CHAMELEON_TYPE_INVALID":
+        return None
     if out == "CHAMELEON_TYPE_":
         return None
     good_val = False
@@ -145,10 +172,21 @@ class Labels(object):
             if x.startswith(prefix):
                 yield x
 
-
 def _cr50_phase(l):
-    return l.get_enum("cr50", prefix="CR50_PHASE_")
+    inferred_cr50_phase = l.get_enum("cr50", prefix="CR50_PHASE_")
+    if inferred_cr50_phase in CR50_PHASE_WHITELIST:
+        return inferred_cr50_phase
+    else:
+        return "CR50_PHASE_INVALID"
 
+def _conductive(l):
+    out = l.get_string("conductive")
+    if out is None:
+        return False
+    if out in ("False", "false", 0, None, "0", "None", "no", "Flase"):
+        return False
+    else:
+        return True
 
 def _cts_abi(l):
     """The ABI has the structure cts_abi_x86 and cts_abi_arm
@@ -177,7 +215,7 @@ def _os_type(l):
 def _ec_type(l):
     """Get the ec type."""
     name = l.get_string("ec")
-    return EC_TYPE_ATEST_TO_SK.get(name, None)
+    return EC_TYPE_ATEST_TO_SK.get(name, "EC_TYPE_INVALID")
 
 
 def _video_acceleration(l):
@@ -198,6 +236,15 @@ def _video_acceleration(l):
 
 def _platform(l):
     return l.get_string("platform") or l.get_string("Platform")
+
+
+def _phase(l):
+    inferred_phase = l.get_enum("phase", prefix="PHASE_")
+    if inferred_phase in PHASE_WHITELIST:
+        return inferred_phase
+    else:
+        return "PHASE_INVALID"
+    
 
 
 def validate_required_fields_for_skylab(skylab_fields):
@@ -251,7 +298,7 @@ def process_labels(labels, platform):
         # enum keys
         "ecType": _ec_type(l),
         "osType": _os_type(l),
-        "phase": l.get_enum("phase", prefix="PHASE_"),
+        "phase": _phase(l),
         # list of enum keys
         "criticalPools": pools["criticalPools"],
         "ctsAbi": _cts_abi(l),
@@ -289,7 +336,7 @@ def process_labels(labels, platform):
             "audioLoopbackDongle": l.get_bool("audio_loopback_dongle"),
             "chameleon": l.get_bool("chameleon"),
             "chameleonType": _get_chameleon(l),
-            "conductive": l.get_bool("conductive"),
+            "conductive": _conductive(l),
             "huddly": l.get_bool("huddly"),
             "mimo": l.get_bool("mimo"),
             "servo": l.get_bool("servo"),
@@ -317,3 +364,86 @@ def process_labels(labels, platform):
         del out["self_serve_pools"]
 
     return out
+
+
+
+# accepts: string possibly in camelCase
+# returns: string in snake_case
+def to_snake_case(str):
+    out = []
+    for i, x in enumerate(str):
+        if i == 0:
+            out.append(x.lower())
+            continue
+        if x.isupper():
+            out.append("_")
+            out.append(x.lower())
+        else:
+            out.append(x.lower())
+    return "".join(out)
+
+
+def write(*args, **kwargs):
+    print(*args, sep="", end="", **kwargs)
+
+def writeln(*args, **kwargs):
+    print(*args, sep="", end="\n", **kwargs)
+
+
+# accepts: key, value, indentation level
+# returns: nothing
+# emits: textual protobuf format, best effort
+def print_textpb_keyval(key, val, level=0):
+    # repeated field, repeat the key in every stanza
+    if isinstance(val, (list, tuple)):
+        for x in val:
+            # TODO(gregorynisbet): nested lists?
+            print_textpb_keyval(to_snake_case(key), x, level=level)
+    # if the value is a dictionary, don't print :
+    elif isinstance(val, dict):
+        write((level * " "), to_snake_case(key), " ")
+        print_textpb(val, level=level)        
+    else:
+        write((level * " "), to_snake_case(key), ":", " ")
+        print_textpb(val, level=0)
+
+
+            
+
+
+# accepts: obj, indentation level
+# returns: nothing
+# emits: textual protobuf format, best effort
+def print_textpb(obj, level=0):
+    # not sure what we want for None
+    # an empty string seems like a good choice
+    if obj is None:
+        writeln((level * " "), '""')
+    elif isinstance(obj, (bytes, unicode)) and obj.startswith("[IGNORED]"):
+        writeln((level * " "), json.dumps(str(uuid.uuid4())))
+    elif isinstance(obj, (int, long, float, bool)):
+        writeln((level * " "), json.dumps(obj))
+    elif isinstance(obj, (bytes, unicode)):
+        # guess that something is not an enum if it
+        # contains at least one lowercase letter or a space
+        # or does not contain an underscore
+        is_enum = True
+        for ch in obj:
+            if ch.islower() or ch == " ":
+                is_enum = False
+                break
+        # check for the underscore
+        is_enum = is_enum and "_" in obj
+        if is_enum:
+            writeln((level * " "), obj)
+        else:
+            writeln((level * " "), json.dumps(obj))
+    elif isinstance(obj, dict):
+        writeln("{")
+        for key in sorted(obj):
+            print_textpb_keyval(key=key, val=obj[key], level=(2 + level))
+        writeln((level * " "), "}")
+    elif isinstance(obj, (list, tuple)):
+        raise RuntimeError("No sequences on toplevel")
+    else:
+        raise RuntimeError("Unsupported type (%s)" % type(obj))

@@ -19,7 +19,7 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.server import hosts
 from autotest_lib.server import utils
 from autotest_lib.server.cros import camerabox_utils
-from autotest_lib.server.cros import tradefed_test
+from autotest_lib.server.cros.tradefed import tradefed_test
 
 # Maximum default time allowed for each individual CTS module.
 _CTS_TIMEOUT_SECONDS = 3600
@@ -30,8 +30,9 @@ _PARTNER_CTS = 'gs://chromeos-partner-cts/'
 _CTS_URI = {
     'arm': _PUBLIC_CTS + 'android-cts-9.0_r9-linux_x86-arm.zip',
     'x86': _PUBLIC_CTS + 'android-cts-9.0_r9-linux_x86-x86.zip',
-    'media': _PUBLIC_CTS + 'android-cts-media-1.4.zip',
 }
+_CTS_MEDIA_URI = _PUBLIC_CTS + 'android-cts-media-1.4.zip'
+_CTS_MEDIA_LOCALPATH = '/tmp/android-cts-media'
 
 
 class cheets_CTS_P(tradefed_test.TradefedTest):
@@ -126,6 +127,9 @@ class cheets_CTS_P(tradefed_test.TradefedTest):
         for dut in self.dut_fixtures:
             dut.initialize()
 
+        for host in self._hosts:
+            host.run('cras_test_client --mute 1')
+
     def initialize(self,
                    camera_facing=None,
                    bundle=None,
@@ -163,6 +167,7 @@ class cheets_CTS_P(tradefed_test.TradefedTest):
                  enable_default_apps=False,
                  executable_test_count=None,
                  bundle=None,
+                 extra_artifacts=[],
                  precondition_commands=[],
                  login_precondition_commands=[],
                  timeout=_CTS_TIMEOUT_SECONDS):
@@ -198,10 +203,13 @@ class cheets_CTS_P(tradefed_test.TradefedTest):
             timeout=timeout,
             target_module=target_module,
             target_plan=target_plan,
-            needs_push_media=needs_push_media,
+            media_asset=tradefed_test.MediaAsset(
+                _CTS_MEDIA_URI if needs_push_media else None,
+                _CTS_MEDIA_LOCALPATH),
             enable_default_apps=enable_default_apps,
             executable_test_count=executable_test_count,
             bundle=bundle,
+            extra_artifacts=extra_artifacts,
             cts_uri=_CTS_URI,
             login_precondition_commands=login_precondition_commands,
             precondition_commands=precondition_commands)

@@ -2,7 +2,7 @@ import os
 import subprocess
 
 
-BATCH_SIZE = 200
+BATCH_SIZE = 50
 
 
 # delete all the duts and un-migrate the corresponding entries in
@@ -20,11 +20,9 @@ for item in "$@"; do
     mangled+=("$item"-migrated-do-not-use)
 done
 
-echo y > /tmp/yfile
+atest host rename --for-rollback --non-interactive "${mangled[@]}"
 
-</tmp/yfile atest host rename --for-rollback "${mangled[@]}"
-
-atest host mod --unlock "${mangled[@]}"
+atest host mod --unlock --no-confirmation "$@"
 """
 
 

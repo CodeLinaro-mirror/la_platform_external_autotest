@@ -16,6 +16,7 @@ import time
 import shutil
 import sys
 import types
+import itertools
 
 import common
 
@@ -53,6 +54,13 @@ def find_atest_path():
 _ATEST_EXE = find_atest_path()
 
 
+def strip_suffix(str, suffix):
+    if str.endswith(suffix):
+        return str[:-len(suffix)]
+    else:
+        return str
+
+
 def call_with_tempfile(cmd, lines):
     """Execute command requiring a temporary file and return a CommandOutput struct.
 
@@ -87,6 +95,59 @@ def call_with_tempfile(cmd, lines):
             return CommandOutput(
                 exit_code=e.returncode,
                 output=[x.decode('utf-8') for x in e.output.splitlines()])
+
+
+
+# accepts: string
+# returns: string but with exactly one trailing newline
+def _one_trailing_newline(s):
+    s = s.rstrip("\n")
+    return s + "\n"
+
+# accepts: shell command, rest of args
+# returns: exit_status, stdout, stderr
+def shell_capture_all(cmd, *rest):
+    shellcmd = ("bash", "-c", cmd, "bash",) + rest
+    pr = subprocess.Popen(
+        shellcmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout, stderr = pr.communicate()
+    return pr.returncode, stdout, stderr
+
+
+# accepts: shell command, rest of args
+# returns: exit_status, stdout, stderr
+def shell_capture_all_no_stdin(cmd, *rest):
+    with open(os.devnull) as null:
+        shellcmd = ("bash", "-c", cmd, "bash",) + rest
+        pr = subprocess.Popen(
+            shellcmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=null,
+        )
+        stdout, stderr = pr.communicate()
+        return pr.returncode, stdout, stderr
+
+
+# accepts: shell command, lines of temporary file
+# returns: exit_status, stdout, stderr
+def shell_capture_all_with_tempfile(cmd, lines):
+    exit_status = stdout = stderr = None
+    if lines in (bytes, unicode):
+        raise TypeError("lines must not be text-like (%s)" % type(lines))
+    filename = None
+    with tempfile.NamedTemporaryFile(delete=False) as fh:
+        filename = fh.name
+        for line in lines:
+            fh.write(_one_trailing_newline(line))
+    try:
+        exit_status, stdout, stderr = shell_capture_all_no_stdin(cmd, filename)
+    finally:
+        os.unlink(filename)
+    return exit_status, stdout, stderr
 
 
 CommandOutput = collections.namedtuple('CommandOutput', ['output', 'exit_code'])
@@ -262,11 +323,31 @@ class AtestCmd(object):
         @return : iterator of successfully renamed hosts
         """
         hostnames = hostnames or set()
+
+        to_migrate_hostnames = set()
+        already_migrated_hostnames = set()
+
+        for hostname in hostnames:
+            if hostname.endswith("-migrated-do-not-use"):
+                already_migrated_hostnames.add(hostname)
+            else:
+                to_migrate_hostnames.add(hostname)
+
         stderr_log('begin rename', time.time(), _humantime())
         items = call_with_tempfile(
             AtestCmd.rename_cmd(for_migration=for_migration),
-            lines=hostnames).output
+            lines=to_migrate_hostnames).output
+
         out = list(AtestCmd.rename_filter(items))
+        out_seen = set(out)
+
+        # out and already_migrated_hostnames should be disjoint
+        # but if they aren't we still don't want to list the same
+        # hostname twice
+        for hostname in already_migrated_hostnames:
+            if hostname not in out_seen:
+                out.append(hostname)
+
         stderr_log('end rename', time.time(), _humantime())
         return out
 
@@ -301,13 +382,18 @@ class AtestCmd(object):
         @return : 'atest host statjson' output as parsed json.
         """
         cmd = AtestCmd.statjson_cmd(hostname=hostname)
-        (out, exit_status) = backtick_out_err(cmd)
+        (out, err, exit_status) = capture_all(cmd)
         if exit_status == 0:
-            return json.loads(out.decode('utf-8'))
+            try:
+                return json.loads(out.decode('utf-8'))
+            except ValueError:
+                sys.stderr.write(out)
+                sys.stderr.write("\n\n")
+                return None
         else:
             if exit_status:
-                if "Failed to stat:" in out:
-                    assert "Unknown host" in out
+                if "Failed to stat:" in err:
+                    assert "Unknown host" in err
                 return None
             else:
                 assert "unexpected failure"
@@ -453,8 +539,126 @@ def backtick(*args, **kwargs):
     return (output, exit_status)
 
 
-def backtick_out_err(*args, **kwargs):
-    return backtick(*args, stderr=subprocess.STDOUT, **kwargs)
+def capture_all(*args, **kwargs):
+    proc = subprocess.Popen(
+        *args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        **kwargs
+    )
+    out, err = proc.communicate()
+    return (out, err, proc.returncode)
+
+
+
+# accepts: iterable of hostnames
+# returns: {
+#     good: hostnames in autotest
+#     bad:  hostnames not in autotest
+# }
+def autotest_status(hostnames):
+    os.environ["ATEST"] = _ATEST_EXE
+    status, out, err = shell_capture_all_with_tempfile('"${ATEST}" host list --hostnames-only --mlist "$1"', hostnames)
+    good = []
+    bad = []
+    # process the bad lines
+    for errline in err:
+        # skip preamble
+        if errline.startswith("Unknown host"):
+            continue
+        bad.append(errline.strip())
+    # process the good lines
+    for goodline in good:
+        good.append(good.strip())
+    return {
+        "good": good,
+        "bad": bad
+    }
+
+# accepts: iterable of hostnames
+# returns: {
+#     good: hostnames in skylab
+#     bad:  hostnames not in skylab
+# }
+def skylab_status(hostnames):
+    os.environ["SKYLAB"] = _SKYLAB_EXE
+    good = []
+    bad = []
+    for hostname in hostnames:
+        os.environ["HOSTNAME"] = hostname
+        status, out, err = shell_capture_all_no_stdin('"${SKYLAB}" dut-info "${HOSTNAME}"')
+        # TODO(gregorynisbet): make error checking more robust here to see why exactly
+        # we couldn't get info on the DUT.
+        if status == 0:
+            good.append(hostname)
+        else:
+            bad.append(hostname)
+    return {
+        "good": good,
+        "bad": bad,
+    }
+        
+        
+
+# accepts: iterable of hostnames
+# returns: {
+#        good:                       hostnames with no issues
+#        not_renamed:                hostnames in skylab but not renamed in autotest
+#        not_in_skylab:              hostnames that are not in skylab
+#        not_renamed_not_in_skylab:  hostnames that aren't renamed or in skylab
+# }
+def hostname_migrated_status(hostnames):
+    migrated_map = {}
+    for hostname in hostnames:
+        migrated_map[hostname + "-migrated-do-not-use"] = hostname
+
+    atest_out = autotest_status(hostnames)
+    atest_out_good = set(atest_out["good"])
+    atest_out_bad = set(atest_out["bad"])
+
+    skylab_out = skylab_status(hostnames)
+    skylab_out_good = set(skylab_out["good"])
+    skylab_out_bad = set(skylab_out["bad"])
+
+    atest_renamed_out = autotest_status(list(migrated_map))
+    atest_renamed_out_good = set(atest_renamed_out["good"])
+    atest_renamed_out_bad = set(atest_renamed_out["bad"])
+
+    good = []
+    not_renamed = []
+    not_in_skylab = []
+    not_renamed_not_in_skylab = []
+
+    for hostname in hostnames:
+        # hostname flags is a string listing the undesirable properties
+        # associated with that particular hostname
+        # A -- host has bad autotest status, either not renamed or old hostname present
+        # S -- not migrated to skylab
+        hostname_flags = set()
+        if hostname in atest_out_good:
+            hostname_flags.add("A")
+        if hostname in atest_renamed_out_bad:
+            hostname_flags.add("A")
+        if hostname in skylab_out_bad:
+            hostname_flags.add("S")
+
+        if hostname_flags == set():
+            good.append(hostname)
+        elif hostname_flags == {"A"}:
+            not_renamed.append(hostname)
+        elif hostname_flags == {"S"}:
+            not_in_skylab.append(hostname)
+        elif hostname_flags == {"A", "S"}:
+            not_renamed_not_in_skylab.append(hostname)
+        else:
+            assert False, ("impossible, unexpected set %s" % hostname_flags)
+
+    return {
+        "good": good,
+        "not_renamed": not_renamed,
+        "not_in_skylab": not_in_skylab,
+        "not_renamed_not_in_skylab": not_renamed_not_in_skylab,
+    }
 
 
 class SkylabCmd(object):
@@ -519,45 +723,17 @@ class SkylabCmd(object):
             cmd = list(SkylabCmd.ADD_MANY_DUTS_CMD) + paths
             print("log command")
             stderr_log(cmd)
-            print("backtick_out_err")
+            print("capture_all")
             # ignore cases where the hostname doesn't exist
-            (output, err) = backtick_out_err(cmd)
-            if err:
-                if "Failed to stat:" in output:
-                    assert "Unknown host" in output
+            (out, err, exit_status) = capture_all(cmd)
+            if exit_status != 0:
+                if "Failed to stat:" in err:
+                    assert "Unknown host" in err
                     # then do nothing
 
             # shutil.rmtree(td, ignore_errors=True)
         finally:
             stderr_log('end add_many_duts', time.time(), _humantime())
-
-    @staticmethod
-    def assign_one_dut(hostname=None):
-        """Assign a DUT to a randomly chosen drone."""
-        assert isinstance(hostname, TEXT)
-        cmd = SkylabCmd.assign_one_dut_cmd(hostname=hostname)
-        # run command capturing stdout and stderr regardless of exit status
-        def run(cmd):
-            try:
-                return [0, subprocess.check_output(cmd, stderr=subprocess.STDOUT)]
-            except subprocess.CalledProcessError as e:
-                return [e.returncode, e.output]
-        # NOTE: we need to look at the output of the wrapped command
-        # in order to determine whether the failure is due to a drone
-        # already having been assigned or not.
-        # If the DUT in question is already assigned to a drone,
-        # then we report success to our caller.
-        exit_code, output = run(cmd)
-        # the skylab command does not use a dedicated error status for
-        # failure due to the DUT already being assigned to a drone.
-        # In order to determine whether this happened, we look for a string
-        # in the output. The output contains some JSON and a preamble, so
-        # we can't parse the output since it isn't pure JSON.
-        already_present = ' is already assigned to drone ' in output
-        if already_present:
-            return CommandOutput(exit_code=0, output=output)
-        else:
-            return CommandOutput(exit_code=exit_code, output=output)
 
 
 class Migration(object):
@@ -632,6 +808,7 @@ class Migration(object):
         with_drone = set()
 
         if use_quick_add:
+            stderr_log("quick add path", time.time(), _humantime()) 
             dut_contents = []
             good_hostnames = []
             for hostname in hostnames:
@@ -640,26 +817,38 @@ class Migration(object):
                     pass
                 else:
                     good_hostnames.append(out_json)
-            # TODO(gregorynisbet): Currently we assume that
-            # SkylabCmd.add_many_duts worked for all DUTs.
-            # In the future, check the
-            # inventory or query Skylab in some way to check that the
-            # transfer was successful
+            # SkylabCmd.add_many_duts does not check for whether the action was successful
+            # we use hostname_migrated_status to check whether the duts we were supposed to migrate
+            # were actually migrated
             SkylabCmd.add_many_duts(dut_contents=dut_contents)
-            moved.update(good_hostnames)
 
-        for hostname in hostnames:
-            if hostname not in moved:
-                skylab_dut_descr = AtestCmd.statjson(hostname=hostname)
-                status = SkylabCmd.add_one_dut(add_dut_content=skylab_dut_descr)
-                if status.exit_code != 0:
-                    continue
-                moved.add(hostname)
-            for _ in range(rename_retries):
-                status = SkylabCmd.assign_one_dut(hostname=hostname)
-                if status.exit_code == 0:
+            # strip the migrated suffix when checking the status of each of the hostnames
+            truncated_hostnames = [strip_suffix(hostname, "-migrated-do-not-use") for hostname in hostnames]
+            status_out = hostname_migrated_status(truncated_hostnames)
+
+            # anything in the good state or missing rename is fine
+            complete = status_out["good"] + status_out["not_renamed"]
+            # anything where the status indicates that the entity is not in skylab yet is not fine
+            not_started = status_out["not_in_skylab"] + status_out["not_renamed_not_in_skylab"]
+
+            return AddToSkylabInventoryAndDroneStatus(
+                complete=complete,
+                without_drone=set(),
+                not_started=not_started,
+            )
+
+        else:
+            stderr_log("slow add path", time.time(), _humantime()) 
+            for hostname in hostnames:
+                if hostname not in moved:
+                    skylab_dut_descr = AtestCmd.statjson(hostname=hostname)
+                    stderr_log("processing hostname", hostname)
+                    status = SkylabCmd.add_one_dut(add_dut_content=skylab_dut_descr)
+                    if status.exit_code != 0:
+                        continue
+                    moved.add(hostname)
                     with_drone.add(hostname)
-                    break
+
         out = AddToSkylabInventoryAndDroneStatus(
             complete=with_drone,
             without_drone=(moved - with_drone),
@@ -807,8 +996,6 @@ class Migration(object):
         stderr_log('immediately', immediately, time.time(), _humantime())
         stderr_log('use_quick_add', use_quick_add, time.time(), _humantime())
 
-        # import pdb; pdb.set_trace()
-
         all_hosts = tuple(hostnames)
         plan = Migration.migration_plan(ratio=ratio, hostnames=all_hosts)
         Migration.lock(hostnames=plan.transfer, reason=reason)
@@ -843,7 +1030,48 @@ class Migration(object):
         return out
 
 
-migrate = Migration.migrate
+
+# accepts: iterable
+# returns: item or None, ok (true if item is real, false otherwise)
+def next_safe(it):
+    it = iter(it)
+    try:
+        return next(it), True
+    except StopIteration:
+        return None, False
+
+
+# accepts: n (stride length), it (iterable)
+# returns: iterator of arrays of n items each
+def natatime(n, it):
+    it = iter(it)
+    while True:
+        out = []
+        for i in range(n):
+            item, ok = next_safe(it)
+            if ok:
+                out.append(item)
+            else:
+                break
+        if len(out):
+            yield out
+        else:
+            return
+
+
+
+
+def migrate(batch_size=None, hostnames=None, **kwargs):
+    if batch_size is None:
+        return Migration.migrate(hostnames=hostnames, **kwargs)
+    if batch_size is not None:
+        it = natatime(n=batch_size, it=hostnames)
+        out = []
+        for batch in it:
+            res = Migration.migrate(hostnames=hostnames, **kwargs)
+            json.dumps(res, sys.stderr, indent=4)
+            out.append(res)
+        return out
 
 
 def setup(atest_exe=None, skylab_exe=None):
