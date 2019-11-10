@@ -14,11 +14,23 @@ import errno
 import logging
 import logging.config
 import os
+import sys
 
 import common
+from autotest_lib.client.common_lib import enum
 from autotest_lib.server import afe_utils
 from autotest_lib.server.hosts import file_store
 from autotest_lib.site_utils.deployment.prepare import dut as preparedut
+
+
+RETURN_CODES = enum.Enum(
+        'OK',
+        'STAGE_USB_FAILURE',
+        'INSTALL_FIRMWARE_FAILURE',
+        'INSTALL_TEST_IMAGE_FAILURE',
+        'BOOT_FROM_RECOVERY_MODE_FAILURE'
+        'OTHER_FAILURES',
+)
 
 
 class DutPreparationError(Exception):
@@ -30,8 +42,13 @@ def main():
   opts = _parse_args()
   _configure_logging('prepare_dut', os.path.join(opts.results_dir, _LOG_FILE))
 
-  info = _read_store(opts.host_info_file)
-  repair_image = _get_cros_repair_image_name(info.board)
+  try:
+    info = _read_store(opts.host_info_file)
+    repair_image = _get_cros_repair_image_name(info.board)
+  except Exception as err:
+    logging.error("fail to prepare: %s", err)
+    return RETURN_CODES.OTHER_FAILURES
+
   logging.info('Using repair image %s, obtained from AFE', repair_image)
   with _create_host(opts.hostname, info, opts.results_dir) as host:
     if opts.dry_run:
@@ -39,11 +56,34 @@ def main():
       return
 
     if 'stage-usb' in opts.actions:
-      preparedut.download_image_to_servo_usb(host, repair_image)
-    if 'install-firmware' in opts.actions:
-      preparedut.install_firmware(host)
+      try:
+        preparedut.download_image_to_servo_usb(host, repair_image)
+      except Exception as err:
+        logging.error("fail to stage image to usb: %s", err)
+        return RETURN_CODES.STAGE_USB_FAILURE
+
     if 'install-test-image' in opts.actions:
-      preparedut.install_test_image(host)
+      try:
+        preparedut.install_test_image(host)
+      except Exception as err:
+        logging.error("fail to install test image: %s", err)
+        return RETURN_CODES.INSTALL_TEST_IMAGE_FAILURE
+
+    if 'install-firmware' in opts.actions:
+      try:
+        preparedut.install_firmware(host)
+      except Exception as err:
+        logging.error("fail to install firmware: %s", err)
+        return RETURN_CODES.INSTALL_FIRMWARE_FAILURE
+
+    if 'verify-recovery-mode' in opts.actions:
+      try:
+        preparedut.verify_rec_mode_boot_into_usb(host)
+      except Exception as err:
+        logging.error("fail to boot from recovery mode: %s", err)
+        return RETURN_CODES.BOOT_FROM_RECOVERY_MODE_FAILURE
+
+  return RETURN_CODES.OK
 
 
 _LOG_FILE = 'prepare_dut.log'
@@ -57,7 +97,8 @@ def _parse_args():
   parser.add_argument(
       'actions',
       nargs='+',
-      choices=['stage-usb', 'install-firmware', 'install-test-image'],
+      choices=['stage-usb', 'install-test-image', 'install-firmware',
+               'verify-recovery-mode'],
       help='DUT preparation actions to execute.',
   )
   parser.add_argument(
@@ -183,4 +224,4 @@ def _get_cros_repair_image_name(board):
 
 
 if __name__ == '__main__':
-  main()
+  sys.exit(main())

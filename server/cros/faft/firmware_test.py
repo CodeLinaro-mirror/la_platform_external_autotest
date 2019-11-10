@@ -16,7 +16,7 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import tpm_utils
 from autotest_lib.server import test
 from autotest_lib.server.cros import vboot_constants as vboot
-from autotest_lib.server.cros.faft.config.config import Config as FAFTConfig
+from autotest_lib.server.cros.faft.utils.config import Config as FAFTConfig
 from autotest_lib.server.cros.faft.rpc_proxy import RPCProxy
 from autotest_lib.server.cros.faft.utils import mode_switcher
 from autotest_lib.server.cros.faft.utils.faft_checkers import FAFTCheckers
@@ -137,7 +137,8 @@ class FirmwareTest(FAFTBase):
                 self._no_ec_sync = True
 
         self.faft_config = FAFTConfig(
-                self.faft_client.System.GetPlatformName())
+                self.faft_client.System.GetPlatformName(),
+                self.faft_client.System.GetModelName())
         self.checkers = FAFTCheckers(self)
         self.switcher = mode_switcher.create_mode_switcher(self)
 
@@ -1736,15 +1737,20 @@ class FirmwareTest(FAFTBase):
         return self.FWMP_CLEARED_ERROR_MSG in res.stdout
 
 
+    def _tpm_is_owned(self):
+        """Returns True if the tpm is owned"""
+        result = self.host.run('cryptohome --action=tpm_more_status',
+                               ignore_status=True)
+        logging.debug(result)
+        return result.exit_status == 0 and 'owned: true' in result.stdout
+
     def clear_fwmp(self):
         """Clear the FWMP"""
         if self.fwmp_is_cleared():
             return
         tpm_utils.ClearTPMOwnerRequest(self.host, wait_for_ready=True)
-        status = self.host.run('cryptohome --action=tpm_status').stdout
-        logging.debug(status)
-        if 'TPM Owned: true' not in status:
-            self.host.run('cryptohome --action=tpm_take_ownership')
-            self.host.run('cryptohome --action=tpm_wait_ownership')
+        self.host.run('cryptohome --action=tpm_take_ownership')
+        if not utils.wait_for_value(self._tpm_is_owned, expected_value=True):
+            raise error.TestError('Unable to own tpm while clearing fwmp.')
         self.host.run('cryptohome '
                       '--action=remove_firmware_management_parameters')

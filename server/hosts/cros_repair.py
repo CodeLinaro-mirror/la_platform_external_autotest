@@ -68,7 +68,8 @@ _DEV_MODE_ALWAYS_ALLOWED = global_config.global_config.get_config_value(
 _CROS_AU_TRIGGERS = ('power', 'rwfw', 'python', 'cros',)
 _CROS_EXTENDED_AU_TRIGGERS = _CROS_AU_TRIGGERS + ('ec_reset',)
 _CROS_POWERWASH_TRIGGERS = ('tpm', 'good_au', 'ext4',)
-_CROS_USB_TRIGGERS = ('ssh', 'writable',)
+_CROS_USB_TRIGGERS = ('ssh', 'writable', 'stop_start_ui',)
+_JETSTREAM_USB_TRIGGERS = ('ssh', 'writable',)
 
 
 class ACPowerVerifier(hosts.Verifier):
@@ -425,6 +426,26 @@ class KvmExistsVerifier(hosts.Verifier):
         return '/dev/kvm should exist if device supports Linux VMs'
 
 
+class StopStartUIVerifier(hosts.Verifier):
+    """Verify that command 'stop ui' won't crash the DUT.
+
+    We run 'stop ui' in AU and provision. We found some bad images broke
+    this command and then broke all the provision of all following test. We add
+    this verifier to ensure it works and will trigger reimaging to a good
+    version if it fails.
+    """
+    def verify(self, host):
+        try:
+            host.run('stop ui && start ui', ignore_status=True, timeout=10)
+        except error.AutoservSSHTimeout:
+            raise hosts.AutoservVerifyError(
+                "Got timeout when stop ui/start ui. DUT might crash.")
+
+    @property
+    def description(self):
+        return 'The DUT image works fine when stop ui/start ui.'
+
+
 class ServoTypeVerifier(hosts.Verifier):
     """Verify that servo_type attribute exists"""
 
@@ -603,7 +624,10 @@ class ServoInstallRepair(hosts.RepairAction):
     def repair(self, host):
         # pylint: disable=missing-docstring
         repair_utils.require_servo(host)
-        host.servo_install(host.stage_image_for_servo())
+        image_name, update_url = host.stage_image_for_servo()
+        afe_utils.clean_provision_labels(host)
+        host.servo_install(update_url)
+        afe_utils.add_provision_labels(host, host.VERSION_PREFIX, image_name)
 
     @property
     def description(self):
@@ -662,6 +686,11 @@ class JetstreamServiceRepair(hosts.RepairAction):
 
 def _cros_verify_dag():
     """Return the verification DAG for a `CrosHost`."""
+    return _cros_verify_base_dag() + _cros_verify_extended_dag()
+
+
+def _cros_verify_base_dag():
+    """Return the base verification DAG for a `CrosHost`."""
     FirmwareStatusVerifier = cros_firmware.FirmwareStatusVerifier
     FirmwareVersionVerifier = cros_firmware.FirmwareVersionVerifier
     verify_dag = (
@@ -681,6 +710,13 @@ def _cros_verify_dag():
         (KvmExistsVerifier,               'ec_reset', ('ssh',)),
     )
     return verify_dag
+
+
+def _cros_verify_extended_dag():
+    """Return the extended verification DAG for a `CrosHost`."""
+    return (
+        (StopStartUIVerifier, 'stop_start_ui', ('ssh',)),
+    )
 
 
 def _cros_basic_repair_actions():
@@ -745,11 +781,9 @@ def create_cros_repair_strategy():
 
 def _moblab_verify_dag():
     """Return the verification DAG for a `MoblabHost`."""
-    FirmwareVersionVerifier = cros_firmware.FirmwareVersionVerifier
     verify_dag = (
         (repair_utils.SshVerifier,        'ssh',     ()),
         (ACPowerVerifier,                 'power',   ('ssh',)),
-        (FirmwareVersionVerifier,         'rwfw',    ('ssh',)),
         (PythonVerifier,                  'python',  ('ssh',)),
         (repair_utils.LegacyHostVerifier, 'cros',    ('ssh',)),
     )
@@ -760,7 +794,7 @@ def _moblab_repair_actions():
     """Return the repair actions for a `MoblabHost`."""
     repair_actions = (
         (repair_utils.RPMCycleRepair, 'rpm', (), ('ssh', 'power',)),
-        (AutoUpdateRepair, 'au', ('ssh',), _CROS_AU_TRIGGERS),
+        (AutoUpdateRepair, 'au', ('ssh',), ('power', 'python', 'cros')),
     )
     return repair_actions
 
@@ -802,22 +836,23 @@ def _jetstream_repair_actions():
         _cros_basic_repair_actions() +
         (
             (JetstreamTpmRepair, 'jetstream_tpm_repair',
-             _CROS_USB_TRIGGERS + _CROS_POWERWASH_TRIGGERS,
+             _JETSTREAM_USB_TRIGGERS + _CROS_POWERWASH_TRIGGERS,
              au_triggers + jetstream_tpm_triggers),
 
             (JetstreamServiceRepair, 'jetstream_service_repair',
-             _CROS_USB_TRIGGERS + _CROS_POWERWASH_TRIGGERS + (
+             _JETSTREAM_USB_TRIGGERS + _CROS_POWERWASH_TRIGGERS + (
                  'jetstream_tpm', 'jetstream_attestation'),
              au_triggers + jetstream_service_triggers),
         ) +
         _cros_extended_repair_actions(
-            au_triggers=au_triggers + jetstream_service_triggers))
+            au_triggers=au_triggers + jetstream_service_triggers,
+            usb_triggers=_JETSTREAM_USB_TRIGGERS))
     return repair_actions
 
 
 def _jetstream_verify_dag():
     """Return the verification DAG for a `JetstreamHost`."""
-    verify_dag = _cros_verify_dag() + (
+    verify_dag = _cros_verify_base_dag() + (
         (JetstreamTpmVerifier, 'jetstream_tpm', ('ssh',)),
         (JetstreamAttestationVerifier, 'jetstream_attestation', ('ssh',)),
         (JetstreamServicesVerifier, 'jetstream_services', ('ssh',)),

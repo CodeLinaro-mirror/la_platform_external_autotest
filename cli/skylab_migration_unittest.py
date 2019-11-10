@@ -157,12 +157,6 @@ class MigrationUnittest(unittest.TestCase):
             skylab_migration.AtestCmd.statjson_cmd(hostname='H'),
             [skylab_migration._ATEST_EXE, 'host', 'statjson', '--', 'H'])
 
-    def test_statjson(self):
-        with mock.patch.object(subprocess, 'check_output') as check_output:
-            check_output.return_value = '[]'
-            obj = skylab_migration.AtestCmd.statjson(None)
-            self.assertEqual(obj, [])
-
     def test_atest_lock_cmd(self):
         self.assertEqual(
             skylab_migration.AtestCmd.atest_lock_cmd(reason='R'), [
@@ -198,31 +192,6 @@ class MigrationUnittest(unittest.TestCase):
             skylab_migration._TEMPPATH
         ]
         actual = skylab_migration.SkylabCmd.add_one_dut_cmd()
-        self.assertEqual(expected, actual)
-
-    def test_add_many_duts(self):
-        def mkdtemp_impl(*args, **kwargs):
-            return self._tempdir
-
-        def call_impl(cmd, stderr=None):
-            self.assertEqual(cmd, [
-                skylab_migration._SKYLAB_EXE, 'quick-add-duts',
-                os.path.join(self._tempdir, '0'),
-                os.path.join(self._tempdir, '1'),
-                os.path.join(self._tempdir, '2'),
-                os.path.join(self._tempdir, '3')
-            ])
-
-        with mock.patch.object(tempfile, 'mkdtemp', new=mkdtemp_impl):
-            with mock.patch.object(subprocess, 'call', new=call_impl):
-                with mock.patch.object(subprocess, 'check_call', new=call_impl):
-                    with mock.patch.object(subprocess, 'check_output', new=call_impl):
-                        skylab_migration.SkylabCmd.add_many_duts(
-                            [None, None, None, None])
-
-    def test_assign_one_dut_cmd(self):
-        expected = [skylab_migration._SKYLAB_EXE, 'assign-dut', '--', 'HHH']
-        actual = skylab_migration.SkylabCmd.assign_one_dut_cmd(hostname='HHH')
         self.assertEqual(expected, actual)
 
     def test_atest_get_migration_plan_cmd(self):
@@ -360,16 +329,11 @@ class MigrationUnittest(unittest.TestCase):
                 skylab_migration.AtestCmd, 'statjson', new=atest_statjson):
             with mock.patch.object(
                     skylab_migration.SkylabCmd, 'add_one_dut', new=add_one_dut):
-                with mock.patch.object(
-                        skylab_migration.SkylabCmd,
-                        'assign_one_dut',
-                        new=assign_one_dut):
-                    summary = skylab_migration.Migration.add_to_skylab_inventory_and_drone(
-                        use_quick_add=False,
-                        hostnames=['GOOD', 'MEDIUM', 'BAD'])
-                    self.assertEqual(summary.complete, {'GOOD'})
-                    self.assertEqual(summary.without_drone, {'MEDIUM'})
-                    self.assertEqual(summary.not_started, {'BAD'})
+                summary = skylab_migration.Migration.add_to_skylab_inventory_and_drone(
+                    use_quick_add=False,
+                    hostnames=['GOOD', 'MEDIUM', 'BAD'])
+                self.assertEqual(summary.complete, {'GOOD', 'MEDIUM'})
+                self.assertEqual(summary.not_started, {'BAD'})
 
     def test_migrate_known_good_duts_until_max_duration_sync_smoke_test(self):
 

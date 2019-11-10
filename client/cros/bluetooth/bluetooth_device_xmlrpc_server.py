@@ -88,7 +88,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
     UPSTART_ERROR_ALREADYSTARTED = \
             'com.ubuntu.Upstart0_6.Error.AlreadyStarted'
 
-    BLUETOOTHD_JOB = 'bluetoothd'
+    BLUETOOTHD_JOB = 'btdispatch'
 
     DBUS_ERROR_SERVICEUNKNOWN = 'org.freedesktop.DBus.Error.ServiceUnknown'
 
@@ -461,14 +461,21 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
 
         # Turn on the adapter in order to remove all remote devices.
         if not self._is_powered_on():
-            self._set_powered(True)
+            if not self._set_powered(True):
+                logging.warning('Unable to power on the adapter')
+                return False
 
         for device in devices:
             logging.debug('removing %s', device.get('Address'))
             self.remove_device_object(device.get('Address'))
 
-        if not set_power:
-            self._set_powered(False)
+        # Toggle power to the adapter.
+        if not self._set_powered(False):
+            logging.warning('Unable to power off adapter')
+            return False
+        if set_power and not self._set_powered(True):
+            logging.warning('Unable to power on adapter')
+            return False
 
         return True
 
@@ -490,8 +497,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             else:
                 logging.warning('Adapter not found!')
                 return False
-        self._set_powered(powered)
-        return True
+        return self._set_powered(powered)
 
 
     @xmlrpc_server.dbus_safe(False)
@@ -502,8 +508,10 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
 
         """
         logging.debug('_set_powered %r', powered)
-        self._adapter.Set(self.BLUEZ_ADAPTER_IFACE, 'Powered', powered,
+        self._adapter.Set(self.BLUEZ_ADAPTER_IFACE, 'Powered',
+                          dbus.Boolean(powered, variant_level=1),
                           dbus_interface=dbus.PROPERTIES_IFACE)
+        return True
 
 
     @xmlrpc_server.dbus_safe(False)
@@ -521,7 +529,8 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             # has happened.
             return True
         self._adapter.Set(self.BLUEZ_ADAPTER_IFACE,
-                          'Discoverable', discoverable,
+                          'Discoverable',
+                          dbus.Boolean(discoverable, variant_level=1),
                           dbus_interface=dbus.PROPERTIES_IFACE)
         return True
 
@@ -593,7 +602,8 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         @return True on success, False otherwise.
 
         """
-        self._adapter.Set(self.BLUEZ_ADAPTER_IFACE, 'Pairable', pairable,
+        self._adapter.Set(self.BLUEZ_ADAPTER_IFACE, 'Pairable',
+                          dbus.Boolean(pairable, variant_level=1),
                           dbus_interface=dbus.PROPERTIES_IFACE)
         return True
 
@@ -843,7 +853,10 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                                   self._bluetooth_service_name,
                                   self.BLUEZ_PROFILE_MANAGER_PATH),
                               self.BLUEZ_PROFILE_MANAGER_IFACE)
-        profile_manager.RegisterProfile(path, uuid, options)
+        dbus_object = self._system_bus.get_object(
+                            self._bluetooth_service_name, path)
+        profile_manager.RegisterProfile(dbus_object, uuid,
+                                    dbus.Dictionary(options, signature='sv'))
         return True
 
 
@@ -1341,7 +1354,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                 lambda error: logging.error(
                     'register_advertisement: failed: %s', str(error)),
                 # other arguments
-                adv.get_path(), {})
+                adv.get_path(), dbus.Dictionary({}, signature='sv'))
 
 
     def unregister_advertisement(self, advertisement_data):
@@ -1403,7 +1416,8 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                 lambda error: logging.error(
                     'set_advertising_intervals: failed: %s', str(error)),
                 # other arguments
-                min_adv_interval_ms, max_adv_interval_ms)
+                dbus.UInt16(min_adv_interval_ms),
+                dbus.UInt16(max_adv_interval_ms))
 
 
     def reset_advertising(self):

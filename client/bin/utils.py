@@ -112,7 +112,7 @@ def extract_tarball(tarball):
         topdir = line.split('/')[0]
         if os.path.isdir(topdir):
             if dir:
-                assert(dir == topdir)
+                assert(dir == topdir), 'tarball must be a a single directory'
             else:
                 dir = topdir
     if dir:
@@ -2083,6 +2083,19 @@ def get_platform():
     if platform == '':
         platform = get_board()
     return platform
+
+
+def get_sku():
+    """
+    Get the SKU number.
+
+    @returns SKU number
+    """
+    command = 'mosys platform sku'
+    result = utils.run(command, ignore_status=True)
+    if result.exit_status != 0:
+        return ''
+    return result.stdout.strip()
 
 
 def get_ec_version():

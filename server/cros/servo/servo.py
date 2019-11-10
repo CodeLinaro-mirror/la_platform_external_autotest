@@ -335,7 +335,7 @@ class Servo(object):
         return self._power_state
 
 
-    def initialize_dut(self, cold_reset=False):
+    def initialize_dut(self, cold_reset=False, enable_main=True):
         """Initializes a dut for testing purposes.
 
         This sets various servo signals back to default values
@@ -354,7 +354,13 @@ class Servo(object):
 
         @param cold_reset If True, cold reset the device after
                           initialization.
+        @param enable_main If True, make sure the main servo device has
+                           control of the dut.
+
         """
+        if enable_main:
+            self.enable_main_servo_device()
+
         try:
             self._server.hwinit()
         except socket.error as e:
@@ -435,6 +441,14 @@ class Servo(object):
         self.set_nocheck('power_key', press_secs)
 
 
+    def pwr_button(self, action='press'):
+        """Simulate a power button press.
+
+        @param action: str; could be press or could be release.
+        """
+        self.set_nocheck('pwr_button', action)
+
+
     def lid_open(self):
         """Simulate opening the lid and raise exception if all attempts fail"""
         self.set('lid_open', 'yes')
@@ -447,6 +461,12 @@ class Servo(object):
         """
         self.set('lid_open', 'no')
         time.sleep(Servo.SLEEP_DELAY)
+
+
+    def vbus_power_get(self):
+        """Get current vbus_power."""
+        return self.get('vbus_power')
+
 
     def volume_up(self, timeout=300):
         """Simulate pushing the volume down button.
@@ -709,17 +729,22 @@ class Servo(object):
 
         @param gpio_name Name of the gpio.
         @param gpio_value New setting for the gpio.
+        @raise error.TestFail: if the control value fails to change.
         """
         self.set_nocheck(gpio_name, gpio_value)
         retry_count = Servo.GET_RETRY_MAX
-        while gpio_value != self.get(gpio_name) and retry_count:
+        actual_value = self.get(gpio_name)
+        while gpio_value != actual_value and retry_count:
             logging.warning("%s != %s, retry %d", gpio_name, gpio_value,
-                         retry_count)
+                            retry_count)
             retry_count -= 1
             time.sleep(Servo.SHORT_DELAY)
-        if not retry_count:
-            assert gpio_value == self.get(gpio_name), \
-                'Servo failed to set %s to %s' % (gpio_name, gpio_value)
+            actual_value = self.get(gpio_name)
+
+        if gpio_value != actual_value:
+            raise error.TestFail(
+                    'Servo failed to set %s to %s. Got %s.'
+                    % (gpio_name, gpio_value, actual_value))
 
 
     def set_nocheck(self, gpio_name, gpio_value):
@@ -944,6 +969,26 @@ class Servo(object):
         return servo_type
 
 
+    def get_main_servo_device(self):
+        """Return the main servo device"""
+        servo_type = self.get_servo_version()
+        return servo_type.split('_with_')[-1].split('_and_')[0]
+
+
+    def enable_main_servo_device(self):
+        """Make sure the main device has control of the dut."""
+        # Cr50 detects servo using the EC uart. It doesn't work well if the
+        # board doesn't use EC uart. The lab active_v4_device doesn't handle
+        # this correctly. Check ec_uart_pty before trying to change the active
+        # device.
+        # TODO(crbug.com/1016842): reenable the setting the main device when
+        # active device works on labstations.
+        return
+        if not self.has_control('active_v4_device'):
+            return
+        self.set('active_v4_device', self.get_main_servo_device())
+
+
     def running_through_ccd(self):
         """Returns True if the setup is using ccd to run."""
         servo = self._server.get_version()
@@ -1034,6 +1079,13 @@ class Servo(object):
             else:
                 raise error.TestError('Failed to extract the %s image from '
                                       'tarball' % firmware_name)
+
+        # Extract subsidiary binaries for EC
+        if firmware_name == 'EC':
+            # Find a monitor binary for NPCX_UUT chip type, if any.
+            mon_candidates = [ w.replace('ec.bin', 'npcx_monitor.bin')
+                                   for w in image_candidates ]
+            _extract_image_from_tarball(tarball_path, dest_dir, mon_candidates)
 
         logging.info('Will re-program %s %snow', firmware_name,
                      'RW ' if rw_only else '')

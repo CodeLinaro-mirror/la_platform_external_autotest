@@ -58,6 +58,9 @@ _CONTROLFILE_TEMPLATE = Template(
     {%- if max_retries != None %}
             max_retry={{max_retries}},
     {%- endif %}
+    {%- if needs_push_media %}
+            needs_push_media=True,
+    {%- endif %}
             tag='{{tag}}',
             test_name='{{name}}',
     {%- if authkey %}
@@ -102,8 +105,8 @@ _GTS_TIMEOUT = {
     'GtsMediaTestCases': 8,
     'GtsOsTestCases': 0.25,
     _ALL: 24,
-    _COLLECT: 0.25,
-    _PUBLIC_COLLECT: 0.25,
+    _COLLECT: 0.5,
+    _PUBLIC_COLLECT: 0.5,
 }
 
 # Any test that runs as part as blocking BVT needs to be stable and fast. For
@@ -139,8 +142,6 @@ _BVT_PERBUILD = [
 
 # Modules that are known to download and/or push media file assets.
 _MEDIA_MODULES = ['GtsYouTubeTestCases']
-# TODO(b/128874657): Wire _NEEDS_PUSH_MEDIA to the control file and the test
-# code, so that the download can be cached and shared among test runs.
 _NEEDS_PUSH_MEDIA = _MEDIA_MODULES + [_ALL]
 
 # Run `eject` for (and only for) each device with RM=1 in lsblk output.
@@ -222,18 +223,6 @@ def get_tradefed_revision(line):
     if m:
         return m.group(1)
     logging.warning('Could not identify revision in line "%s".', line)
-    return None
-
-
-def get_bundle_revision(filename):
-    """Makes an educated guess about the revision.
-
-    In this case we chose to guess by filename, but we could also parse the
-    xml files in the module.
-    """
-    m = re.search(r'(?<=gts-)(.*)-linux', filename)
-    if m is not None:
-        return m.group(1)
     return None
 
 
@@ -565,14 +554,6 @@ def get_extra_modules_dict(is_public):
     return _EXTRA_MODULES
 
 
-def get_extra_modules(is_public):
-    extra_modules_dict = get_extra_modules_dict(is_public)
-    modules = []
-    for _, extra_modules in extra_modules_dict.items():
-        modules += extra_modules
-    return set(modules)
-
-
 def get_modules_to_remove(is_public):
     if is_public:
         return get_extra_modules_dict(is_public).keys()
@@ -602,6 +583,13 @@ def calculate_timeout(modules, suites, is_public):
             timeout += delta
             delta = 1800
     return timeout
+
+
+def needs_push_media(modules):
+    """Oracle to determine if to push several GB of media files to DUT."""
+    if modules.intersection(set(_NEEDS_PUSH_MEDIA)):
+        return True
+    return False
 
 
 def get_controlfile_content(combined,
@@ -644,6 +632,7 @@ def get_controlfile_content(combined,
         max_result_size_kb=get_max_result_size_kb(modules, is_public),
         revision=revision,
         build=build,
+        needs_push_media=needs_push_media(modules),
         tag=tag,
         uri=uri,
         DOC=get_doc(modules, is_public),

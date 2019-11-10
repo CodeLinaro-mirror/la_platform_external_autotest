@@ -20,7 +20,6 @@ from autotest_lib.client.common_lib.cros import retry
 from autotest_lib.client.cros import constants as client_constants
 from autotest_lib.client.cros import cros_ui
 from autotest_lib.server import afe_utils
-from autotest_lib.server import crashcollect
 from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros import provision
 from autotest_lib.server.cros.dynamic_suite import constants as ds_constants
@@ -154,11 +153,6 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
     # URL pattern to download firmware image.
     _FW_IMAGE_URL_PATTERN = CONFIG.get_config_value(
             'CROS', 'firmware_url_pattern', type=str)
-
-    # DUT_LOG_LOCATION: the directory in the DUT that the log is saved
-    # after re-imaging using chromeos-install.
-    # The location is specified in chromeos-install script.
-    DUT_LOG_LOCATION = '/mnt/stateful_partition/unencrypted/prior_logs'
 
     @staticmethod
     def check_host(host, timeout=10):
@@ -524,8 +518,9 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         @param image_name: a name like lumpy-release/R27-3837.0.0
         @param artifact: a string like 'test_image'. Requests
             appropriate image to be staged.
-        @returns an update URL like:
-            http://172.22.50.205:8082/update/lumpy-release/R27-3837.0.0
+        @returns a tuple of (image_name, URL) like
+            (lumpy-release/R27-3837.0.0,
+             http://172.22.50.205:8082/update/lumpy-release/R27-3837.0.0)
         """
         if not image_name:
             image_name = self.get_cros_repair_image_name()
@@ -533,9 +528,9 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         devserver = dev_server.ImageServer.resolve(image_name, self.hostname)
         devserver.stage_artifacts(image_name, [artifact])
         if artifact == 'test_image':
-            return devserver.get_test_image_url(image_name)
+            return image_name, devserver.get_test_image_url(image_name)
         elif artifact == 'recovery_image':
-            return devserver.get_recovery_image_url(image_name)
+            return image_name, devserver.get_recovery_image_url(image_name)
         else:
             raise error.AutoservError("Bad artifact!")
 
@@ -589,15 +584,11 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         @param rw_only: True to only clear fwrw_version; otherewise, clear
                         both fwro_version and fwrw_version.
         """
-        labels = self._AFE.get_labels(
-                name__startswith=provision.FW_RW_VERSION_PREFIX,
-                host__hostname=self.hostname)
+        info = self.host_info_store.get()
+        info.clear_version_labels(provision.FW_RW_VERSION_PREFIX)
         if not rw_only:
-            labels = labels + self._AFE.get_labels(
-                    name__startswith=provision.FW_RO_VERSION_PREFIX,
-                    host__hostname=self.hostname)
-        for label in labels:
-            label.remove_hosts(hosts=[self.hostname])
+            info.clear_version_labels(provision.FW_RO_VERSION_PREFIX)
+        self.host_info_store.commit(info)
 
 
     def _add_fw_version_label(self, build, rw_only):
@@ -608,11 +599,11 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                         fwro_version and fwrw_version.
 
         """
-        fw_label = provision.fwrw_version_to_label(build)
-        self._AFE.run('label_add_hosts', id=fw_label, hosts=[self.hostname])
+        info = self.host_info_store.get()
+        info.set_version_label(provision.FW_RW_VERSION_PREFIX, build)
         if not rw_only:
-            fw_label = provision.fwro_version_to_label(build)
-            self._AFE.run('label_add_hosts', id=fw_label, hosts=[self.hostname])
+            info.set_version_label(provision.FW_RO_VERSION_PREFIX, build)
+        self.host_info_store.commit(info)
 
 
     def firmware_install(self, build=None, rw_only=False, dest=None):
@@ -726,20 +717,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         with metrics.SecondsTimer(
                 'chromeos/autotest/provision/servo_install/install_duration'):
             logging.info('Installing image through chromeos-install.')
-            try:
-                # Re-imaging the DUT with log collecting.
-                self.run(
-                    'chromeos-install --yes '
-                    '--lab_preserve_logs='
-                    '"/usr/local/autotest/common_lib/logs_to_collect"',
-                    timeout=install_timeout)
-            except Exception as e:
-                logging.exception(
-                    'Fail to collect log from DUT.'
-                    'Retry to fix DUT without collecting log.')
-                self.run(
-                    'chromeos-install --yes',
-                    timeout=install_timeout)
+            self.run('chromeos-install --yes',timeout=install_timeout)
 
             self.halt()
 
@@ -761,21 +739,6 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             raise error.AutoservError('DUT failed to reboot installed '
                                       'test image after %d seconds' %
                                       self.BOOT_TIMEOUT)
-
-        # The log saved after re-imaging process is transferred to shard
-        # result directory when the job instance exists.
-        # When we run repair manually, the result directory is created
-        # within local host.
-        try:
-            local_dir = crashcollect.get_crashinfo_dir(
-                self,
-                'prior_log'
-            )
-
-            self.collect_logs(self.DUT_LOG_LOCATION, local_dir)
-        except OSError:
-            logging.exception('Fail to collect log. '
-                              'The destination log directory does not exist')
 
 
     def set_servo_host(self, host):
@@ -1032,42 +995,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         @raise error.AutoservError: If any mismatch between cros-version label
                                     and the build installed in dut is found.
         """
-        labels = self._AFE.get_labels(
-                name__startswith=ds_constants.VERSION_PREFIX,
-                host__hostname=self.hostname)
-        mismatch_found = False
-        if labels:
-            # Ask the DUT for its canonical image name.  This will be in
-            # a form like this:  kevin-release/R66-10405.0.0
-            release_builder_path = self.get_release_builder_path()
-            host_list = [self.hostname]
-            for label in labels:
-                # Remove any cros-version label that does not match
-                # the DUT's installed image.
-                #
-                # TODO(jrbarnette):  We make exceptions for certain
-                # known cases where the version label will not match the
-                # original CHROMEOS_RELEASE_BUILDER_PATH setting:
-                #  * Tests for the `arc-presubmit` pool append
-                #    "-cheetsth" to the label.
-                #  * Moblab use cases based on `cros stage` store images
-                #    under a name with the string "-custom" embedded.
-                #    It's not reliable to match such an image name to the
-                #    label.
-                label_version = label.name[len(ds_constants.VERSION_PREFIX):]
-                if '-custom' in label_version:
-                    continue
-                if label_version.endswith('-cheetsth'):
-                    label_version = label_version[:-len('-cheetsth')]
-                if label_version != release_builder_path:
-                    logging.warn(
-                        'version according to cros-version label "%s" does not '
-                        'match DUT-determined version %s. Removing the label.',
-                        label_version, release_builder_path)
-                    label.remove_hosts(hosts=host_list)
-                    mismatch_found = True
-        if mismatch_found:
-            raise error.AutoservError('The host has wrong cros-version label.')
+        # crbug.com/1007333: This check is being removed.
+        return True
 
 
     def cleanup_services(self):

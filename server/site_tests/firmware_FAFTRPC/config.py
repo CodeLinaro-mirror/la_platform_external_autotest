@@ -77,6 +77,7 @@ RPC_CATEGORIES = [
                 "method_names": [
                     "IsAvailable",
                     "GetPlatformName",
+                    "GetModelName",
                     "DevTpmPresent",
                     "GetRootDev",
                     "GetRootPart",
@@ -87,20 +88,6 @@ RPC_CATEGORIES = [
                 ],
                 "passing_args": [NO_ARGS],
                 "failing_args": [ONE_INT_ARG, ONE_STR_ARG],
-            },
-            {
-                "method_name": "WaitForClient",
-                "passing_args": [ONE_INT_ARG],
-                "failing_args": [NO_ARGS, ONE_STR_ARG],
-                "allow_error_msg":
-                    "'LocalShell' object has no attribute 'wait_for_device'",
-            },
-            {
-                "method_name": "WaitForClientOffline",
-                "passing_args": [ONE_INT_ARG],
-                "failing_args": [NO_ARGS, ONE_STR_ARG],
-                "allow_error_msg":
-                    "'LocalShell' object has no attribute 'wait_for_no_device'",
             },
             {
                 "method_name": "DumpLog",
@@ -515,6 +502,7 @@ RPC_CATEGORIES = [
                     "GetFirmwareDatakeyVersion",
                     "GetKernelVersion",
                     "GetKernelDatakeyVersion",
+                    "GetTpmVersion",
                     "StopDaemon",
                     "RestartDaemon",
                 ],
@@ -571,7 +559,7 @@ RPC_CATEGORIES = [
                     "GetKeysPath",
                     "GetWorkPath",
                     "GetBiosRelativePath",
-                    "GetEcRelativePath",
+                    "GetEcRelativePath"
                 ],
                 "passing_args": [
                     NO_ARGS,
@@ -671,9 +659,9 @@ RPC_CATEGORIES = [
                     ("bootok", ),
                     ("factory_install", ),
                     ("bootok", None),
-                    ("bootok", "foo"),
-                    ("bootok", "foo", ()),
-                    ("bootok", "foo", ("--noupdate_ec", "--wp=1")),
+                    ("bootok", "test"),
+                    ("bootok", "test", ()),
+                    ("bootok", "test", ("--noupdate_ec", "--wp=1")),
                 ],
                 "failing_args": [NO_ARGS],
             },
@@ -682,7 +670,9 @@ RPC_CATEGORIES = [
                     "RunAutoupdate",
                     "RunBootok",
                 ],
-                "passing_args": [ONE_STR_ARG],
+                "passing_args": [
+                    ("test",),
+                ],
                 "failing_args": [
                     NO_ARGS,
                     ("foo", "bar"),
@@ -714,6 +704,28 @@ RPC_CATEGORIES = [
                 ],
                 "expected_return_type": str
             },
+            {
+                "method_name": "GetImageGbbFlags",
+                "passing_args": [
+                    NO_ARGS,
+                    ('/tmp/fake-bios.bin',)
+                ],
+                "failing_args": [
+                    ('/tmp/fake-bios.bin', 'bogus')
+                ],
+                "store_result_as": "gbb_flags"
+            },
+            {
+                "method_name": "SetImageGbbFlags",
+                "passing_args": [
+                    (operator.itemgetter('gbb_flags'),),
+                    (operator.itemgetter('gbb_flags'), '/tmp/fake-bios.bin'),
+                ],
+                "failing_args": [
+                    NO_ARGS,
+                    ('too', 'many', 'args')
+                ]
+            }
         ]
     },
     {

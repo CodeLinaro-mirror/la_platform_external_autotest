@@ -694,23 +694,6 @@ class SystemServicer(object):
         """
         return True
 
-    def WaitForClient(self, timeout):
-        """Wait for the client to come back online.
-
-        @param timeout: Time in seconds to wait for the client SSH daemon to
-                        come up.
-        @return: True if succeed; otherwise False.
-        """
-        return self._os_if.wait_for_device(timeout)
-
-    def WaitForClientOffline(self, timeout):
-        """Wait for the client to come offline.
-
-        @param timeout: Time in seconds to wait the client to come offline.
-        @return: True if succeed; otherwise False.
-        """
-        return self._os_if.wait_for_no_device(timeout)
-
     def DumpLog(self, remove_log=False):
         """Dump the log file.
 
@@ -770,6 +753,17 @@ class SystemServicer(object):
             raise Exception('Failed getting platform name: ' +
                             '\n'.join(lines))
         return lines[-1]
+
+    def GetModelName(self):
+        """Get the model name of the current system.
+
+        @return: A string of the model name.
+        """
+        lines = self._os_if.run_shell_command_get_output(
+                '(mosys -vvv platform model 2>&1) || echo Failed')
+        if lines[-1].strip() == 'Failed':
+            raise Exception('Failed getting model name: ' + '\n'.join(lines))
+        return lines[-1].strip()
 
     def DevTpmPresent(self):
         """Check if /dev/tpm0 is present.
@@ -915,6 +909,11 @@ class TpmServicer(object):
     def GetKernelDatakeyVersion(self):
         """Retrieve tpm kernel data key version."""
         return self._tpm_handler.get_kernel_key_version()
+
+    def GetTpmVersion(self):
+        """Returns '1.2' or '2.0' as a string."""
+        # tpmc can return this without stopping daemons, so access real handler.
+        return self._real_tpm_handler.get_tpm_version()
 
     def StopDaemon(self):
         """Stop tpm related daemon."""
@@ -1130,3 +1129,22 @@ class UpdaterServicer(object):
     def CopyBios(self, filename):
         """Make a copy of the shellball bios.bin"""
         return self._updater.copy_bios(filename)
+
+    def GetImageGbbFlags(self, filename=None):
+        """Get the GBB flags in the given image (shellball image if unspecified)
+
+        @param filename: the image path to act on (None to use shellball image)
+        @return: An integer of the GBB flags.
+        """
+        return self._updater.get_image_gbb_flags(filename)
+
+    def SetImageGbbFlags(self, flags, filename=None):
+        """Set the GBB flags in the given image (shellball image if unspecified)
+
+        @param flags: the flags to set
+        @param filename: the image path to act on (None to use shellball image)
+
+        @type flags: int
+        @type filename: str | None
+        """
+        return self._updater.set_image_gbb_flags(flags, filename)
