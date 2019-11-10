@@ -8,7 +8,7 @@ TIME = "SHORT"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "firmware"
 TEST_TYPE = "server"
-ATTRIBUTES = "suite:faft_cr50_prepvt, suite:faft_cr50_tot"
+ATTRIBUTES = "suite:faft_cr50_prepvt"
 JOB_RETRIES = 1
 
 DOC = """
@@ -16,6 +16,11 @@ This test clears the TPM if necessary, the runs a client side test that checks
 Virtual NVRAM functionality in cr50. Finally, it clears the TPM again.
 Every time the TPM is cleared, the system is rebooted.
 """
+
+if 'args_dict' not in locals():
+    args_dict = {}
+
+args_dict.update(utils.args_to_dict(args))
 
 def run_test(machine):
     host = hosts.create_host(machine)

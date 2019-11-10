@@ -36,6 +36,6 @@ def run(machine):
     host = hosts.create_host(machine, chameleon_args=chameleon_args)
     bluetooth_test.enable_newblue(host=host, enable=newblue_enable)
     job.run_test('bluetooth_AdapterQuickSanity', host=host,
-                  num_iterations=1)
+                  num_iterations=1, flag='Quick Sanity')
 
 parallel_simple(run, machines)

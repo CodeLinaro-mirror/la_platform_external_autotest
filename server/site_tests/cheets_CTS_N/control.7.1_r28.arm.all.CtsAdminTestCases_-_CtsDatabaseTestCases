@@ -14,7 +14,7 @@ TIME = 'LONG'
 MAX_RESULT_SIZE_KB = 307200
 DOC = 'Run module CtsAdminTestCases, CtsAlarmClockTestCases, CtsAndroidAppTestCases, CtsAnimationTestCases, CtsAppSecurityHostTestCases, CtsAppTestCases, CtsAppUsageHostTestCases, CtsAppWidgetTestCases, CtsAslrMallocTestCases, CtsAssistTestCases, CtsAtraceHostTestCases, CtsBackupHostTestCases, CtsBackupTestCases, CtsBionicTestCases, CtsBluetoothTestCases, CtsCalendarcommon2TestCases, CtsCameraTestCases, CtsCarTestCases, CtsCarrierApiTestCases, CtsCompilationTestCases, CtsContentTestCases, CtsCppToolsTestCases, CtsDatabaseTestCases of the Android Compatibility Test Suite (CTS) using arm ABI in the ARC++ container.'
 
-def run_CTS(machine):
+def run_TS(machine):
     host_list = [hosts.create_host(machine)]
     job.run_test(
         'cheets_CTS_N',
@@ -22,7 +22,6 @@ def run_CTS(machine):
         iterations=1,
         max_retry=9,
         enable_default_apps=True,
-        needs_push_media=False,
         tag='7.1_r28.arm.all.CtsAdminTestCases_-_CtsDatabaseTestCases',
         test_name='cheets_CTS_N.7.1_r28.arm.all.CtsAdminTestCases_-_CtsDatabaseTestCases',
         run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsAdminTestCases', '--include-filter', 'CtsAlarmClockTestCases', '--include-filter', 'CtsAndroidAppTestCases', '--include-filter', 'CtsAnimationTestCases', '--include-filter', 'CtsAppSecurityHostTestCases', '--include-filter', 'CtsAppTestCases', '--include-filter', 'CtsAppUsageHostTestCases', '--include-filter', 'CtsAppWidgetTestCases', '--include-filter', 'CtsAslrMallocTestCases', '--include-filter', 'CtsAssistTestCases', '--include-filter', 'CtsAtraceHostTestCases', '--include-filter', 'CtsBackupHostTestCases', '--include-filter', 'CtsBackupTestCases', '--include-filter', 'CtsBionicTestCases', '--include-filter', 'CtsBluetoothTestCases', '--include-filter', 'CtsCalendarcommon2TestCases', '--include-filter', 'CtsCameraTestCases', '--include-filter', 'CtsCarTestCases', '--include-filter', 'CtsCarrierApiTestCases', '--include-filter', 'CtsCompilationTestCases', '--include-filter', 'CtsContentTestCases', '--include-filter', 'CtsCppToolsTestCases', '--include-filter', 'CtsDatabaseTestCases', '--logcat-on-failure', '--disable-reboot', '--skip-device-info'],
@@ -34,4 +33,4 @@ def run_CTS(machine):
         login_precondition_commands=['lsblk -do NAME,RM | sed -n s/1$//p | xargs -n1 eject'],
         timeout=172800)
 
-parallel_simple(run_CTS, machines)
+parallel_simple(run_TS, machines)
