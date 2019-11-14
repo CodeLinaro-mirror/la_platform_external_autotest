@@ -14,7 +14,7 @@ TIME = 'MEDIUM'
 MAX_RESULT_SIZE_KB = 512000
 DOC = 'Run module CtsMediaBitstreamsTestCases of the Android Compatibility Test Suite (CTS) using arm ABI in the ARC++ container.'
 
-def run_CTS(machine):
+def run_TS(machine):
     host_list = [hosts.create_host(machine)]
     job.run_test(
         'cheets_CTS_Q',
@@ -23,7 +23,7 @@ def run_CTS(machine):
         needs_push_media=True,
         tag='10_r1.arm.CtsMediaBitstreamsTestCases',
         test_name='cheets_CTS_Q.10_r1.arm.CtsMediaBitstreamsTestCases',
-        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsMediaBitstreamsTestCases', '--logcat-on-failure'],
+        run_template=['run', 'commandAndExit', 'cts', '--module', 'CtsMediaBitstreamsTestCases', '--logcat-on-failure'],
         retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
         target_module='CtsMediaBitstreamsTestCases',
         target_plan=None,
@@ -31,4 +31,4 @@ def run_CTS(machine):
         uri='gs://chromeos-arc-images/cts/bundle/Q/android-cts-10_r1-linux_x86-arm.zip',
         timeout=3600)
 
-parallel_simple(run_CTS, machines)
+parallel_simple(run_TS, machines)

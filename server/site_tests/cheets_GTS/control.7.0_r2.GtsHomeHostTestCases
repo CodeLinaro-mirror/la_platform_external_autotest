@@ -14,7 +14,7 @@ TIME = 'MEDIUM'
 MAX_RESULT_SIZE_KB = 307200
 DOC = 'Run module GtsHomeHostTestCases of the Android Google Test Suite (GTS) in the ARC++ container.'
 
-def run_GTS(machine):
+def run_TS(machine):
     host_list = [hosts.create_host(machine)]
     job.run_test(
         'cheets_GTS',
@@ -23,11 +23,11 @@ def run_GTS(machine):
         tag='7.0_r2.GtsHomeHostTestCases',
         test_name='cheets_GTS.7.0_r2.GtsHomeHostTestCases',
         authkey='gs://chromeos-arc-images/cts/bundle/gts-arc.json',
-        run_template=['run', 'commandAndExit', 'gts', '--include-filter', 'GtsHomeHostTestCases', '--ignore-business-logic-failure'],
+        run_template=['run', 'commandAndExit', 'gts', '--module', 'GtsHomeHostTestCases', '--ignore-business-logic-failure'],
         retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
         target_module='GtsHomeHostTestCases',
         target_plan=None,
         uri='gs://chromeos-arc-images/cts/bundle/android-gts-7_r2-5805161.zip',
         timeout=3600)
 
-parallel_simple(run_GTS, machines)
+parallel_simple(run_TS, machines)

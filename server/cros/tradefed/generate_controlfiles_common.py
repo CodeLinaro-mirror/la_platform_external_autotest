@@ -5,6 +5,7 @@
 
 import argparse
 import contextlib
+import copy
 import logging
 import os
 import re
@@ -59,10 +60,10 @@ _CONTROLFILE_TEMPLATE = Template(
     {%- endif %}
     {% if sync_count and sync_count > 1 %}
     from autotest_lib.server import utils as server_utils
-    def run_CTS(ntuples):
+    def {{test_func_name}}(ntuples):
         host_list = [hosts.create_host(machine) for machine in ntuples]
     {% else %}
-    def run_CTS(machine):
+    def {{test_func_name}}(machine):
         {%- if servo_support_needed %}
         # REMOVE 'servo_args=servo_args' arg for local debugging if your test
         # setup doesn't have servo.
@@ -89,14 +90,21 @@ _CONTROLFILE_TEMPLATE = Template(
     {%- if enable_default_apps %}
             enable_default_apps=True,
     {%- endif %}
+    {%- if needs_push_media %}
             needs_push_media={{needs_push_media}},
+    {%- endif %}
             tag='{{tag}}',
             test_name='{{name}}',
+    {%- if authkey %}
+            authkey='{{authkey}}',
+    {%- endif %}
             run_template={{run_template}},
             retry_template={{retry_template}},
             target_module={% if target_module %}'{{target_module}}'{% else %}None{%endif%},
             target_plan={% if target_plan %}'{{target_plan}}'{% else %}None{% endif %},
+    {%- if abi %}
             bundle='{{abi}}',
+    {%- endif %}
     {%- if extra_artifacts %}
             extra_artifacts={{extra_artifacts}},
     {%- endif %}
@@ -116,9 +124,9 @@ _CONTROLFILE_TEMPLATE = Template(
                                                                 SYNC_COUNT)
     # Use log=False in parallel_simple to avoid an exception in setting up
     # the incremental parser when SYNC_COUNT > 1.
-    parallel_simple(run_CTS, ntuples, log=False)
+    parallel_simple({{test_func_name}}, ntuples, log=False)
     {% else -%}
-    parallel_simple(run_CTS, machines)
+    parallel_simple({{test_func_name}}, machines)
     {% endif %}
 """))
 
@@ -142,6 +150,7 @@ def get_tradefed_build(line):
     # Sample string:
     # - Android Compatibility Test Suite 7.0 (3423912)
     # - Android Compatibility Test Suite for Instant Apps 1.0 (4898911)
+    # - Android Google Mobile Services (GMS) Test Suite 6.0_r1 (4756896)
     m = re.search(r' \((.*)\)', line)
     if m:
         return m.group(1)
@@ -158,10 +167,16 @@ def get_tradefed_revision(line):
                  Android Compatibility Test Suite for Instant Apps 1.0 (4898911)
     @return Tradefed CTS revision. Example: 6.0_r6.
     """
+    m = re.search(r'Android Google Mobile Services \(GMS\) Test Suite (.*) \(',
+                  line)
+    if m:
+        return m.group(1)
+
     m = re.search(
         r'Android Compatibility Test Suite(?: for Instant Apps)? (.*) \(', line)
     if m:
         return m.group(1)
+
     logging.warning('Could not identify revision in line "%s".', line)
     return None
 
@@ -176,15 +191,16 @@ def get_bundle_abi(filename):
         return 'arm'
     if filename.endswith('_x86-x86.zip'):
         return 'x86'
-    raise Exception('Could not determine ABI from "%s".' % filename)
+
+    assert(CONFIG['TRADEFED_CTS_COMMAND'] =='gts'), 'Only GTS has empty ABI'
+    return ''
 
 
 def get_extension(module, abi, revision, is_public=False, camera_facing=None):
     """Defines a unique string.
 
     Notice we chose module revision first, then abi, as the module revision
-    changes at least on a monthly basis. This ordering makes it simpler to
-    add/remove modules.
+    changes regularly. This ordering makes it simpler to add/remove modules.
     @param module: CTS module which will be tested in the control file. If 'all'
                    is specified, the control file will runs all the tests.
     @param public: boolean variable to specify whether or not the bundle is from
@@ -193,12 +209,15 @@ def get_extension(module, abi, revision, is_public=False, camera_facing=None):
                           for specific camera facing or not.
     @return string: unique string for specific tests. If public=True then the
                     string is "<abi>.<module>", otherwise, the unique string is
-                    "<revision>.<abi>.<module>".
+                    "<revision>.<abi>.<module>". Note that if abi is empty, the
+                    abi part is omitted.
     """
     ext_parts = []
     if not is_public:
         ext_parts = [revision]
-    ext_parts += [abi, module]
+    if abi:
+        ext_parts += [abi]
+    ext_parts += [module]
     if camera_facing:
         ext_parts += ['camerabox', camera_facing]
     return '.'.join(ext_parts)
@@ -206,15 +225,16 @@ def get_extension(module, abi, revision, is_public=False, camera_facing=None):
 
 def get_doc(modules, abi, is_public):
     """Defines the control file DOC string."""
-    if not modules.intersection(get_collect_modules(is_public)):
-        # Generate per-module DOC
-        doc = ('Run module %s of the %s using %s ABI in '
-               'the ARC++ container.'
-               % (', '.join(sorted(list(modules))), CONFIG['DOC_TITLE'], abi))
+    if modules.intersection(get_collect_modules(is_public)):
+        module_text = 'all'
     else:
-        doc = ('Run all of the %s using %s ABI in '
-               'the ARC++ container.' % (CONFIG['DOC_TITLE'], abi))
+        # Generate per-module DOC
+        module_text = 'module ' + ', '.join(sorted(list(modules)))
 
+    abi_text = (' using %s ABI' % abi) if abi else ''
+
+    doc = ('Run %s of the %s%s in the ARC++ container.'
+           % (module_text, CONFIG['DOC_TITLE'], abi_text))
     return doc
 
 
@@ -264,16 +284,15 @@ def get_suites(modules, abi, is_public):
 
     suites = set(CONFIG['INTERNAL_SUITE_NAMES'])
 
-    if CONFIG['SKIP_EXTRA_MOBLAB_SUITES']:
-        # Not add extra suites since everything runs in the same suite on
-        # moblab.
-        return sorted(list(suites))
-
     for module in modules:
+        if module in get_collect_modules(is_public):
+            # We collect all tests both in arc-gts and arc-gts-qual as both have
+            # a chance to be complete (and used for submission).
+            suites |= set(CONFIG['QUAL_SUITE_NAMES'])
         if module in CONFIG['EXTRA_ATTRIBUTES']:
             # Special cases come with their own suite definitions.
             suites |= set(CONFIG['EXTRA_ATTRIBUTES'][module])
-        if module in CONFIG['SMOKE'] and abi == 'arm':
+        if module in CONFIG['SMOKE'] and (abi == 'arm' or abi == ''):
             # Handle VMTest by adding a few jobs to suite:smoke.
             suites.add('suite:smoke')
         if module in CONFIG['HARDWARE_DEPENDENT_MODULES']:
@@ -288,14 +307,15 @@ def get_suites(modules, abi, is_public):
                     vm_suite = suite
                 if module in CONFIG['VMTEST_INFO_SUITES'][suite]:
                     vm_suite = suite
-            suites.add('suite:%s' % vm_suite)
+            if vm_suite is not None:
+                suites.add('suite:%s' % vm_suite)
         # One or two modules hould be in suite:bvt-arc to cover CQ/PFQ. A few
         # spare/fast modules can run in suite:bvt-perbuild in case we need a
         # replacement for the module in suite:bvt-arc (integration test for
         # cheets_CTS only, not a correctness test for CTS content).
-        if module in CONFIG['BVT_ARC'] and abi == 'arm':
+        if module in CONFIG['BVT_ARC'] and (abi == 'arm' or abi == ''):
             suites.add('suite:bvt-arc')
-        elif module in CONFIG['BVT_PERBUILD'] and abi == 'arm':
+        elif module in CONFIG['BVT_PERBUILD'] and (abi == 'arm' or abi == ''):
             suites.add('suite:bvt-perbuild')
     return sorted(list(suites))
 
@@ -303,7 +323,6 @@ def get_suites(modules, abi, is_public):
 def get_dependencies(modules, abi, is_public, is_camerabox_test):
     """Defines lab dependencies needed to schedule a module.
 
-    Currently we only care about x86 ABI tests, which must run on Intel boards.
     @param module: CTS module which will be tested in the control file. If 'all'
                    is specified, the control file will runs all the tests.
     @param abi: string that specifies the application binary interface of the
@@ -342,7 +361,8 @@ def get_job_retries(modules, is_public):
         # We don't want job retries for module collection or special cases.
         if (module in get_collect_modules(is_public) or module == _ALL or
             ('CtsDeqpTestCases' in CONFIG['EXTRA_MODULES'] and
-             module in CONFIG['EXTRA_MODULES']['CtsDeqpTestCases'])):
+             module in CONFIG['EXTRA_MODULES']['CtsDeqpTestCases']['SUBMODULES']
+             )):
             retries = 0
     return retries
 
@@ -355,6 +375,9 @@ def get_max_retries(modules, abi, suites, is_public):
     """
     retry = -1
     if is_public:
+        if _ALL in CONFIG['PUBLIC_MODULE_RETRY_COUNT']:
+            retry = CONFIG['PUBLIC_MODULE_RETRY_COUNT'][_ALL]
+
         # In moblab at partners we may need many more retries than in lab.
         for module in modules:
             if module in CONFIG['PUBLIC_MODULE_RETRY_COUNT']:
@@ -366,18 +389,17 @@ def get_max_retries(modules, abi, suites, is_public):
                 retry = max(retry, CONFIG['CTS_MAX_RETRIES'][module])
 
     # Ugly overrides.
-    for module in modules:
-        # In bvt we don't want to hold the CQ/PFQ too long.
-        if ('suite:bvt-arc' in suites or
-                'suite:bvt-perbuild' in suites and abi == 'arm'):
-            retry = 3
-        # During qualification we want at least 9 retries, possibly more.
-        # TODO(kinaba&yoshiki): do not abuse suite names
-        if set(CONFIG['QUAL_SUITE_NAMES']) & set(suites):
-            retry = max(retry, CONFIG['CTS_QUAL_RETRIES'])
-        # Collection should never have a retry. This needs to be last.
-        if module in get_collect_modules(is_public):
-            retry = 0
+    # In bvt we don't want to hold the CQ/PFQ too long.
+    if 'suite:bvt-arc' in suites or 'suite:bvt-perbuild' in suites:
+        retry = 3
+    # During qualification we want at least 9 retries, possibly more.
+    # TODO(kinaba&yoshiki): do not abuse suite names
+    if set(CONFIG['QUAL_SUITE_NAMES']) & set(suites):
+        retry = max(retry, CONFIG['CTS_QUAL_RETRIES'])
+    # Collection should never have a retry. This needs to be last.
+    if modules.intersection(get_collect_modules(is_public)):
+        retry = 0
+
     if retry >= 0:
         return retry
     # Default case omits the retries in the control file, so tradefed_test.py
@@ -483,6 +505,12 @@ def get_test_priority(modules, is_public):
     return priority
 
 
+def get_authkey(is_public):
+    if is_public or not CONFIG['AUTHKEY']:
+        return None
+    return CONFIG['AUTHKEY']
+
+
 def _format_collect_cmd(retry):
     """Returns a list specifying tokens for tradefed to list all tests."""
     if retry:
@@ -515,30 +543,31 @@ def _format_modules_cmd(is_public, modules=None, retry=False):
     else:
         # For runs create a logcat file for each individual failure.
         cmd = ['run', 'commandAndExit', CONFIG['TRADEFED_CTS_COMMAND']]
-        # TODO(yoshiki): remove this branching and consolidate them with the
-        # unified one rule.
-        if CONFIG['TRADEFED_CTS_COMMAND'] == 'cts':
-            special_cmd = _get_special_command_line(modules, is_public)
-            if special_cmd:
-                cmd.extend(special_cmd)
+
+        special_cmd = _get_special_command_line(modules, is_public)
+        if special_cmd:
+            cmd.extend(special_cmd)
+        elif _ALL in modules:
+            pass
+        elif len(modules) == 1:
+            cmd += ['--module', list(modules)[0]]
+        else:
+            assert (CONFIG['TRADEFED_CTS_COMMAND'] != 'cts-instant'), \
+                   'cts-instant cannot include multiple modules'
             # We run each module with its own --include-filter command/option.
             # https://source.android.com/compatibility/cts/run
-            elif modules:
-                for module in sorted(modules):
-                    cmd += ['--include-filter', module]
-        elif CONFIG['TRADEFED_CTS_COMMAND'] == 'cts-instant':
-            if _ALL in modules:
-                pass
-            elif len(modules) == 1:
-                cmd += ['--module', list(modules)[0]]
-            else:
-                raise Exception('cts-instant cannot include multiple modules')
+            for module in sorted(modules):
+                cmd += ['--include-filter', module]
 
         # For runs create a logcat file for each individual failure.
         # Not needed on moblab, nobody is going to look at them.
-        if not (modules.intersection(CONFIG['DISABLE_LOGCAT_ON_FAILURE']) or
-                is_public):
+        if (not modules.intersection(CONFIG['DISABLE_LOGCAT_ON_FAILURE']) and
+            not is_public and
+            CONFIG['TRADEFED_CTS_COMMAND'] != 'gts'):
             cmd.append('--logcat-on-failure')
+
+        if CONFIG['TRADEFED_IGNORE_BUSINESS_LOGIC_FAILURE']:
+            cmd.append('--ignore-business-logic-failure')
 
     if CONFIG['TRADEFED_DISABLE_REBOOT']:
         cmd.append('--disable-reboot')
@@ -572,16 +601,18 @@ def get_extra_modules_dict(is_public, abi):
     if not is_public:
         return CONFIG['EXTRA_MODULES']
 
+    extra_modules = copy.deepcopy(CONFIG['PUBLIC_EXTRA_MODULES'])
     if abi in CONFIG['EXTRA_SUBMODULE_OVERRIDE']:
-        new_dict  = dict()
-        for module, submodules in CONFIG['PUBLIC_EXTRA_MODULES'].items():
-            submodules = submodules[:]
+        for _, submodules in extra_modules.items():
             for old, news in CONFIG['EXTRA_SUBMODULE_OVERRIDE'][abi].items():
                 submodules.remove(old)
                 submodules.extend(news)
-            new_dict[module] = submodules
-        return new_dict
-    return CONFIG['PUBLIC_EXTRA_MODULES']
+    return {
+        module: {
+            'SUBMODULES': submodules,
+            'SUITES': [CONFIG['MOBLAB_SUITE_NAME']],
+        } for module, submodules in extra_modules.items()
+    }
 
 
 def get_modules_to_remove(is_public, abi):
@@ -674,13 +705,14 @@ def get_controlfile_content(combined,
     target_module = None
     if (combined not in get_collect_modules(is_public) and combined != _ALL):
         target_module = combined
-    for target, m in get_extra_modules_dict(is_public, abi).items():
-        if combined in m:
+    for target, config in get_extra_modules_dict(is_public, abi).items():
+        if combined in config['SUBMODULES']:
             target_module = target
     return _CONTROLFILE_TEMPLATE.render(
         year=CONFIG['COPYRIGHT_YEAR'],
         name=name,
         base_name=CONFIG['TEST_NAME'],
+        test_func_name=CONFIG['CONTROLFILE_TEST_FUNCTION_NAME'],
         attributes=attributes,
         dependencies=get_dependencies(
             modules,
@@ -708,6 +740,7 @@ def get_controlfile_content(combined,
         test_length=get_test_length(modules),
         priority=get_test_priority(modules, is_public),
         extra_args=get_extra_args(modules, is_public),
+        authkey=get_authkey(is_public),
         sync_count=get_sync_count(modules, abi, is_public),
         camera_facing=camera_facing)
 
@@ -737,7 +770,8 @@ def get_tradefed_data(path, is_public, abi):
     while True:
         line = p.stdout.readline().strip()
         # Android Compatibility Test Suite 7.0 (3423912)
-        if line.startswith('Android Compatibility Test Suite '):
+        if (line.startswith('Android Compatibility Test Suite ') or
+            line.startswith('Android Google ')):
             logging.info('Unpacking: %s.', line)
             build = get_tradefed_build(line)
             revision = get_tradefed_revision(line)
@@ -747,6 +781,9 @@ def get_tradefed_data(path, is_public, abi):
             # Newer CTS shows ABI-module pairs like "arm64-v8a CtsNetTestCases"
             modules.add(line.split()[1])
         elif line.startswith('Cts'):
+            modules.add(line)
+        elif line.startswith('Gts'):
+            # Older GTS plainly lists the module names
             modules.add(line)
         elif line.startswith('cts-'):
             modules.add(line)
@@ -775,18 +812,20 @@ def get_tradefed_data(path, is_public, abi):
       # Kill the process if alive.
       p.kill()
     p.wait()
-    for module in get_modules_to_remove(is_public, abi):
-        modules.remove(module)
+
+    modules -= set(get_modules_to_remove(is_public, abi))
     if not modules:
       raise Exception("no modules found.")
     return list(modules), build, revision
 
 
 def download(uri, destination):
-    """Download |uri| to local |destination|."""
-    if uri.startswith('http'):
-        subprocess.check_call(['wget', uri, '-P', destination])
-    elif uri.startswith('gs'):
+    """Download |uri| to local |destination|.
+
+       |destination| must be a file path (not a directory path)."""
+    if uri.startswith('http://') or uri.startswith('https://'):
+        subprocess.check_call(['wget', uri, '-O', destination])
+    elif uri.startswith('gs://'):
         subprocess.check_call(['gsutil', 'cp', uri, destination])
     else:
         raise Exception
@@ -881,8 +920,6 @@ def combine_modules_by_common_word(modules):
                 combined[media] = set([media])
         else:
             combined[prefix] = set(d[key])
-        # Sanity check.
-        #print key, len(d[key]), prefix, d[key]
     print 'Reduced number of control files from %d to %d.' % (len(modules),
                                                               len(combined))
     return combined
@@ -998,21 +1035,18 @@ def write_collect_controlfiles(_modules, abi, revision, build, uri, is_public):
                           suites, is_public)
 
 
-def write_extra_deqp_controlfiles(_modules, abi, revision, build, uri,
-                                  is_public):
-    """Write all control files for splitting Deqp into pieces.
+def write_extra_controlfiles(_modules, abi, revision, build, uri,
+                             is_public):
+    """Write all extra control files as specified in config.
 
-    This is used in particular by moblab to load balance. A similar approach
-    was also used during bringup of grunt to split media tests.
+    This is used by moblab to load balance large modules like Deqp, as well as
+    making custom modules such as WM presubmit. A similar approach was also used
+    during bringup of grunt to split media tests.
     """
-    submodules = \
-        get_extra_modules_dict(is_public, abi).get('CtsDeqpTestCases', [])
-    suites = ['suite:arc-cts-deqp', 'suite:graphics_per-day']
-    if is_public:
-        suites = [CONFIG['MOBLAB_SUITE_NAME']]
-    for module in submodules:
-        write_controlfile(module, set([module]), abi, revision, build, uri,
-                          suites, is_public)
+    for module, config in get_extra_modules_dict(is_public, abi).items():
+        for submodule in config['SUBMODULES']:
+            write_controlfile(submodule, set([submodule]), abi, revision, build,
+                              uri, config['SUITES'], is_public)
 
 
 def write_extra_camera_controlfiles(abi, revision, build, uri, is_public):
@@ -1028,7 +1062,7 @@ def write_extra_camera_controlfiles(abi, revision, build, uri, is_public):
             f.write(content)
 
 
-def run(uris, is_public):
+def run(uris, is_public, cache_dir):
     """Downloads each bundle in |uris| and generates control files for each
 
     module as reported to us by tradefed.
@@ -1036,11 +1070,17 @@ def run(uris, is_public):
     for uri in uris:
         abi = get_bundle_abi(uri)
         # Get tradefed data by downloading & unzipping the files
-
         with TemporaryDirectory(prefix='cts-android_') as tmp:
-            logging.info('Downloading to %s.', tmp)
-            download(uri, tmp)
-            bundle = os.path.join(tmp, os.path.basename(uri))
+            if cache_dir is not None:
+                assert(os.path.isdir(cache_dir))
+                bundle = os.path.join(cache_dir, os.path.basename(uri))
+                if not os.path.exists(bundle):
+                    logging.info('Downloading to %s.', cache_dir)
+                    download(uri, bundle)
+            else:
+                bundle = os.path.join(tmp, os.path.basename(uri))
+                logging.info('Downloading to %s.', tmp)
+                download(uri, bundle)
             logging.info('Extracting %s.', bundle)
             unzip(bundle, tmp)
             modules, build, revision = get_tradefed_data(tmp, is_public, abi)
@@ -1051,23 +1091,26 @@ def run(uris, is_public):
             if is_public:
                 write_moblab_controlfiles(modules, abi, revision, build, uri,
                                           is_public)
-            elif not CONFIG['WRITE_EXTRA_CONTROLFILES']:
-                write_qualification_and_regression_controlfile(
-                    abi, revision, build, uri, is_public)
             else:
-                write_regression_controlfiles(modules, abi, revision, build,
-                                              uri, is_public)
-                write_qualification_controlfiles(modules, abi, revision, build,
-                                                 uri, is_public)
-                write_extra_camera_controlfiles(abi, revision, build, uri,
-                                                is_public)
+                if CONFIG['CONTROLFILE_WRITE_SIMPLE_QUAL_AND_REGRESS']:
+                    write_qualification_and_regression_controlfile(
+                        abi, revision, build, uri, is_public)
+                else:
+                    write_regression_controlfiles(modules, abi, revision, build,
+                                                  uri, is_public)
+                    write_qualification_controlfiles(modules, abi, revision,
+                                                     build, uri, is_public)
+
+                if CONFIG['CONTROLFILE_WRITE_CAMERA']:
+                    write_extra_camera_controlfiles(abi, revision, build, uri,
+                                                    is_public)
 
             write_collect_controlfiles(modules, abi, revision, build, uri,
                                        is_public)
 
-            if CONFIG['WRITE_EXTRA_CONTROLFILES']:
-                write_extra_deqp_controlfiles(None, abi, revision, build, uri,
-                                              is_public)
+            if CONFIG['CONTROLFILE_WRITE_EXTRA']:
+                write_extra_controlfiles(None, abi, revision, build, uri,
+                                         is_public)
 
 
 def main(config):
@@ -1084,8 +1127,8 @@ def main(config):
         'uris',
         nargs='+',
         help='List of Google Storage URIs to CTS bundles. Example:\n'
-        'gs://chromeos-arc-images/cts/bundle/2016-06-02/'
-        'android-cts-6.0_r6-linux_x86-arm.zip')
+        'gs://chromeos-arc-images/cts/bundle/P/'
+        'android-cts-9.0_r9-linux_x86-x86.zip')
     parser.add_argument(
         '--is_public',
         dest='is_public',
@@ -1093,5 +1136,13 @@ def main(config):
         action='store_true',
         help='Generate the public control files for CTS, default generate'
         ' the internal control files')
+    parser.add_argument(
+        '--cache_dir',
+        dest='cache_dir',
+        default=None,
+        action='store',
+        help='Cache directory for downloaded bundle file. Uses the cached '
+             'bundle file if exists, or caches a downloaded file to this '
+             'directory if not.')
     args = parser.parse_args()
-    run(args.uris, args.is_public)
+    run(args.uris, args.is_public, args.cache_dir)

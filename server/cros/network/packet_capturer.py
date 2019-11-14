@@ -33,17 +33,14 @@ SNAPLEN_WIFI_PROBE_REQUEST = 600
 TCPDUMP_START_TIMEOUT_SECONDS = 5
 TCPDUMP_START_POLL_SECONDS = 0.1
 
-def get_packet_capturer(host, host_description=None, cmd_ifconfig=None,
-                        cmd_ip=None, cmd_iw=None, cmd_netdump=None,
-                        ignore_failures=False):
-    cmd_ifconfig = (cmd_ifconfig or
-                    path_utils.get_install_path('ifconfig', host=host))
+def get_packet_capturer(host, host_description=None, cmd_ip=None, cmd_iw=None,
+                        cmd_netdump=None, ignore_failures=False):
     cmd_iw = cmd_iw or path_utils.get_install_path('iw', host=host)
     cmd_ip = cmd_ip or path_utils.get_install_path('ip', host=host)
     cmd_netdump = (cmd_netdump or
                    path_utils.get_install_path('tcpdump', host=host))
     host_description = host_description or 'cap_%s' % uuid.uuid4().hex
-    if None in [cmd_ifconfig, cmd_iw, cmd_ip, cmd_netdump, host_description]:
+    if None in [cmd_iw, cmd_ip, cmd_netdump, host_description]:
         if ignore_failures:
             logging.warning('Creating a disabled packet capturer for %s.',
                             host_description)
@@ -52,8 +49,7 @@ def get_packet_capturer(host, host_description=None, cmd_ifconfig=None,
             raise error.TestFail('Missing commands needed for '
                                  'capturing packets')
 
-    return PacketCapturer(host, host_description, cmd_ifconfig, cmd_ip, cmd_iw,
-                          cmd_netdump)
+    return PacketCapturer(host, host_description, cmd_ip, cmd_iw, cmd_netdump)
 
 
 class DisabledPacketCapturer(object):
@@ -153,12 +149,11 @@ class PacketCapturer(object):
         return False
 
 
-    def __init__(self, host, host_description, cmd_ifconfig, cmd_ip,
-                 cmd_iw, cmd_netdump, disable_captures=False):
+    def __init__(self, host, host_description, cmd_ip, cmd_iw, cmd_netdump,
+                 disable_captures=False):
         self._cmd_netdump = cmd_netdump
         self._cmd_iw = cmd_iw
         self._cmd_ip = cmd_ip
-        self._cmd_ifconfig = cmd_ifconfig
         self._host = host
         self._ongoing_captures = {}
         self._cap_num = 0
@@ -268,7 +263,7 @@ class PacketCapturer(object):
             logging.warning('Failed creating monitor.')
             return None
 
-        self._host.run('%s %s up' % (self._cmd_ifconfig, monitor_device))
+        self._host.run('%s link set %s up' % (self._cmd_ip, monitor_device))
         self._created_managed_devices.append(monitor_device)
         return monitor_device
 
@@ -329,7 +324,7 @@ class PacketCapturer(object):
         If |capture_pid| is given, stops that capture, otherwise stops all
         ongoing captures.
 
-        This method will sleep for a small amount of time, to ensure that
+        This method may sleep for a small amount of time, to ensure that
         libpcap has completed its last poll(). The caller must ensure that
         no unwanted traffic is received during this time.
 
@@ -340,12 +335,13 @@ class PacketCapturer(object):
         @return list of RemoteCaptureResult tuples
 
         """
-        time.sleep(self.LIBPCAP_POLL_FREQ_SECS * 2)
-
         if capture_pid:
             pids_to_kill = [capture_pid]
         else:
             pids_to_kill = list(self._ongoing_captures.keys())
+
+        if pids_to_kill:
+            time.sleep(self.LIBPCAP_POLL_FREQ_SECS * 2)
 
         results = []
         for pid in pids_to_kill:

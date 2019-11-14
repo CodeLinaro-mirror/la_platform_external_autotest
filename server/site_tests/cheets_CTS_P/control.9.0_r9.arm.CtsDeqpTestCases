@@ -14,17 +14,16 @@ TIME = 'LONG'
 MAX_RESULT_SIZE_KB = 1024000
 DOC = 'Run module CtsDeqpTestCases of the Android Compatibility Test Suite (CTS) using arm ABI in the ARC++ container.'
 
-def run_CTS(machine):
+def run_TS(machine):
     host_list = [hosts.create_host(machine)]
     job.run_test(
         'cheets_CTS_P',
         hosts=host_list,
         iterations=1,
         max_retry=15,
-        needs_push_media=False,
         tag='9.0_r9.arm.CtsDeqpTestCases',
         test_name='cheets_CTS_P.9.0_r9.arm.CtsDeqpTestCases',
-        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsDeqpTestCases'],
+        run_template=['run', 'commandAndExit', 'cts', '--module', 'CtsDeqpTestCases'],
         retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
         target_module='CtsDeqpTestCases',
         target_plan=None,
@@ -32,4 +31,4 @@ def run_CTS(machine):
         uri='gs://chromeos-arc-images/cts/bundle/P/android-cts-9.0_r9-linux_x86-arm.zip',
         timeout=72000)
 
-parallel_simple(run_CTS, machines)
+parallel_simple(run_TS, machines)

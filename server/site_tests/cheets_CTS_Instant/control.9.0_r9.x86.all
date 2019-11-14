@@ -14,14 +14,13 @@ TIME = 'LONG'
 MAX_RESULT_SIZE_KB = 512000
 DOC = 'Run module all of the Android Compatibility Test Suite for Instant Apps (CTS Instant) using x86 ABI in the ARC++ container.'
 
-def run_CTS(machine):
+def run_TS(machine):
     host_list = [hosts.create_host(machine)]
     job.run_test(
         'cheets_CTS_Instant',
         hosts=host_list,
         iterations=1,
         max_retry=9,
-        needs_push_media=False,
         tag='9.0_r9.x86.all',
         test_name='cheets_CTS_Instant.9.0_r9.x86.all',
         run_template=['run', 'commandAndExit', 'cts-instant', '--logcat-on-failure'],
@@ -33,4 +32,4 @@ def run_CTS(machine):
         login_precondition_commands=['lsblk -do NAME,RM | sed -n s/1$//p | xargs -n1 eject'],
         timeout=18000)
 
-parallel_simple(run_CTS, machines)
+parallel_simple(run_TS, machines)

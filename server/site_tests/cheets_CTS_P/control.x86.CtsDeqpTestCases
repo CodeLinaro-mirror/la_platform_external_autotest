@@ -2,7 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# This file has been automatically generated. Do not edit!
+# This file is not auto-generated. Don't delete it.
+# TODO(b/138915146): auto-generate this file.
 
 AUTHOR = 'ARC++ Team'
 NAME = 'cheets_CTS_P.x86.CtsDeqpTestCases'
@@ -15,7 +16,7 @@ MAX_RESULT_SIZE_KB = 1024000
 PRIORITY = 70
 DOC = 'Run module CtsDeqpTestCases of the Android Compatibility Test Suite (CTS) using x86 ABI in the ARC++ container.'
 
-def run_CTS(machine):
+def run_TS(machine):
     host_list = [hosts.create_host(machine)]
     job.run_test(
         'cheets_CTS_P',
@@ -34,4 +35,4 @@ def run_CTS(machine):
         warn_on_test_retry=False,
         timeout=172800)
 
-parallel_simple(run_CTS, machines)
+parallel_simple(run_TS, machines)

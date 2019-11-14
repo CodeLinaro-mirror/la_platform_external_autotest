@@ -11,8 +11,8 @@ CONFIG = {}
 CONFIG['TEST_NAME'] = 'cheets_CTS_Q'
 CONFIG['DOC_TITLE'] = 'Android Compatibility Test Suite (CTS)'
 CONFIG['MOBLAB_SUITE_NAME'] = 'suite:cts_Q'
-CONFIG['SKIP_EXTRA_MOBLAB_SUITES'] = True
 CONFIG['COPYRIGHT_YEAR'] = 2019
+CONFIG['AUTHKEY'] = ''
 
 # Both arm, x86 tests results normally is below 200MB.
 # 1000MB should be sufficient for CTS tests and dump logs for android-cts.
@@ -27,18 +27,22 @@ CONFIG['TRADEFED_RETRY_COMMAND'] = 'retry'
 CONFIG['TRADEFED_DISABLE_REBOOT'] = False
 CONFIG['TRADEFED_DISABLE_REBOOT_ON_COLLECTION'] = True
 CONFIG['TRADEFED_MAY_SKIP_DEVICE_INFO'] = False
+CONFIG['TRADEFED_EXECUTABLE_PATH'] = 'android-cts/tools/cts-tradefed'
+CONFIG['TRADEFED_IGNORE_BUSINESS_LOGIC_FAILURE'] = False
 
 # On moblab everything runs in the same suite.
 CONFIG['INTERNAL_SUITE_NAMES'] = ['suite:arc-cts-q']
 CONFIG['QUAL_SUITE_NAMES'] = []
 
-CONFIG['WRITE_EXTRA_CONTROLFILES'] = True
+CONFIG['CONTROLFILE_TEST_FUNCTION_NAME'] = 'run_TS'
+CONFIG['CONTROLFILE_WRITE_SIMPLE_QUAL_AND_REGRESS'] = False
+CONFIG['CONTROLFILE_WRITE_CAMERA'] = False
+CONFIG['CONTROLFILE_WRITE_EXTRA'] = True
 
 # The dashboard suppresses upload to APFE for GS directories (based on autotest
 # tag) that contain 'tradefed-run-collect-tests'. b/119640440
 # Do not change the name/tag without adjusting the dashboard.
 _COLLECT = 'tradefed-run-collect-tests-only-internal'
-_PUBLIC_COLLECT = 'tradefed-run-collect-tests-only'
 
 CONFIG['LAB_DEPENDENCY'] = {
    'x86': ['cts_abi_x86']
@@ -75,7 +79,6 @@ CONFIG['CTS_TIMEOUT'] = {
     'CtsVideoTestCases':                 1.5,
     'CtsWidgetTestCases':                2.0,
     _COLLECT:                            2.5,
-    _PUBLIC_COLLECT:                     2.5,
 }
 
 # Any test that runs as part as blocking BVT needs to be stable and fast. For
@@ -87,54 +90,18 @@ CONFIG['QUAL_TIMEOUT'] = 48
 
 CONFIG['QUAL_BOOKMARKS'] = sorted([])
 
-CONFIG['SMOKE'] = [
-    'CtsUsbTests',
-]
+CONFIG['SMOKE'] = []
 
-CONFIG['BVT_ARC'] = [
-    'CtsAccelerationTestCases',
-    'CtsAdminTestCases',
-]
+CONFIG['BVT_ARC'] = []
 
-CONFIG['BVT_PERBUILD'] = [
-    'CtsAccountManagerTestCases',
-    'CtsBluetoothTestCases',
-    'CtsGraphicsTestCases',
-    'CtsJankDeviceTestCases',
-    'CtsOpenGLTestCases',
-    'CtsOpenGlPerf2TestCases',
-    'CtsPermission2TestCases',
-    'CtsSimpleperfTestCases',
-    'CtsSpeechTestCases',
-    'CtsTelecomTestCases',
-    'CtsTelephonyTestCases',
-    'CtsThemeDeviceTestCases',
-    'CtsTransitionTestCases',
-    'CtsTvTestCases',
-    'CtsUiAutomationTestCases',
-    'CtsUsbTests',
-    'CtsVoiceSettingsTestCases',
-]
+CONFIG['BVT_PERBUILD'] = []
 
 CONFIG['NEEDS_POWER_CYCLE'] = []
 
-CONFIG['HARDWARE_DEPENDENT_MODULES'] = [
-    'CtsSensorTestCases',
-    'CtsCameraTestCases',
-    'CtsBluetoothTestCases',
-]
+CONFIG['HARDWARE_DEPENDENT_MODULES'] = []
 
 # The suite is divided based on the run-time hint in the *.config file.
 CONFIG['VMTEST_INFO_SUITES'] = collections.OrderedDict()
-# This is the default suite for all the modules that are not specified below.
-CONFIG['VMTEST_INFO_SUITES']['vmtest-informational1'] = []
-CONFIG['VMTEST_INFO_SUITES']['vmtest-informational2'] = [
-    'CtsMediaTestCases', 'CtsMediaStressTestCases', 'CtsHardwareTestCases'
-]
-CONFIG['VMTEST_INFO_SUITES']['vmtest-informational3'] = [
-    'CtsThemeHostTestCases', 'CtsHardwareTestCases', 'CtsLibcoreTestCases'
-]
-CONFIG['VMTEST_INFO_SUITES']['vmtest-informational4'] = ['']
 
 # Modules that are known to download and/or push media file assets.
 CONFIG['MEDIA_MODULES'] = [
@@ -156,11 +123,6 @@ _EJECT_REMOVABLE_DISK_COMMAND = (
 # Behave more like in the verififed mode.
 _SECURITY_PARANOID_COMMAND = (
     "\'echo 3 > /proc/sys/kernel/perf_event_paranoid\'")
-# TODO(kinaba): Come up with a less hacky way to handle the situation.
-# {0} is replaced with the retry count. Writes either 1 (required by
-# CtsSimpleperfTestCases) or 3 (CtsSecurityHostTestCases).
-_ALTERNATING_PARANOID_COMMAND = (
-    "\'echo $(({0} % 2 * 2 + 1)) > /proc/sys/kernel/perf_event_paranoid\'")
 # Expose /proc/config.gz
 _CONFIG_MODULE_COMMAND = "\'modprobe configs\'"
 
@@ -184,41 +146,16 @@ CONFIG['LOGIN_PRECONDITION'] = {
     'CtsProviderTestCases': [_EJECT_REMOVABLE_DISK_COMMAND],
 }
 
-_WIFI_CONNECT_COMMANDS = [
-    # These needs to be in order.
-    "'/usr/local/autotest/cros/scripts/wifi connect %s %s\' % (ssid, wifipass)",
-    "'/usr/local/autotest/cros/scripts/reorder-services-moblab.sh wifi'"
-]
-
 # Preconditions applicable to public tests.
 CONFIG['PUBLIC_PRECONDITION'] = {
-    'CtsSecurityHostTestCases': [
-        _SECURITY_PARANOID_COMMAND, _CONFIG_MODULE_COMMAND
-    ],
-    'CtsUsageStatsTestCases': _WIFI_CONNECT_COMMANDS,
-    'CtsNetTestCases': _WIFI_CONNECT_COMMANDS,
-    'CtsLibcoreTestCases': _WIFI_CONNECT_COMMANDS,
 }
 
 CONFIG['PUBLIC_DEPENDENCIES'] = {
-    'CtsCameraTestCases': ['lighting'],
-    'CtsMediaTestCases': ['noloopback'],
 }
 
 # This information is changed based on regular analysis of the failure rate on
 # partner moblabs.
 CONFIG['PUBLIC_MODULE_RETRY_COUNT'] = {
-    'CtsAccessibilityServiceTestCases':  12,
-    'CtsActivityManagerDeviceTestCases': 12,
-    'CtsBluetoothTestCases':             10,
-    'CtsFileSystemTestCases':            10,
-    'CtsGraphicsTestCases':              12,
-    'CtsIncidentHostTestCases':          12,
-    'CtsNetTestCases':                   10,
-    'CtsSecurityHostTestCases':          10,
-    'CtsSensorTestCases':                12,
-    'CtsUsageStatsTestCases':            10,
-    _PUBLIC_COLLECT: 0,
 }
 
 # This information is changed based on regular analysis of the job run time on
@@ -250,13 +187,16 @@ CONFIG['DISABLE_LOGCAT_ON_FAILURE'] = set([
 ])
 
 CONFIG['EXTRA_MODULES'] = {
-    'CtsDeqpTestCases' : set([
-        'CtsDeqpTestCases.dEQP-EGL',
-        'CtsDeqpTestCases.dEQP-GLES2',
-        'CtsDeqpTestCases.dEQP-GLES3',
-        'CtsDeqpTestCases.dEQP-GLES31',
-        'CtsDeqpTestCases.dEQP-VK'
-    ])
+    'CtsDeqpTestCases': {
+        'SUBMODULES': set([
+            'CtsDeqpTestCases.dEQP-EGL',
+            'CtsDeqpTestCases.dEQP-GLES2',
+            'CtsDeqpTestCases.dEQP-GLES3',
+            'CtsDeqpTestCases.dEQP-GLES31',
+            'CtsDeqpTestCases.dEQP-VK'
+        ]),
+        'SUITES': ['suite:arc-cts-q'],
+    },
 }
 
 # Moblab wants to shard dEQP really finely. This isn't needed anymore as it got
@@ -500,29 +440,9 @@ CONFIG['EXTRA_COMMANDLINE'] = {
     ]
 }
 
-CONFIG['EXTRA_ATTRIBUTES'] = {
-    'CtsDeqpTestCases': ['suite:arc-cts', 'suite:arc-cts-deqp'],
-    'CtsDeqpTestCases.dEQP-EGL': [
-        'suite:arc-cts-deqp', 'suite:graphics_per-day'
-    ],
-    'CtsDeqpTestCases.dEQP-GLES2': [
-        'suite:arc-cts-deqp', 'suite:graphics_per-day'
-    ],
-    'CtsDeqpTestCases.dEQP-GLES3': [
-        'suite:arc-cts-deqp', 'suite:graphics_per-day'
-    ],
-    'CtsDeqpTestCases.dEQP-GLES31': [
-        'suite:arc-cts-deqp', 'suite:graphics_per-day'
-    ],
-    'CtsDeqpTestCases.dEQP-VK': [
-        'suite:arc-cts-deqp', 'suite:graphics_per-day'
-    ],
-    _COLLECT: ['suite:arc-cts-qual', 'suite:arc-cts'],
-}
+CONFIG['EXTRA_ATTRIBUTES'] = {}
 
 CONFIG['EXTRA_ARTIFACTS'] = {}
-
-CONFIG['TRADEFED_EXECUTABLE_PATH'] = 'android-cts/tools/cts-tradefed'
 
 
 from generate_controlfiles_common import main
