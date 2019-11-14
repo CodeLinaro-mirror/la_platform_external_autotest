@@ -40,7 +40,6 @@ from autotest_lib.server.cros.tradefed import tradefed_utils
 
 # For convenience, add to our scope.
 parse_tradefed_result = tradefed_utils.parse_tradefed_result
-adb_keepalive = tradefed_utils.adb_keepalive
 
 # TODO(kinaba): Move to tradefed_utils together with the setup/cleanup methods.
 MediaAsset = namedtuple('MediaAssetInfo', ['uri', 'localpath'])
@@ -757,17 +756,6 @@ class TradefedTest(test.test):
         self._safe_makedirs(dest)
         shutil.copy(os.path.join('/tmp', name), os.path.join(dest, name))
 
-    def _parse_result(self, result, waivers=None):
-        """Check the result from the tradefed output.
-
-        This extracts the test pass/fail/executed list from the output of
-        tradefed. It is up to the caller to handle inconsistencies.
-
-        @param result: The result object from utils.run.
-        @param waivers: a set[] of tests which are permitted to fail.
-        """
-        return parse_tradefed_result(result.stdout, waivers)
-
     def _get_expected_failures(self, directory, bundle_abi):
         """Return a list of expected failures or no test module.
 
@@ -919,14 +907,10 @@ class TradefedTest(test.test):
             logging.warning('Failed to restore powerd policy, overrided policy '
                             'will persist until device reboot.')
 
-    def _run_and_parse_tradefed(self, commands):
+    def _run_and_parse_tradefed(self, command):
         """Kick off the tradefed command.
 
-        Assumes that only last entry of |commands| actually runs tests and has
-        interesting output (results, logs) for collection. Ignores all other
-        commands for this purpose.
-
-        @param commands: List of lists of command tokens.
+        @param command: Lists of command tokens.
         @raise TestFail: when a test failure is detected.
         @return: tuple of (tests, pass, fail, notexecuted) counts.
         """
@@ -940,11 +924,10 @@ class TradefedTest(test.test):
             else:
                 logging.warning('cts-tradefed shard command isn\'t defined, '
                                 'falling back to use single device.')
-        commands = [command + target_argument + shard_argument
-                    for command in commands]
+        command = command + target_argument + shard_argument
 
         try:
-            output = self._run_tradefed(commands)
+            output = self._run_tradefed(command)
         except Exception as e:
             self._log_java_version()
             if not isinstance(e, error.CmdTimeoutError):
@@ -961,7 +944,7 @@ class TradefedTest(test.test):
         self._collect_tradefed_global_log(output, result_destination)
         # Result parsing must come after all other essential operations as test
         # warnings, errors and failures can be raised here.
-        return self._parse_result(output, waivers=self._waivers)
+        return parse_tradefed_result(output.stdout, self._waivers)
 
     def _setup_result_directories(self):
         """Sets up the results and logs directories for tradefed.
@@ -1050,7 +1033,10 @@ class TradefedTest(test.test):
 
         @return: tuple of the last (session_id, pass, fail, all_done?).
         """
-        output = self._run_tradefed([['list', 'results']])
+
+        # Fix b/143580192: We set the timeout to 20s because it should never
+        # takes more than 10s.
+        output = self._run_tradefed_with_timeout(['list', 'results'], 20)
 
         # Parses the last session from the output that looks like:
         #
@@ -1071,6 +1057,36 @@ class TradefedTest(test.test):
 
     def _tradefed_run_command(self, template):
         raise NotImplementedError('Subclass should override this function')
+
+    def _tradefed_cmd_path(self):
+        raise NotImplementedError('Subclass should override this function')
+
+    def _tradefed_env(self):
+        return None
+
+    def _run_tradefed_with_timeout(self, command, timeout):
+        tradefed = self._tradefed_cmd_path()
+        with tradefed_utils.adb_keepalive(self._get_adb_targets(),
+                                          self._install_paths):
+            logging.info('RUN(timeout=%d): %s', timeout,
+                         ' '.join([tradefed] + command))
+            output = self._run(
+                tradefed,
+                args=tuple(command),
+                env=self._tradefed_env(),
+                timeout=timeout,
+                verbose=True,
+                ignore_status=False,
+                # Make sure to tee tradefed stdout/stderr to autotest logs
+                # continuously during the test run.
+                stdout_tee=utils.TEE_TO_LOGS,
+                stderr_tee=utils.TEE_TO_LOGS)
+            logging.info('END: %s\n', ' '.join([tradefed] + command))
+        return output
+
+    def _run_tradefed(self, command):
+        timeout = self._timeout * self._timeout_factor
+        return self._run_tradefed_with_timeout(command, timeout)
 
     def _run_tradefed_with_retries(self,
                                    test_name,
@@ -1147,12 +1163,12 @@ class TradefedTest(test.test):
                         self._install_plan(target_plan)
 
                     logging.info('Running %s:', test_name)
-                    commands = [self._tradefed_run_command(run_template)]
+                    command = self._tradefed_run_command(run_template)
                 else:
                     logging.info('Retrying failures of %s with session_id %d:',
                                  test_name, session_id)
-                    commands = [self._tradefed_retry_command(retry_template,
-                                                             session_id)]
+                    command = self._tradefed_retry_command(retry_template,
+                                                           session_id)
 
                 # TODO(pwang): Evaluate if it is worth it to get the number of
                 #              not-excecuted, for instance, by collecting all
@@ -1163,8 +1179,7 @@ class TradefedTest(test.test):
                 if media_asset and media_asset.uri:
                     self._override_powerd_prefs()
                 try:
-                    waived_tests, acc = self._run_and_parse_tradefed(
-                        commands)
+                    waived_tests, acc = self._run_and_parse_tradefed(command)
                 finally:
                     # TODO(b/137917339): ditto
                     if media_asset and media_asset.uri:
