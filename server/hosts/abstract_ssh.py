@@ -1,3 +1,7 @@
+# Copyright (c) 2008 The Chromium OS Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
 import os, time, socket, shutil, glob, logging, tempfile, re
 import shlex
 import subprocess
@@ -955,14 +959,12 @@ class AbstractSSHHost(remote.RemoteHost):
         return tunnel_proc
 
 
-    def disconnect_ssh_tunnel(self, tunnel_proc, port):
+    def disconnect_ssh_tunnel(self, tunnel_proc):
         """
         Disconnects a previously forwarded port from the server to the DUT for
         RPC server connection.
 
         @param tunnel_proc: a tunnel process returned from |create_ssh_tunnel|.
-        @param port: remote port on the DUT, used in ADBHost.
-
         """
         if tunnel_proc.poll() is None:
             tunnel_proc.terminate()

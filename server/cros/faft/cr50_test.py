@@ -21,10 +21,16 @@ class Cr50Test(FirmwareTest):
     version = 1
 
     RESPONSE_TIMEOUT = 180
-    GS_PRIVATE = 'gs://chromeos-localmirror-private/distfiles/*/'
+    GS_PRIVATE = 'gs://chromeos-localmirror-private/distfiles/'
+    # Prod signed test images are stored in the private cr50 directory.
+    GS_PRIVATE_PROD = GS_PRIVATE + 'cr50/'
+    # Node locked test images are in this private debug directory.
+    GS_PRIVATE_DBG = GS_PRIVATE + 'chromeos-cr50-debug-0.0.11/'
     GS_PUBLIC = 'gs://chromeos-localmirror/distfiles/'
-    CR50_DEBUG_FILE =  '*/cr50_dbg_%s.bin%s'
-    CR50_PROD_FILE = 'cr50.r0.0.10.w%s%s.tbz2'
+    CR50_PROD_FILE = 'cr50.r0.0.1*.w%s%s.tbz2'
+    CR50_DEBUG_FILE =  '*/cr50.dbg.%s.bin.*%s'
+    CR50_ERASEFLASHINFO_FILE = (
+            '*/cr50_Unknown_NodeLocked-%s_cr50-accessory-mp.bin')
     CR50_TOT_VER_FILE = 'tot/LATEST'
     CR50_TOT_FILE = 'tot/cr50.bin.%s.%s'
     NONE = 0
@@ -44,7 +50,11 @@ class Cr50Test(FirmwareTest):
     CR50_FLASH_OP_ERROR_MSG = 'do_flash_op'
 
     def initialize(self, host, cmdline_args, full_args,
-            restore_cr50_state=False, cr50_dev_path='', provision_update=False):
+            restore_cr50_state=False, provision_update=False):
+        if restore_cr50_state:
+            # TODO(mruthven): remove once cleanup can restore the baord id.
+            raise error.TestNAError('Tests do not support restoring the board '
+                                    'id with the new RO.')
         self._saved_state = self.NONE
         self._raise_error_on_mismatch = not restore_cr50_state
         self._provision_update = provision_update
@@ -57,6 +67,7 @@ class Cr50Test(FirmwareTest):
 
         logging.info('Test Args: %r', full_args)
 
+        self._devid = self.servo.get('cr50_devid')
         self.can_set_ccd_level = (not self.servo.running_through_ccd() or
             self.cr50.testlab_is_on())
         self.original_ccd_level = self.cr50.get_ccd_level()
@@ -91,8 +102,10 @@ class Cr50Test(FirmwareTest):
         # We successfully saved the device state
         self._saved_state |= self.INITIAL_IMAGE_STATE
         try:
-            self._save_node_locked_dev_image(cr50_dev_path)
+            self._save_dbg_image(full_args.get('cr50_dbg_image_path', ''))
             self._save_original_images(full_args.get('release_path', ''))
+            self._save_eraseflashinfo_image(
+                    full_args.get('cr50_eraseflashinfo_image_path', ''))
             # We successfully saved the device images
             self._saved_state |= self.IMAGES
         except error.TestFail as e:
@@ -111,19 +124,28 @@ class Cr50Test(FirmwareTest):
         self._try_to_bring_dut_up()
 
 
-    def _save_node_locked_dev_image(self, cr50_dev_path):
+    def _save_dbg_image(self, cr50_dbg_image_path):
         """Save or download the node locked dev image.
 
-        @param cr50_dev_path: The path to the node locked cr50 image.
+        @param cr50_dbg_image_path: The path to the node locked cr50 image.
         """
-        # TODO(mruthven): remove once we get the new RO DBG images.
-        raise error.TestFail('Could not find DBG image for new RO')
-        if os.path.isfile(cr50_dev_path):
-            self._node_locked_cr50_image = cr50_dev_path
+        if os.path.isfile(cr50_dbg_image_path):
+            self._dbg_image_path = cr50_dbg_image_path
         else:
-            devid = self.servo.get('cr50_devid')
-            self._node_locked_cr50_image = self.download_cr50_debug_image(
-                devid)[0]
+            self._dbg_image_path = self.download_cr50_debug_image()[0]
+
+
+    def _save_eraseflashinfo_image(self, cr50_eraseflashinfo_image_path):
+        """Save or download the node locked eraseflashinfo image.
+
+        @param cr50_eraseflashinfo_image_path: The path to the node locked cr50
+                                               image.
+        """
+        if os.path.isfile(cr50_eraseflashinfo_image_path):
+            self._eraseflashinfo_image_path = cr50_eraseflashinfo_image_path
+        else:
+            self._eraseflashinfo_image_path = (
+                    self.download_cr50_eraseflashinfo_image()[0])
 
 
     def _save_original_images(self, release_path):
@@ -211,16 +233,23 @@ class Cr50Test(FirmwareTest):
         return self._original_cr50_image
 
 
-    def has_saved_cr50_dev_path(self):
+    def has_saved_dbg_image_path(self):
         """Returns true if we saved the node locked debug image."""
-        return hasattr(self, '_node_locked_cr50_image')
+        return hasattr(self, '_dbg_image_path')
 
 
-    def get_saved_cr50_dev_path(self):
+    def get_saved_dbg_image_path(self):
         """Return the local path for the cr50 dev image."""
-        if not self.has_saved_cr50_dev_path():
+        if not self.has_saved_dbg_image_path():
             raise error.TestError('No record of debug image')
-        return self._node_locked_cr50_image
+        return self._dbg_image_path
+
+
+    def get_saved_eraseflashinfo_image_path(self):
+        """Return the local path for the cr50 eraseflashinfo image."""
+        if not hasattr(self, '_eraseflashinfo_image_path'):
+            raise error.TestError('No record of eraseflashinfo image')
+        return self._eraseflashinfo_image_path
 
 
     def _restore_original_image(self, chip_bid, chip_flags):
@@ -239,7 +268,7 @@ class Cr50Test(FirmwareTest):
             try:
                 # Update to the node-locked DBG image so we can erase all of
                 # the state we are trying to reset
-                self.cr50_update(self._node_locked_cr50_image)
+                self.cr50_update(self._dbg_image_path)
 
                 # Rollback to the original cr50 image.
                 self.cr50_update(self._original_cr50_image, rollback=True,
@@ -427,8 +456,8 @@ class Cr50Test(FirmwareTest):
             logging.info('DUT did not respond. Resetting it.')
 
 
-    def _restore_cr50_state(self):
-        """Restore cr50 state, so the device can be used for further testing"""
+    def _restore_cr50_image(self):
+        """Restore the original image and board id."""
         state_mismatch = self._check_original_image_state()
         if state_mismatch and not self._provision_update:
             self._restore_original_image_and_board_id()
@@ -436,6 +465,9 @@ class Cr50Test(FirmwareTest):
                 raise error.TestError('Unexpected state mismatch during '
                                       'cleanup %s' % state_mismatch)
 
+
+    def _restore_ccd_settings(self):
+        """Restore the original ccd state."""
         # Reset the password as the first thing in cleanup. It is important that
         # if some other part of cleanup fails, the password has at least been
         # reset.
@@ -459,6 +491,22 @@ class Cr50Test(FirmwareTest):
 
         # Restore the ccd privilege level
         self._reset_ccd_settings()
+
+
+
+    def _restore_cr50_state(self):
+        """Restore cr50 state, so the device can be used for further testing.
+
+        Restore the cr50 image and board id first. Then CCD, because flashing
+        dev signed images completely clears the CCD state.
+        """
+        try:
+            self._restore_cr50_image()
+        except Exception as e:
+            logging.warning('Issue restoring Cr50 image: %s', str(e))
+            raise
+        finally:
+            self._restore_ccd_settings()
 
 
     def find_cr50_gs_image(self, gsurl):
@@ -546,12 +594,24 @@ class Cr50Test(FirmwareTest):
         return dest, ver
 
 
-    def download_cr50_debug_image(self, devid, image_bid=''):
+    def download_cr50_eraseflashinfo_image(self):
+        """download the cr50 image that allows erasing flashinfo.
+
+        Get the file with the matching devid.
+
+        @return: A tuple with the debug image local path and version
+        """
+        devid = self._devid.replace(' ', '-').replace('0x', '')
+        gsurl = os.path.join(self.GS_PRIVATE_DBG,
+                             self.CR50_ERASEFLASHINFO_FILE % devid)
+        return self.download_cr50_gs_image(gsurl, None, None)
+
+
+    def download_cr50_debug_image(self, devid='', image_bid=''):
         """download the cr50 debug file.
 
         Get the file with the matching devid and image board id info
 
-        @param devid: the cr50_devid string '${DEVID0} ${DEVID1}'
         @param image_bid: the image board id info string or list
         @return: A tuple with the debug image local path and version
         """
@@ -562,8 +622,9 @@ class Cr50Test(FirmwareTest):
                                                         symbolic=True)
             bid_ext = '.' + image_bid.replace(':', '_')
 
-        gsurl = os.path.join(self.GS_PRIVATE,
-                (self.CR50_DEBUG_FILE % (devid.replace(' ', '_'), bid_ext)))
+        devid = devid if devid else self._devid
+        dbg_file = self.CR50_DEBUG_FILE % (devid.replace(' ', '_'), bid_ext)
+        gsurl = os.path.join(self.GS_PRIVATE_DBG, dbg_file)
         return self.download_cr50_gs_image(gsurl, None, image_bid)
 
 
@@ -572,24 +633,13 @@ class Cr50Test(FirmwareTest):
 
         @return: the local path to the TOT image.
         """
-        # Get the TOT version information
-        ver_file = os.path.join(self.GS_PRIVATE, self.CR50_TOT_VER_FILE)
-        dut_ver_file = self.download_cr50_gs_file(ver_file, False)[1]
-        tot_ver = self.host.run('cat %s' % dut_ver_file).stdout.strip()
-
-        # Download the TOT image for the current board using the devid and TOT
-        # version information.
-        devid_ext = self.servo.get('cr50_devid').replace(' ', '_')
-        tot_file = self.CR50_TOT_FILE % (tot_ver, devid_ext)
-        gsurl = os.path.join(self.GS_PRIVATE, tot_file)
-
-        logging.info('using release image %s', tot_file)
-        return self.download_cr50_gs_image(gsurl, False, None)[0]
+        # TODO(mruthven): use logic from provision_Cr50TOT
+        raise error.TestNAError('Could not download TOT image')
 
 
     def _find_release_image_gsurl(self, fn):
         """Find the gs url for the release image"""
-        for gsbucket in [self.GS_PUBLIC, self.GS_PRIVATE]:
+        for gsbucket in [self.GS_PUBLIC, self.GS_PRIVATE_PROD]:
             gsurl = os.path.join(gsbucket, fn)
             if self.find_cr50_gs_image(gsurl):
                 return gsurl
