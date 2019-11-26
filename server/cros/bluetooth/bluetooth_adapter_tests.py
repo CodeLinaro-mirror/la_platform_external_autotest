@@ -6,6 +6,7 @@
 
 import errno
 import functools
+import httplib
 import inspect
 import logging
 import os
@@ -37,6 +38,7 @@ SUPPORTED_DEVICE_TYPES = {
     'MOUSE': lambda chameleon: chameleon.get_bluetooth_hid_mouse,
     'KEYBOARD': lambda chameleon: chameleon.get_bluetooth_hid_keyboard,
     'BLE_MOUSE': lambda chameleon: chameleon.get_ble_mouse,
+    'BLE_KEYBOARD': lambda chameleon: chameleon.get_ble_keyboard,
     'A2DP_SINK': lambda chameleon: chameleon.get_bluetooth_a2dp_sink,
 }
 
@@ -891,8 +893,8 @@ class BluetoothAdapterTests(test.test):
             """Check for timeout value in loop while recording failures."""
             actual_timeout = get_timeout()
             if timeout != actual_timeout:
-                logging.error('%s timeout value read %s does not '
-                              'match value set %s', property_name,
+                logging.debug('%s timeout value read %s does not '
+                              'match value set %s, yet', property_name,
                               actual_timeout, timeout)
                 return False
             else:
@@ -982,6 +984,7 @@ class BluetoothAdapterTests(test.test):
                                       property_name, time_elapsed, timeout)
                         return True
 
+        default_value = check_property()
         default_timeout = get_timeout()
 
         result = []
@@ -994,8 +997,13 @@ class BluetoothAdapterTests(test.test):
             logging.error("exception in test_%s_timeout",property_name)
             raise
         finally:
-            # Set the timeout back to default value before existing the test
+            # Set the property back to default value permanently before
+            # exiting the test
+            set_timeout(0)
+            set_property(default_value)
+            # Set the timeout back to default value before exiting the test
             set_timeout(default_timeout)
+
 
     @_test_retry_and_log
     def test_discoverable_timeout(self, timeout_values = [0, 60, 180]):
@@ -1129,8 +1137,19 @@ class BluetoothAdapterTests(test.test):
                     self.ADAPTER_PAIRING_TIMEOUT_SECS)
 
 
+        def _verify_connection_info():
+            """Verify that connection info to device is retrievable.
+
+            @returns: True if the connection info is retrievable.
+                      False otherwise.
+            """
+            return (self.bluetooth_facade.get_connection_info(device_address)
+                    is not None)
+
+
         has_device = False
         paired = False
+        connection_info_retrievable = False
         if self.bluetooth_facade.has_device(device_address):
             has_device = True
             try:
@@ -1145,7 +1164,12 @@ class BluetoothAdapterTests(test.test):
             except:
                 logging.error('test_pairing: unexpected error')
 
-        self.results = {'has_device': has_device, 'paired': paired}
+            connection_info_retrievable = _verify_connection_info()
+
+        self.results = {
+                'has_device': has_device,
+                'paired': paired,
+                'connection_info_retrievable': connection_info_retrievable}
         return all(self.results.values())
 
 
@@ -2188,6 +2212,7 @@ class BluetoothAdapterTests(test.test):
         }
         return all(self.results.values())
 
+
     def add_device(self, address, address_type, action):
         """Add a device to the Kernel action list."""
         return self.bluetooth_facade.add_device(address, address_type, action)
@@ -2640,7 +2665,7 @@ class BluetoothAdapterTests(test.test):
         raise NotImplementedError
 
 
-    def cleanup(self):
+    def cleanup(self, on_start=True):
         """Clean up bluetooth adapter tests."""
         # Close the device properly if a device is instantiated.
         # Note: do not write something like the following statements
@@ -2655,21 +2680,32 @@ class BluetoothAdapterTests(test.test):
                     device.Close()
 
                     # If module has a reset feature, use it
-                    try:
-                        device.ResetStack()
+                    if on_start:
+                        try:
+                            device.ResetStack()
 
-                    except SocketError as e:
-                        # Ignore connection reset, expected during stack reset
-                        if e.errno != errno.ECONNRESET:
-                            raise
+                        except SocketError as e:
+                            # Ignore conn reset, expected during stack reset
+                            if e.errno != errno.ECONNRESET:
+                                raise
 
-                    # Catch generic Fault exception by rpc server, ignore method
-                    # not available as it indicates platform didn't support
-                    # method and that's ok
-                    except Exception, e:
-                        if not (e.__class__.__name__ == 'Fault' and
-                            'is not supported' in str(e)):
-                            raise
+                        except httplib.BadStatusLine as e:
+                            # BadStatusLine occurs occasionally when chameleon
+                            # is restarted. We ignore it here
+                            logging.error('Ignoring badstatusline exception')
+                            pass
+
+                        # Catch generic Fault exception by rpc server, ignore
+                        # method not available as it indicates platform didn't
+                        # support method and that's ok
+                        except Exception, e:
+                            if not (e.__class__.__name__ == 'Fault' and
+                                'is not supported' in str(e)):
+                                raise
+
+                    else:
+                        # If we are doing a reset action, powercycle device
+                        device.PowerCycle()
 
         self.devices = dict()
         for device_type in SUPPORTED_DEVICE_TYPES:

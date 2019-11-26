@@ -415,7 +415,7 @@ class SysStat(object):
 
     Fields:
 
-    battery:   A list of BatteryStat objects.
+    battery:   A BatteryStat object.
     linepower: A list of LineStat objects.
     """
     psu_types = ['Mains', 'USB', 'USB_ACA', 'USB_C', 'USB_CDP', 'USB_DCP',
@@ -457,7 +457,7 @@ class SysStat(object):
         self.linepower = []
 
         if self.battery_path:
-            self.battery = [ BatteryStat(self.battery_path) ]
+            self.battery = BatteryStat(self.battery_path)
 
         for path in self.linepower_path:
             self.linepower.append(LineStat(path))
@@ -486,14 +486,19 @@ class SysStat(object):
         return on_ac
 
 
-    def ac_charging(self):
+    def battery_charging(self):
         """
-        Returns true if device is currently charging from AC power.
+        Returns true if battery is currently charging or false otherwise.
         """
-        charging = False
         for linepower in self.linepower:
-            charging |= (linepower.status == 'Charging')
-        return charging
+            if linepower.status == 'Charging':
+                return True
+
+        if not self.battery_path:
+            logging.warn('Unable to determine battery charge status')
+            return False
+
+        return self.battery.status.rstrip() == 'Charging'
 
 
     def battery_discharging(self):
@@ -504,7 +509,7 @@ class SysStat(object):
             logging.warn('Unable to determine battery discharge status')
             return False
 
-        return(self.battery[0].status.rstrip() == 'Discharging')
+        return self.battery.status.rstrip() == 'Discharging'
 
 
     def battery_discharge_ok_on_ac(self):
@@ -513,14 +518,14 @@ class SysStat(object):
         some devices cycle between charge & discharge above a certain
         SoC.  If AC is charging and SoC > 95% we can safely assume that.
         """
-        return self.ac_charging() and (self.percent_current_charge() > 95)
+        return self.battery_charging() and (self.percent_current_charge() > 95)
 
 
     def percent_current_charge(self):
         """Returns current charge compare to design capacity in percent.
         """
-        return self.battery[0].charge_now * 100 / \
-               self.battery[0].charge_full_design
+        return self.battery.charge_now * 100 / \
+               self.battery.charge_full_design
 
 
     def assert_battery_state(self, percent_initial_charge_min):
