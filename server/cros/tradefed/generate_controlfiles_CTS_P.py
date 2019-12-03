@@ -184,6 +184,7 @@ CONFIG['NEEDS_PUSH_MEDIA'] = CONFIG['MEDIA_MODULES']
 # Modules that are known to need the default apps of Chrome (eg. Files.app).
 CONFIG['ENABLE_DEFAULT_APPS'] = [
     'CtsAppSecurityHostTestCases',
+    'CtsContentTestCases',
 ]
 
 # Run `eject` for (and only for) each device with RM=1 in lsblk output.
@@ -254,6 +255,7 @@ CONFIG['PUBLIC_MODULE_RETRY_COUNT'] = {
     'CtsAccessibilityServiceTestCases':  12,
     'CtsActivityManagerDeviceTestCases': 12,
     'CtsBluetoothTestCases':             10,
+    'CtsDeqpTestCases':                  15,
     'CtsFileSystemTestCases':            10,
     'CtsGraphicsTestCases':              12,
     'CtsIncidentHostTestCases':          12,
@@ -262,6 +264,11 @@ CONFIG['PUBLIC_MODULE_RETRY_COUNT'] = {
     'CtsSensorTestCases':                12,
     'CtsUsageStatsTestCases':            10,
     _PUBLIC_COLLECT: 0,
+}
+
+CONFIG['PUBLIC_OVERRIDE_TEST_PRIORITY'] = {
+    _PUBLIC_COLLECT: 70,
+    'CtsDeqpTestCases': 70,
 }
 
 # This information is changed based on regular analysis of the job run time on

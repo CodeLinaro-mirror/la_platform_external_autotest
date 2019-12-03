@@ -183,7 +183,17 @@ class FirmwareTest(FAFTBase):
             self.faft_client.System.SetFwTryNext('A')
             if self.faft_client.System.GetCrossystemValue('mainfw_act') == 'B':
                 logging.info('mainfw_act is B. rebooting to set it A')
-                self.switcher.mode_aware_reboot()
+                # TODO(crbug.com/1018322): remove try/catch once that bug is
+                # marked as fixed and verified. In that case the overlay for
+                # the board itself will map warm_reset to cold_reset.
+                try:
+                    self.switcher.mode_aware_reboot()
+                except ConnectionError as e:
+                    if 'DUT is still up unexpectedly' in str(e):
+                        # In this case, try doing a cold_reset instead
+                        self.switcher.mode_aware_reboot(reboot_type='cold')
+                    else:
+                      raise
 
         # Check flashrom before first use, to avoid xmlrpclib.Fault.
         if not self.faft_client.Bios.IsAvailable():
@@ -893,12 +903,6 @@ class FirmwareTest(FAFTBase):
             if uart_file:
                 self.servo.set('%s_uart_capture' % uart, 'off')
 
-    def _get_power_state(self, power_state):
-        """
-        Return the current power state of the AP
-        """
-        return self.ec.send_command_get_output("powerinfo", [power_state])
-
     def wait_power_state(self, power_state, retries):
         """
         Wait for certain power state.
@@ -907,17 +911,18 @@ class FirmwareTest(FAFTBase):
         @param retries: retries.  This is necessary if AP is powering down
         and transitioning through different states.
         """
-        logging.info('Checking power state "%s" maximum %d times.',
-                     power_state, retries)
-        while retries > 0:
-            logging.info("try count: %d", retries)
-            try:
-                retries = retries - 1
-                ret = self._get_power_state(power_state)
-                return True
-            except error.TestFail:
-                pass
-        return False
+        def _state_matches():
+            (line, state_num, state_name) = self.ec.send_command_get_output(
+                    "powerinfo", [r'power state (\w+) = (\w+)'])[0]
+            logging.debug("%s", line)
+            return state_name == power_state
+
+        timeout = retries * 3  # old get() logic waited 3 seconds per try
+        logging.info('Waiting for power state "%s" maximum %d seconds.',
+                     power_state, timeout)
+        return utils.poll_for_condition_ex(
+                condition=_state_matches, timeout=timeout, sleep_interval=1.5,
+                desc='power state "%s"' % power_state)
 
     def suspend(self):
         """Suspends the DUT."""

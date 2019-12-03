@@ -159,7 +159,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
 
         @param commands: the command string to send to cr50
         """
-        if not self._servo.running_through_ccd():
+        if self._servo.main_device_is_flex():
             self.wake_cr50()
         super(ChromeCr50, self).send_command(commands)
 
@@ -349,7 +349,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
                             command output
         @return: A list of matched output
         """
-        if not self._servo.running_through_ccd():
+        if self._servo.main_device_is_flex():
             self.wake_cr50()
 
         # We have started prepending '\n' to separate cr50 console junk from
@@ -463,15 +463,6 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         return 1
 
 
-    def erase_nvmem(self):
-        """Use flasherase to erase both nvmem sections"""
-        if not self.has_command('flasherase'):
-            raise error.TestError("need image with 'flasherase'")
-
-        self.send_command('flasherase 0x7d000 0x3000')
-        self.send_command('flasherase 0x3d000 0x3000')
-
-
     def reboot(self):
         """Reboot Cr50 and wait for cr50 to reset"""
         self.wait_for_reboot(cmd='reboot')
@@ -509,7 +500,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         @param cmd: the command to run to reset cr50.
         @param timeout: seconds to wait to detect the reboot.
         """
-        if self._servo.running_through_ccd():
+        if self._servo.main_device_is_ccd():
             self.send_command(cmd)
             # Cr50 USB is reset when it reboots. Wait for the CCD connection to
             # go down to detect the reboot.
@@ -525,34 +516,22 @@ class ChromeCr50(chrome_ec.ChromeConsole):
             self._servo.get_power_state_controller().reset()
 
 
-    def rollback(self, eraseflashinfo=True, chip_bid=None, chip_flags=None):
-        """Set the reset counter high enough to force a rollback then reboot
+    def set_board_id(self, chip_bid, chip_flags):
+        """Set the chip board id type and flags."""
+        self.send_command('bid 0x%x 0x%x' % (chip_bid, chip_flags))
 
-        Set the new board id before rolling back if one is given.
 
-        @param eraseflashinfo: True if eraseflashinfo should be run before
-                               rollback
-        @param chip_bid: the integer representation of chip board id or None if
-                         the board id should be erased during rollback
-        @param chip_flags: the integer representation of chip board id flags or
-                        None if the board id should be erased during rollback
-        """
-        if (not self.has_command('rollback') or not
-            self.has_command('eraseflashinfo')):
-            raise error.TestError("need image with 'rollback' and "
-                "'eraseflashinfo'")
+    def eraseflashinfo(self):
+        """Run eraseflashinfo."""
+        self.send_command('eraseflashinfo')
+
+
+    def rollback(self):
+        """Set the reset counter high enough to force a rollback and reboot."""
+        if not self.has_command('rollback'):
+            raise error.TestError("need image with 'rollback'")
 
         inactive_partition = self.get_inactive_version_info()[0]
-        # Set the board id if both the board id and flags have been given.
-        set_bid = chip_bid and chip_flags
-
-        # Erase the infomap
-        if eraseflashinfo or set_bid:
-            self.send_command('eraseflashinfo')
-
-        # Update the board id after it has been erased
-        if set_bid:
-            self.send_command('bid 0x%x 0x%x' % (chip_bid, chip_flags))
 
         self.wait_for_reboot(cmd='rollback')
 
@@ -636,7 +615,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         Returns:
         @return: 'off' or 'on' based on whether the cr50 console is working.
         """
-        if self._servo.running_through_ccd():
+        if self._servo.main_device_is_ccd():
             return self._servo.get('ccd_state') == 'on'
         else:
             return not bool(self.gpioget('CCD_MODE_L'))
@@ -703,7 +682,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         self._servo.set_servo_v4_dts_mode('on')
         # If the test is actually running with ccd, wait for USB communication
         # to come up after reset.
-        if self._servo.running_through_ccd():
+        if self._servo.main_device_is_ccd():
             time.sleep(self._servo.USB_DETECTION_DELAY)
         self.wait_for_ccd_enable(raise_error=raise_error)
 
@@ -735,7 +714,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         @param state: the desired testlab mode string: 'on' or 'off'
         @raise TestFail: if testlab mode was not changed
         """
-        if self._servo.running_through_ccd():
+        if self._servo.main_device_is_ccd():
             raise error.TestError('Cannot set testlab mode with CCD. Use flex '
                     'cable instead.')
         if not self.faft_config.has_powerbutton:
@@ -802,7 +781,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         testlab_on = self._state_to_bool(self._servo.get('cr50_testlab'))
         batt_is_disconnected = self.get_batt_pres_state()[1]
         req_pp = self._level_change_req_pp(level)
-        has_pp = not self._servo.running_through_ccd()
+        has_pp = not self._servo.main_device_is_ccd()
         dbg_en = 'DBG' in self._servo.get('cr50_version')
 
         if req_pp and not has_pp:

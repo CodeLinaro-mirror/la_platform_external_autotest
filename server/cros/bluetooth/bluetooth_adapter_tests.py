@@ -22,6 +22,8 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.server import test
 from autotest_lib.client.bin.input.linux_input import (
         BTN_LEFT, BTN_RIGHT, EV_KEY, EV_REL, REL_X, REL_Y, REL_WHEEL)
+from autotest_lib.server.cros.bluetooth.bluetooth_gatt_client_utils import (
+        GATT_ClientFacade, GATT_Application, GATT_HIDApplication)
 
 
 Event = recorder.Event
@@ -549,25 +551,35 @@ class BluetoothAdapterTests(test.test):
         """Group all chameleons by the type of their detected device
         """
 
-        def chameleon_device_type(chameleon, idx):
+        # Use previously created chameleon_group instead of creating new
+        if len(self.chameleon_group_copy) > 0:
+            logging.info('Using previously created chameleon group')
+            for device_type in SUPPORTED_DEVICE_TYPES:
+                self.chameleon_group[device_type] = \
+                    self.chameleon_group_copy[device_type][:]
+            return
+
+        # Create new chameleon_group
+        for device_type in SUPPORTED_DEVICE_TYPES:
+            self.chameleon_group[device_type] = list()
+            # Create copy of chameleon_group
+            self.chameleon_group_copy[device_type] = list()
+
+        for idx,chameleon in enumerate(self.host.chameleon_list):
             for device_type,gen_device_func in SUPPORTED_DEVICE_TYPES.items():
                 try:
                     device = gen_device_func(chameleon)()
                     if device.CheckSerialConnection():
-                        return device_type
+                        self.chameleon_group[device_type].append(chameleon)
+                        logging.info('%d-th chameleon find device %s', \
+                                     idx, device_type)
+                        # Create copy of chameleon_group
+                        self.chameleon_group_copy[device_type].append(chameleon)
                 except:
                     logging.debug('Error with initializing %s on %d-th'
                                   'chameleon', device_type, idx)
-            logging.error('No device is detected on %d-th chameleon', idx)
-            return None
-
-        for device_type in SUPPORTED_DEVICE_TYPES:
-            self.chameleon_group[device_type] = list()
-
-        for idx,chameleon in enumerate(self.host.chameleon_list):
-            chameleon_type = chameleon_device_type(chameleon, idx)
-            self.chameleon_group[chameleon_type].append(chameleon)
-            logging.info('%d-th chameleon find device %s', idx, chameleon_type)
+            if len(self.chameleon_group[device_type]) == 0:
+                logging.error('No device is detected on %d-th chameleon', idx)
 
     def get_device_rasp(self, device_num):
         """Get all bluetooth device objects from chameleons.
@@ -582,6 +594,7 @@ class BluetoothAdapterTests(test.test):
                 logging.error('Number of chameleon with device type'
                       '%s is %d, which is less then needed %d', device_type,
                       len(self.chameleon_group[device_type]), number)
+                return False
 
             for chameleon in self.chameleon_group[device_type][:number]:
                 device = get_bluetooth_emulated_device(chameleon, device_type)
@@ -599,6 +612,12 @@ class BluetoothAdapterTests(test.test):
                         raise
 
                 self.devices[device_type].append(device)
+
+                # Remove this chameleon from chameleon_group since it is already
+                # configured as a specific device
+                for temp_device in SUPPORTED_DEVICE_TYPES:
+                    if chameleon in self.chameleon_group[temp_device]:
+                        self.chameleon_group[temp_device].remove(chameleon)
 
         return True
 
@@ -717,6 +736,15 @@ class BluetoothAdapterTests(test.test):
     # -------------------------------------------------------------------
     # Adater standalone tests
     # -------------------------------------------------------------------
+
+
+    def enable_disable_debug_log(self, enable):
+        """Enable or disable debug log in DUT
+        @param enable: True to enable all of the debug log,
+                       False to disable all of the debug log.
+        """
+        level = int(enable)
+        self.bluetooth_facade.set_debug_log_levels(level, level, level, level)
 
 
     @_test_retry_and_log
@@ -2243,6 +2271,58 @@ class BluetoothAdapterTests(test.test):
         return self.bluetooth_facade.get_dev_info()
 
 
+    @_test_retry_and_log(False)
+    def test_service_resolved(self, address):
+        """Test that the services under device address can be resolved
+
+        @param address: MAC address of a device
+
+        @returns: True if the ServicesResolved property is changed before
+                 timeout, False otherwise.
+
+        """
+        is_resolved_func = self.bluetooth_facade.device_services_resolved
+        return self._wait_for_condition(lambda : is_resolved_func(address),\
+                                        method_name())
+
+
+    @_test_retry_and_log(False)
+    def test_gatt_browse(self, address):
+        """Test that the GATT client can get the attributes correctly
+
+        @param address: MAC address of a device
+
+        @returns: True if the attribute map received by GATT client is the same
+                  as expected. False otherwise.
+
+        """
+
+        gatt_client_facade = GATT_ClientFacade(self.bluetooth_facade)
+        actual_app = gatt_client_facade.browse(address)
+        expected_app = GATT_HIDApplication()
+        diff = GATT_Application.diff(actual_app, expected_app)
+
+        self.result = {
+            'actural_result': actual_app,
+            'expected_result': expected_app
+        }
+
+        gatt_attribute_hierarchy = ['Device', 'Service', 'Characteristic',
+                                    'Descriptor']
+        # Remove any difference in object path
+        for parent, child in zip(gatt_attribute_hierarchy,
+                                 gatt_attribute_hierarchy[1:]):
+            pattern = re.compile('^%s .* is different in %s' % (child, parent))
+            for diff_str in diff[::]:
+                if pattern.search(diff_str):
+                    diff.remove(diff_str)
+
+        if len(diff) != 0:
+            logging.error('Application Diff: %s', diff)
+            return False
+        return True
+
+
     # -------------------------------------------------------------------
     # Bluetooth mouse related tests
     # -------------------------------------------------------------------
@@ -2667,6 +2747,9 @@ class BluetoothAdapterTests(test.test):
 
     def cleanup(self, on_start=True):
         """Clean up bluetooth adapter tests."""
+        # Disable all the bluetooth debug logs
+        self.enable_disable_debug_log(enable=False)
+
         # Close the device properly if a device is instantiated.
         # Note: do not write something like the following statements
         #           if self.devices[device_type]:

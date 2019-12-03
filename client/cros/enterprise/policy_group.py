@@ -6,24 +6,11 @@ import copy
 import json
 
 from autotest_lib.client.cros.enterprise.policy import Policy as Policy
+from autotest_lib.client.cros.enterprise.device_policy_lookup import DEVICE_POLICY_DICT
 
 CHROMEPOLICIES = 'chromePolicies'
 DEVICELOCALACCOUNT = 'deviceLocalAccountPolicies'
 EXTENSIONPOLICIES = 'extensionPolicies'
-
-DEVICE_POLICY_DICT = {
-    'DeviceAllowBluetooth': 'allow_bluetooth',
-    'DeviceAutoUpdateDisabled': 'update_disabled',
-    'DeviceEpheoldralUsersEnabled': 'epheoldral_users_enabled',
-    'DeviceEphemeralUsersEnabled': 'ephemeral_users_enabled',
-    'DeviceOpenNetworkConfiguration': 'open_network_configuration',
-    'DeviceRollbackToTargetVersion': 'rollback_to_target_version',
-    'DeviceTargetVersionPrefix': 'target_version_prefix',
-    'SystemTimezone': 'timezone',
-    'ReportUploadFrequency': 'device_status_frequency',
-    'DeviceLocalAccounts': 'account',
-    'DeviceLocalAccountAutoLoginId': 'auto_login_id',
-}
 
 
 class AllPolicies(object):
@@ -81,7 +68,7 @@ class AllPolicies(object):
             should be the actual value that will be provided to the DMServer.
 
         """
-        # If the policy is configured (ie a this policy group object represents)
+        # If the policy is configured (ie this policy group object represents)
         # the policies being SET for testing) add the 'policy_group' value.
         policy_group = 'extension' if self.isConfiguredPolicies else None
         extension_policies = copy.deepcopy(policies)
@@ -97,9 +84,13 @@ class AllPolicies(object):
                 key = 'ext_values'
             self.set_policy(key, extension_policy, policy_group, extension_ID)
 
-    def set_policy(self, policy_type, policies, group=None, extension_key=None):
+    def set_policy(self,
+                   policy_type,
+                   policies,
+                   group=None,
+                   extension_key=None):
         """
-        Creates the policy object, and sets it in the corresponding group.
+        Create and the policy object, and set it in the corresponding group.
 
         @param policy_type: str of the policy type. Must be:
             'chrome', 'ext_values', 'displayed_ext_values', or 'local'.
@@ -126,7 +117,7 @@ class AllPolicies(object):
 
     def updateDMJson(self):
         """
-        Updates the self._DM_JSON with the values currently set in
+        Update the ._DM_JSON with the values currently set in
         self.chrome, self.extension_configured_data, and self.local.
 
         """
@@ -135,7 +126,7 @@ class AllPolicies(object):
         self._populateExtensionData()
 
     def _populateChromeData(self):
-        """Updates the DM_JSON's chrome values."""
+        """Update the DM_JSON's chrome values."""
         for policy_name, policy_object in self.chrome.items():
             if policy_object.scope == 'machine':
                 dm_name = DEVICE_POLICY_DICT[policy_name]
@@ -169,22 +160,20 @@ class AllPolicies(object):
         return cleaned
 
     def _jsonify(self, policy, value):
-        """
-        Jsonifies the policy if its a dict, or a list that is not a kiosk
-        policy.
-
-        """
+        """Jsonify policy if its a dict or list that is not kiosk policy."""
         if isinstance(value, dict):
             return json.dumps(value)
         # Kiosk Policy, aka "account", is the only policy not formatted.
-        elif isinstance(value, list) and (policy != 'account'):
+        elif (
+                isinstance(value, list) and
+                (policy != 'device_local_accounts.account')):
             if value and isinstance(value[0], dict):
                 return json.dumps(value)
         return value
 
     def _create_pol_obj(self, name, data, group=None):
         """
-        Creates a policy object from Policy.Policy()
+        Create a policy object from Policy.Policy().
 
         @param name: str, name of the policy
         @param data: data value of the policy
@@ -192,17 +181,17 @@ class AllPolicies(object):
 
         @returns: Policy object, reperesenting the policy args provided.
         """
-        policyObj = Policy()
-        policyObj.name = name
-        if policyObj.is_formatted_value(data):
-            policyObj.set_policy_from_dict(data)
+        policy_obj = Policy()
+        policy_obj.name = name
+        if policy_obj.is_formatted_value(data):
+            policy_obj.set_policy_from_dict(data)
         else:
-            policyObj.value = data
-        policyObj.group = group
-        return policyObj
+            policy_obj.value = data
+        policy_obj.group = group
+        return policy_obj
 
     def _update_policy_dict(self, secondary_ext_policies):
-        """Updates the local .policy_dict with the most current values."""
+        """Update the local .policy_dict with the most current values."""
         for policy in self.chrome:
             self.policy_dict[CHROMEPOLICIES].update(
                 self.chrome[policy].get_policy_as_dict())
@@ -268,7 +257,7 @@ class AllPolicies(object):
 
     def _check(self, policy_group, other_policy_group):
         """
-        Checks if the policy_group is ==.
+        Check if the policy_group is ==.
 
         Will return False if:
             policy is missing from other policy object
