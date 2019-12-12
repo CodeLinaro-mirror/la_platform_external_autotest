@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import time
+import traceback
 
 import common
 from autotest_lib.client.bin import utils
@@ -303,7 +304,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             servo_host.create_servo_host(
                 dut=self, servo_args=servo_args,
                 try_lab_servo=try_lab_servo,
-                try_servo_repair=try_servo_repair))
+                try_servo_repair=try_servo_repair,
+                dut_host_info=self.host_info_store.get()))
         self._default_power_method = None
 
         # TODO(waihong): Do the simplication on Chameleon too.
