@@ -13,6 +13,7 @@ from autotest_lib.server.cros.bluetooth.bluetooth_adapter_pairing_tests import \
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_hidreports_tests \
      import BluetoothAdapterHIDReportTests
 
+
 class bluetooth_AdapterLESanity(BluetoothAdapterQuickTests,
         BluetoothAdapterPairingTests,
         BluetoothAdapterHIDReportTests):
@@ -92,7 +93,25 @@ class bluetooth_AdapterLESanity(BluetoothAdapterQuickTests,
         """LE reconnection loop by reseting HID and check reconnection"""
 
         device = self.devices['BLE_MOUSE'][0]
-        self.auto_reconnect_loop(device=device, loops=3)
+        self.auto_reconnect_loop(device=device,
+                                 loops=3,
+                                 check_connected_method=\
+                                 self.test_mouse_left_click)
+
+
+    @test_wrapper('GATT Client', devices={'BLE_KEYBOARD':1})
+    def le_gatt_client_attribute_browse_test(self):
+        """Browse the whole tree-structured GATT attributes"""
+
+        device = self.devices['BLE_KEYBOARD'][0]
+        self.test_discover_device(device.address)
+        self.bluetooth_facade.stop_discovery()
+        time.sleep(self.TEST_SLEEP_SECS)
+        self.test_pairing(device.address, device.pin, trusted=True)
+        time.sleep(self.TEST_SLEEP_SECS)
+        self.test_connection_by_adapter(device.address)
+        self.test_service_resolved(device.address)
+        self.test_gatt_browse(device.address)
 
 
     @batch_wrapper('LE Sanity')

@@ -177,6 +177,7 @@ CONFIG['NEEDS_PUSH_MEDIA'] = [
 # Modules that are known to need the default apps of Chrome (eg. Files.app).
 CONFIG['ENABLE_DEFAULT_APPS'] = [
     'CtsAppSecurityHostTestCases',
+    'CtsContentTestCases',
 ]
 
 # TODO(kinaba, b/110869932): remove this.
@@ -248,6 +249,10 @@ CONFIG['PUBLIC_MODULE_RETRY_COUNT'] = {
     'CtsUsageStatsTestCases': 10,
     'CtsFileSystemTestCases': 10,
     'CtsBluetoothTestCases': 10,
+}
+
+CONFIG['PUBLIC_OVERRIDE_TEST_PRIORITY'] = {
+    _PUBLIC_COLLECT: 70,
 }
 
 # This information is changed based on regular analysis of the job run time on

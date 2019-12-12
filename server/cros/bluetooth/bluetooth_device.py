@@ -52,6 +52,20 @@ class BluetoothDevice(object):
         self.UUIDs = properties.get('UUIDs')
 
 
+    def set_debug_log_levels(self, dispatcher_vb, newblue_vb, bluez_vb,
+                             kernel_vb):
+        """Enable or disable the debug logs of bluetooth
+
+        @param dispatcher_vb: verbosity of btdispatcher debug log, either 0 or 1
+        @param newblue_vb: verbosity of newblued debug log, either 0 or 1
+        @param bluez_vb: verbosity of bluez debug log, either 0 or 1
+        @param kernel_vb: verbosity of kernel debug log, either 0 or 1
+
+        """
+        return self._proxy.set_debug_log_levels(dispatcher_vb, newblue_vb,
+                                                bluez_vb, kernel_vb)
+
+
     def start_bluetoothd(self):
         """start bluetoothd.
 
@@ -738,6 +752,73 @@ class BluetoothDevice(object):
 
         """
         return self._proxy.is_characteristic_path_resolved(uuid, address)
+
+
+    def get_gatt_attributes_map(self, address):
+        """Return a JSON formated string of the GATT attributes of a device,
+        keyed by UUID
+        @param address: a string of the MAC address of the device
+
+        @return: JSON formated string, stored the nested structure of the
+        attributes. Each attribute has 'path' and ['chrcs' | 'descs'], which
+        store their object path and children respectively.
+        """
+        return self._proxy.get_gatt_attributes_map(address)
+
+
+    def get_gatt_service_property(self, object_path, property_name):
+        """Get property from a service attribute
+        @param object_path: a string of the object path of the service
+        @param property_name: a string of a property, ex: 'Value', 'UUID'
+
+        @return: the property if success,
+                 None otherwise
+        """
+        return self._proxy.get_gatt_service_property(object_path, property_name)
+
+
+    def get_gatt_characteristic_property(self, object_path, property_name):
+        """Get property from a characteristic attribute
+        @param object_path: a string of the object path of the characteristic
+        @param property_name: a string of a property, ex: 'Value', 'UUID'
+
+        @return: the property if success,
+                 None otherwise
+        """
+        return self._proxy.get_gatt_characteristic_property(object_path,
+                                                            property_name)
+
+
+    def get_gatt_descriptor_property(self, object_path, property_name):
+        """Get property from a descriptor attribute
+        @param object_path: a string of the object path of the descriptor
+        @param property_name: a string of a property, ex: 'Value', 'UUID'
+
+        @return: the property if success,
+                 None otherwise
+        """
+        return self._proxy.get_gatt_descriptor_property(object_path,
+                                                        property_name)
+
+
+    def gatt_characteristic_read_value(self, uuid, object_path):
+        """Perform method ReadValue on a characteristic attribute
+        @param uuid: a string of uuid
+        @param object_path: a string of the object path of the characteristic
+
+        @return: base64 string of dbus bytearray
+        """
+        return self._proxy.gatt_characteristic_read_value(uuid, object_path)
+
+
+    def gatt_descriptor_read_value(self, uuid, object_path):
+        """Perform method ReadValue on a descriptor attribute
+        @param uuid: a string of uuid
+        @param object_path: a string of the object path of the descriptor
+
+        @return: base64 string of dbus bytearray
+        """
+        return self._proxy.gatt_descriptor_read_value(uuid, object_path)
 
 
     def copy_logs(self, destination):

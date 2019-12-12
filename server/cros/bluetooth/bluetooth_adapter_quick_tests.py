@@ -77,6 +77,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                 logging.info('Getting device %s', device_type)
                 self.get_device(device_type)
 
+
     def _print_delimiter(self):
         logging.info('=======================================================')
 
@@ -84,20 +85,30 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
     def quick_test_init(self, host, use_chameleon=True, flag='Quick Sanity'):
         """Inits the test batch"""
         self.host = host
-        factory = remote_facade_factory.RemoteFacadeFactory(host,
-                                                            disable_arc=True)
-        self.bluetooth_facade = factory.create_bluetooth_hid_facade()
+        #factory can not be declared as local variable, otherwise
+        #factory._proxy.__del__ will be invoked, which shutdown the xmlrpc server,
+        #which log out the user.
+        self.factory = remote_facade_factory.RemoteFacadeFactory(host,
+                                                                 disable_arc=True)
+        self.bluetooth_facade = self.factory.create_bluetooth_hid_facade()
         self.use_chameleon = use_chameleon
         if self.use_chameleon:
-            self.input_facade = factory.create_input_facade()
+            self.input_facade = self.factory.create_input_facade()
             self.check_chameleon()
 
             # Query connected devices on our chameleon at init time
             self.available_devices = self.list_devices_available()
 
+            for chameleon in self.host.chameleon_list:
+                chameleon.register_raspPi_log(self.outputdir)
+
             if self.host.multi_chameleon:
                 self.chameleon_group = dict()
+                # Create copy of chameleon_group
+                self.chameleon_group_copy = dict()
                 self.group_chameleons_type()
+
+        self.enable_disable_debug_log(enable=True)
 
         self.flag = flag
         self.test_iter = None
@@ -114,6 +125,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
         self.pkg_name = None
         self.pkg_iter = None
         self.pkg_is_running = False
+
 
     @staticmethod
     def quick_test_test_decorator(test_name, devices={}, flags=['All']):
@@ -239,9 +251,20 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                     if device_is_paired:
                         self.bluetooth_facade.remove_device_object(
                                 device.address)
+
+        # Repopulate chameleon_group for next tests
+        if self.host.multi_chameleon:
+            # Clear previous tets's leftover entries. Don't delete the
+            # chameleon_group dictionary though, it'll be used as it is.
+            for device_type in self.chameleon_group:
+                if len(self.chameleon_group[device_type]) > 0:
+                    del self.chameleon_group[device_type][:]
+
+            # Repopulate
+            self.group_chameleons_type()
+
         # Close the connection between peers
         self.cleanup()
-
 
 
     @staticmethod
