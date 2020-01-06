@@ -75,6 +75,7 @@ UPDATE_TIMEOUT = 60
 UPDATE_OK = 1
 
 ERASED_BID_INT = 0xffffffff
+ERASED_BID_STR = hex(ERASED_BID_INT)
 # With an erased bid, the flags and board id will both be erased
 ERASED_CHIP_BID = (ERASED_BID_INT, ERASED_BID_INT, ERASED_BID_INT)
 # Any image with this board id will run on any device
@@ -199,47 +200,6 @@ def GetSavedVersion(client):
 
     result = client.run(GET_CR50_VERSION).stdout.strip()
     return FindVersion(result, '--fwver')
-
-
-def GetRLZ(client):
-    """Get the RLZ brand code from vpd.
-
-    Args:
-        client: the object to run commands on
-
-    Returns:
-        The current RLZ code or '' if the space doesn't exist
-    """
-    result = client.run('vpd -g rlz_brand_code', ignore_status=True)
-    if (result.exit_status and (result.exit_status != 3 or
-        "Vpd data 'rlz_brand_code' was not found." not in result.stderr)):
-        raise error.TestFail(result)
-    return result.stdout.strip()
-
-
-def SetRLZ(client, rlz):
-    """Set the RLZ brand code in vpd
-
-    Args:
-        client: the object to run commands on
-        rlz: 4 character string.
-
-    Raises:
-        TestError if the RLZ code is too long or if setting the code failed.
-    """
-    rlz = rlz.strip()
-    if len(rlz) > SYMBOLIC_BID_LENGTH:
-        raise error.TestError('RLZ is too long. Use a max of 4 characters')
-
-    if rlz == GetRLZ(client):
-        return
-    elif rlz:
-          client.run('vpd -s rlz_brand_code=%s' % rlz)
-    else:
-          client.run('vpd -d rlz_brand_code')
-
-    if rlz != GetRLZ(client):
-        raise error.TestError('Could not set RLZ code')
 
 
 def StopTrunksd(client):
@@ -612,7 +572,7 @@ def GetChipBoardId(client):
     return board_id, board_id_inv, flags
 
 
-def CheckChipBoardId(client, board_id, flags):
+def CheckChipBoardId(client, board_id, flags, board_id_inv=None):
     """Compare the given board_id and flags to the running board_id and flags
 
     Interpret board_id and flags how gsctool would interpret them, then compare
@@ -621,21 +581,36 @@ def CheckChipBoardId(client, board_id, flags):
     Args:
         client: the object to run commands on
         board_id: a hex str, symbolic str, or int value for board_id
+        board_id_inv: a hex str or int value of board_id_inv. Ignore
+                      board_id_inv if None. board_id_inv is ~board_id unless
+                      the board id is erased. In case both should be 0xffffffff.
         flags: the int value of flags or None
 
     Raises:
         TestFail if the new board id info does not match
     """
     # Read back the board id and flags
-    new_board_id, _, new_flags = GetChipBoardId(client)
+    new_board_id, new_board_id_inv, new_flags = GetChipBoardId(client)
 
     expected_board_id = GetIntBoardId(board_id)
     expected_flags = GetExpectedFlags(flags)
 
-    if new_board_id != expected_board_id or new_flags != expected_flags:
-        raise error.TestFail('Failed to set board id expected %x:%x, but got '
-                             '%x:%x' % (expected_board_id, expected_flags,
-                             new_board_id, new_flags))
+    if board_id_inv == None:
+        new_board_id_inv_str = ''
+        expected_board_id_inv_str = ''
+    else:
+        new_board_id_inv_str = '%08x:' % new_board_id_inv
+        expected_board_id_inv = GetIntBoardId(board_id_inv)
+        expected_board_id_inv_str = '%08x:' % expected_board_id_inv
+
+    expected_str = '%08x:%s%08x' % (expected_board_id,
+                                    expected_board_id_inv_str,
+                                    expected_flags)
+    new_str = '%08x:%s%08x' % (new_board_id, new_board_id_inv_str, new_flags)
+
+    if new_str != expected_str:
+        raise error.TestFail('Failed to set board id: expected %r got %r' %
+                             (expected_str, new_str))
 
 
 def SetChipBoardId(client, board_id, flags=None, pad=True):

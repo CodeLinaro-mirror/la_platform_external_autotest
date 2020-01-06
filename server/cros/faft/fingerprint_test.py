@@ -93,7 +93,13 @@ class FingerprintTest(test.test):
                 _FIRMWARE_VERSION_RO_VERSION: 'nocturne_fp_v2.2.64-58cf5974e',
                 _FIRMWARE_VERSION_RW_VERSION: 'nocturne_fp_v2.2.110-b936c0a3c',
                 _FIRMWARE_VERSION_KEY_ID: '6f38c866182bd9bf7a4462c06ac04fa6a0074351',
-            }
+            },
+            'nocturne_fp_v2.2.191-1d529566e.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: 'e21223d6a3dbb7a6c6f2905f602f972b8a2b6d0fb52e262931745dae808e7c4d',
+                _FIRMWARE_VERSION_RO_VERSION: 'nocturne_fp_v2.2.64-58cf5974e',
+                _FIRMWARE_VERSION_RW_VERSION: 'nocturne_fp_v2.2.191-1d529566e',
+                _FIRMWARE_VERSION_KEY_ID: '6f38c866182bd9bf7a4462c06ac04fa6a0074351',
+            },
         },
         _FP_BOARD_NAME_NAMI: {
             'nami_fp_v2.2.144-7a08e07eb.bin': {
@@ -402,7 +408,7 @@ class FingerprintTest(test.test):
             self._get_expected_firmware_rw_version(build_fw_file)
         self.check_equal(actual_rw_version, expected_rw_version)
 
-        logging.info("Validated build firmware metadata.");
+        logging.info("Validated build firmware metadata.")
 
     def _get_key_type(self, key_id):
         """Returns the key "type" for a given "key id"."""
@@ -555,7 +561,7 @@ class FingerprintTest(test.test):
         """Returns RW firmware version from build (based on filename)."""
         fw_file = os.path.basename(self._build_fw_file)
         if not fw_file.endswith('.bin'):
-            raise error.TestFail('Unexpected filename for RW firmware: '
+            raise error.TestFail('Unexpected filename for RW firmware: %s'
                                  % fw_file)
         fw_version = fw_file[:-4]
         if use_dev_signed_fw:

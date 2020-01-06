@@ -62,10 +62,6 @@ class Cr50Test(FirmwareTest):
     def initialize(self, host, cmdline_args, full_args,
                    restore_cr50_image=False, restore_cr50_board_id=False,
                    provision_update=False):
-        if restore_cr50_image:
-            # TODO(mruthven): remove once cleanup can restore the baord id.
-            raise error.TestNAError('Tests do not support restoring the board '
-                                    'id with the new RO.')
         self._saved_state = self.NONE
         self._raise_error_on_mismatch = not restore_cr50_image
         self._provision_update = provision_update
@@ -235,7 +231,7 @@ class Cr50Test(FirmwareTest):
     def _save_original_state(self):
         """Save the cr50 related state.
 
-        Save the device's current cr50 version, cr50 board id, rlz, and image
+        Save the device's current cr50 version, cr50 board id, and image
         at /opt/google/cr50/firmware/cr50.bin.prod. These will be used to
         restore the state during cleanup.
         """
@@ -277,6 +273,10 @@ class Cr50Test(FirmwareTest):
             raise error.TestError('No record of eraseflashinfo image')
         return self._eraseflashinfo_image_path
 
+    def get_device_brand(self):
+        """Returns the 4 character device brand."""
+        return self._original_image_state['cros_config / brand-code']
+
 
     def _retry_cr50_update(self, image, retries, rollback):
         """Try to update to the given image retries amount of times.
@@ -315,7 +315,7 @@ class Cr50Test(FirmwareTest):
         @param image: the image to end on. Use the original test image if no
                       image is given.
         """
-        image = image if image else self._original_cr50_image
+        image = image if image else self.get_saved_cr50_original_path()
         self.run_update_to_eraseflashinfo()
         self.cr50_update(image)
 
@@ -329,21 +329,6 @@ class Cr50Test(FirmwareTest):
 
         @param state_mismatch: a dictionary of the mismatched state.
         """
-        # Use the eraseflashinfo image to clear the board id.
-        eraseflashinfo = self._cleanup_required(state_mismatch,
-                                                self.ERASEFLASHINFO_IMAGE)
-        set_bid = False
-        chip_bid = None
-        chip_flags = None
-
-        # eraseflashinfo erases the chip board id. Determine what chip board id
-        # to restore.
-        if eraseflashinfo:
-            chip_bid_info = self._original_image_state['chip_bid']
-            set_bid = chip_bid_info != cr50_utils.ERASED_CHIP_BID
-            chip_bid = chip_bid_info[0]
-            chip_flags = chip_bid_info[2]
-
         # Remove prepvt and prod iamges, so they don't interfere with the test
         # rolling back and updating to images that my be older than the images
         # on the device.
@@ -351,15 +336,28 @@ class Cr50Test(FirmwareTest):
             self.host.run('rm %s' % cr50_utils.CR50_PREPVT, ignore_status=True)
             self.host.run('rm %s' % cr50_utils.CR50_PROD, ignore_status=True)
 
+        bid_mismatch = 'chip_bid' in state_mismatch
+        original_bid = self._original_image_state['chip_bid']
+        set_bid = bid_mismatch and original_bid != cr50_utils.ERASED_CHIP_BID
+        bid_is_erased = (cr50_utils.GetChipBoardId(self.host) ==
+                         cr50_utils.ERASED_CHIP_BID)
+        eraseflashinfo = bid_mismatch and not bid_is_erased
+
+        if (eraseflashinfo and not
+            self._saved_cr50_state(self.ERASEFLASHINFO_IMAGE)):
+            raise error.TestFail('Did not save eraseflashinfo image')
+
         if eraseflashinfo:
             self.run_update_to_eraseflashinfo()
 
         self._retry_cr50_update(self._dbg_image_path, 3, False)
 
+        chip_bid = original_bid[0]
+        chip_flags = original_bid[2]
         if set_bid:
             self.cr50.set_board_id(chip_bid, chip_flags)
 
-        self._retry_cr50_update(self._original_cr50_image, 3, True)
+        self._retry_cr50_update(self.get_saved_cr50_original_path(), 3, True)
 
 
     def _cleanup_required(self, state_mismatch, image_type):
@@ -406,16 +404,15 @@ class Cr50Test(FirmwareTest):
     def get_image_and_bid_state(self):
         """Get a dict with the current device cr50 information.
 
-        The state dict will include the platform brand, rlz code, chip board id,
-        the running cr50 image version, the running cr50 image board id, and the
+        The state dict will include the platform brand, chip board id, the
+        running cr50 image version, the running cr50 image board id, and the
         device cr50 image version.
         """
         state = {}
-        state['mosys platform brand'] = self.host.run('mosys platform brand',
-            ignore_status=True).stdout.strip()
+        state['cros_config / brand-code'] = self.host.run(
+                'cros_config / brand-code', ignore_status=True).stdout.strip()
         state['prod_version'] = self._get_image_information('prod')
         state['prepvt_version'] = self._get_image_information('prepvt')
-        state['rlz'] = cr50_utils.GetRLZ(self.host)
         state['chip_bid'] = cr50_utils.GetChipBoardId(self.host)
         state['chip_bid_str'] = '%08x:%08x:%08x' % state['chip_bid']
         state['running_image_ver'] = cr50_utils.GetRunningVersion(self.host)
@@ -554,9 +551,6 @@ class Cr50Test(FirmwareTest):
         # Copy the original .prod and .prepvt images back onto the DUT.
         if self._cleanup_required(new_mismatch, self.DEVICE_IMAGES):
             self._restore_device_files()
-
-        if 'rlz' in new_mismatch:
-            cr50_utils.SetRLZ(self.host, self._original_image_state['rlz'])
 
         mismatch_last = self._check_original_image_state()
         if mismatch_last:
@@ -811,7 +805,10 @@ class Cr50Test(FirmwareTest):
         tmp_dest = '/tmp/' + os.path.basename(path)
 
         dest, image_ver = cr50_utils.InstallImage(self.host, path, tmp_dest)
-        cr50_utils.GSCTool(self.host, ['-a', dest])
+        # Use the -p option to make sure the DUT does a clean reboot.
+        cr50_utils.GSCTool(self.host, ['-a', dest, '-p'])
+        # Reboot the DUT to finish the cr50 update.
+        self.host.reboot(wait=False)
         return image_ver[1]
 
 

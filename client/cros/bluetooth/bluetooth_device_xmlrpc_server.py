@@ -12,6 +12,7 @@ import gobject
 import json
 import logging
 import logging.handlers
+import os
 
 import common
 from autotest_lib.client.bin import utils
@@ -88,11 +89,16 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
     UPSTART_ERROR_ALREADYSTARTED = \
             'com.ubuntu.Upstart0_6.Error.AlreadyStarted'
 
-    BLUETOOTHD_JOB = 'btdispatch'
+    # The file stores newblue enable/disable setting. The file can be updated in
+    # the run time by calling newblue enable/disable in crosh shell.
+    NEWBLUE_CONFIG_FILE = "/var/lib/bluetooth/newblue"
+
+    BLUETOOTHD_JOB = 'bluetoothd'
 
     DBUS_ERROR_SERVICEUNKNOWN = 'org.freedesktop.DBus.Error.ServiceUnknown'
 
     BLUETOOTH_SERVICE_NAME = 'org.chromium.Bluetooth'
+    BLUEZ_SERVICE_NAME = 'org.bluez'
     BLUEZ_MANAGER_PATH = '/'
     BLUEZ_DEBUG_LOG_PATH = '/org/chromium/Bluetooth'
     BLUEZ_DEBUG_LOG_IFACE = 'org.chromium.Bluetooth.Debug'
@@ -122,8 +128,17 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
     def __init__(self):
         super(BluetoothDeviceXmlRpcDelegate, self).__init__()
 
-        # Always connect to btdispatch regardless of NewBlue enable status.
-        self._bluetooth_service_name = self.BLUETOOTH_SERVICE_NAME
+        # Init bluetooth service name based on newblue config file.
+        self._bluetooth_service_name = self.BLUEZ_SERVICE_NAME
+        if os.path.exists(self.NEWBLUE_CONFIG_FILE):
+            with open(self.NEWBLUE_CONFIG_FILE) as _newblue_config_file:
+                _newblue_enable = int(_newblue_config_file.read().strip())
+                if _newblue_enable:
+                    self._bluetooth_service_name = self.BLUETOOTH_SERVICE_NAME
+        else:
+            logging.debug('Newblue config file does not exist')
+        logging.debug('Bluetooth Service Name: %s',
+                      self._bluetooth_service_name)
 
         # Open the Bluetooth Raw socket to the kernel which provides us direct,
         # raw, access to the HCI controller.
@@ -175,6 +190,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         self._adv_mainloop = gobject.MainLoop()
 
 
+    @xmlrpc_server.dbus_safe(False)
     def set_debug_log_levels(self, dispatcher_vb, newblue_vb, bluez_vb,
                              kernel_vb):
         """Enable or disable the debug logs of bluetooth
@@ -185,8 +201,11 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         @param kernel_vb: verbosity of kernel debug log, either 0 or 1
 
         """
+
+        # TODO(b/145163508, b/145749798): update when debug logs is migrated to
+        #                                 bluez.
         debug_object = self._system_bus.get_object(
-                                                self._bluetooth_service_name,
+                                                self.BLUETOOTH_SERVICE_NAME,
                                                 self.BLUEZ_DEBUG_LOG_PATH)
         debug_object.SetLevels(dbus.Byte(dispatcher_vb),
                                dbus.Byte(newblue_vb),
