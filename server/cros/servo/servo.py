@@ -975,14 +975,17 @@ class Servo(object):
         When programming a firmware image on the DUT, the image must be
         located on the host to which the servo device is connected. Sometimes
         servo is controlled by a remote host, in this case the image needs to
-        be transferred to the remote host.
+        be transferred to the remote host. This adds the servod port number, to
+        make sure tests for different DUTs don't trample on each other's files.
 
         @param image_path: a string, name of the firmware image file to be
                transferred.
         @return: a string, full path name of the copied file on the remote.
         """
-
-        dest_path = os.path.join('/tmp', os.path.basename(image_path))
+        name = os.path.basename(image_path)
+        remote_name = 'dut_%s.%s' % (self._servo_host.servo_port, name)
+        dest_path = os.path.join('/tmp', remote_name)
+        logging.info('Copying %s to %s', name, dest_path)
         self._servo_host.send_file(image_path, dest_path)
         return dest_path
 
@@ -1181,8 +1184,20 @@ class Servo(object):
         """
         ap_image_candidates = ('image.bin', 'image-%s.bin' % model,
                                'image-%s.bin' % board)
-        ec_image_candidates = ('ec.bin', '%s/ec.bin' % model,
-                               '%s/ec.bin' % board)
+
+        # Best effort; try to retrieve the EC board from the version as
+        # reported by the EC.
+        ec_board = None
+        try:
+          ec_board = self.get('ec_board')
+        except Exception as err:
+          logging.info('Failed to get ec_board value; ignoring')
+          pass
+
+        ec_image_candidates = ['ec.bin', '%s/ec.bin' % model,
+                               '%s/ec.bin' % board]
+        if ec_board:
+          ec_image_candidates.append('%s/ec.bin' % ec_board)
 
         self._reprogram(tarball_path, 'EC', ec_image_candidates, rw_only)
         self._reprogram(tarball_path, 'BIOS', ap_image_candidates, rw_only)

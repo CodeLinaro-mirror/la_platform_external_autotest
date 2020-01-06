@@ -19,6 +19,7 @@ import bluetooth_test_utils
 from autotest_lib.client.bin import utils
 from autotest_lib.client.bin.input import input_event_recorder as recorder
 from autotest_lib.client.common_lib import error
+from autotest_lib.client.cros.chameleon import chameleon
 from autotest_lib.server import test
 from autotest_lib.client.bin.input.linux_input import (
         BTN_LEFT, BTN_RIGHT, EV_KEY, EV_REL, REL_X, REL_Y, REL_WHEEL)
@@ -39,6 +40,11 @@ SUPPORTED_DEVICE_TYPES = {
     'BLE_MOUSE': lambda chameleon: chameleon.get_ble_mouse,
     'BLE_KEYBOARD': lambda chameleon: chameleon.get_ble_keyboard,
     'A2DP_SINK': lambda chameleon: chameleon.get_bluetooth_a2dp_sink,
+
+    # This is a base object that does not emulate any Bluetooth device.
+    # This object is preferred when only a pure XMLRPC server is needed
+    # on the chameleon host, e.g., to perform servod methods.
+    'BLUETOOTH_BASE': lambda chameleon: chameleon.get_bluetooth_base,
 }
 
 
@@ -545,8 +551,7 @@ class BluetoothAdapterTests(test.test):
 
 
     def group_chameleons_type(self):
-        """Group all chameleons by the type of their detected device
-        """
+        """Group all chameleons by the type of their detected device."""
 
         # Use previously created chameleon_group instead of creating new
         if len(self.chameleon_group_copy) > 0:
@@ -578,11 +583,89 @@ class BluetoothAdapterTests(test.test):
             if len(self.chameleon_group[device_type]) == 0:
                 logging.error('No device is detected on %d-th chameleon', idx)
 
-    def get_device_rasp(self, device_num):
+
+    def wait_for_device(self, device):
+        """Waits for device to become available again
+
+        We reset raspberry pi peer between tests. This method helps us wait to
+        prevent us from trying to use the device before it comes back up again.
+
+        @param device: proxy object of peripheral device
+        """
+
+        def is_device_ready():
+            """Tries to use a service of the device
+
+            @returns: True if device is available to provide service
+                      False otherwise
+            """
+
+            try:
+                # Call a simple (fast) function to determine if device is online
+                # and reachable. If we can query this property, we know the
+                # device is available for us to use
+                getattr(device, 'GetCapabilities')()
+
+            except Exception as e:
+                return False
+
+            return True
+
+
+        try:
+            utils.poll_for_condition(condition=is_device_ready,
+                                     desc='wait_for_device')
+
+        except utils.TimeoutError as e:
+            raise error.TestError('Peer is not available after waiting')
+
+
+    def clear_raspi_device(self, device):
+        """Clears a device on a raspi chameleon by resetting bluetooth stack
+
+        @param device: proxy object of peripheral device
+        """
+
+        try:
+            device.ResetStack()
+
+        except SocketError as e:
+            # Ignore conn reset, expected during stack reset
+            if e.errno != errno.ECONNRESET:
+                raise
+
+        except chameleon.ChameleonConnectionError as e:
+            # Ignore chameleon conn reset, expected during stack reset
+            if str(errno.ECONNRESET) not in str(e):
+                raise
+
+        except httplib.BadStatusLine as e:
+            # BadStatusLine occurs occasionally when chameleon
+            # is restarted. We ignore it here
+            logging.error('Ignoring badstatusline exception')
+            pass
+
+        # Catch generic Fault exception by rpc server, ignore
+        # method not available as it indicates platform didn't
+        # support method and that's ok
+        except Exception, e:
+            if not (e.__class__.__name__ == 'Fault' and
+                'is not supported' in str(e)):
+                raise
+
+        # Ensure device is back online before continuing
+        self.wait_for_device(device)
+
+
+    def get_device_rasp(self, device_num, on_start=True):
         """Get all bluetooth device objects from chameleons.
         This method should be called only after group_chameleons_type
         @param device_num : dict of {device_type:number}, to specify the number
                             of device needed for each device_type.
+
+        @param on_start: boolean describing whether the requested clear is for a
+                            new test, or in the middle of a current one
+
         @returns: True if Success.
         """
 
@@ -595,6 +678,10 @@ class BluetoothAdapterTests(test.test):
 
             for chameleon in self.chameleon_group[device_type][:number]:
                 device = get_bluetooth_emulated_device(chameleon, device_type)
+
+                # Re-fresh device to clean state if test is starting
+                if on_start:
+                    self.clear_raspi_device(device)
 
                 try:
                     # Tell generic chameleon to bind to this device type
@@ -619,16 +706,23 @@ class BluetoothAdapterTests(test.test):
         return True
 
 
-    def get_device(self, device_type):
+    def get_device(self, device_type, on_start=True):
         """Get the bluetooth device object.
 
         @param device_type : the bluetooth device type, e.g., 'MOUSE'
+
+        @param on_start: boolean describing whether the requested clear is for a
+                            new test, or in the middle of a current one
 
         @returns: the bluetooth device object
 
         """
         self.devices[device_type].append(get_bluetooth_emulated_device(\
                                     self.host.chameleon, device_type))
+
+        # Re-fresh device to clean state if test is starting
+        if on_start:
+            self.clear_raspi_device(self.devices[device_type][-1])
 
         try:
             # Tell generic chameleon to bind to this device type
@@ -742,6 +836,11 @@ class BluetoothAdapterTests(test.test):
         """
         level = int(enable)
         self.bluetooth_facade.set_debug_log_levels(level, level, level, level)
+
+
+    def log_message(self, msg):
+        """ Write a string to log."""
+        self.bluetooth_facade.log_message(msg)
 
 
     @_test_retry_and_log
@@ -1098,7 +1197,7 @@ class BluetoothAdapterTests(test.test):
     # -------------------------------------------------------------------
 
 
-    @_test_retry_and_log
+    @_test_retry_and_log(False)
     def test_discover_device(self, device_address):
         """Test that the adapter could discover the specified device address.
 
@@ -2684,6 +2783,27 @@ class BluetoothAdapterTests(test.test):
 
 
     # -------------------------------------------------------------------
+    # Servod related tests
+    # -------------------------------------------------------------------
+
+    @_test_retry_and_log
+    def test_power_consumption(self, max_power_mw):
+        """Test the average power consumption."""
+        power_mw = self.device.servod.MeasurePowerConsumption()
+        self.results = {'power_mw': power_mw}
+
+        if (power_mw is None):
+            logging.error('Failed to measure power consumption')
+            return False
+
+        power_mw = float(power_mw)
+        logging.info('power consumption (mw): %f (max allowed: %f)',
+                     power_mw, max_power_mw)
+
+        return power_mw <= max_power_mw
+
+
+    # -------------------------------------------------------------------
     # Autotest methods
     # -------------------------------------------------------------------
 
@@ -2757,32 +2877,8 @@ class BluetoothAdapterTests(test.test):
                 if device is not None:
                     device.Close()
 
-                    # If module has a reset feature, use it
-                    if on_start:
-                        try:
-                            device.ResetStack()
-
-                        except SocketError as e:
-                            # Ignore conn reset, expected during stack reset
-                            if e.errno != errno.ECONNRESET:
-                                raise
-
-                        except httplib.BadStatusLine as e:
-                            # BadStatusLine occurs occasionally when chameleon
-                            # is restarted. We ignore it here
-                            logging.error('Ignoring badstatusline exception')
-                            pass
-
-                        # Catch generic Fault exception by rpc server, ignore
-                        # method not available as it indicates platform didn't
-                        # support method and that's ok
-                        except Exception, e:
-                            if not (e.__class__.__name__ == 'Fault' and
-                                'is not supported' in str(e)):
-                                raise
-
-                    else:
-                        # If we are doing a reset action, powercycle device
+                    # Power cycle BT device if we're in the middle of a test
+                    if not on_start:
                         device.PowerCycle()
 
         self.devices = dict()

@@ -62,7 +62,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
             for device in device_list:
                 if device is not None:
                     logging.info('Restarting %s', device_type)
-                    self.get_device(device_type)
+                    self.get_device(device_type, on_start=False)
 
 
     def start_peers(self, devices):
@@ -107,6 +107,9 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                 # Create copy of chameleon_group
                 self.chameleon_group_copy = dict()
                 self.group_chameleons_type()
+
+        # Clear the active devices for this test
+        self.active_test_devices = {}
 
         self.enable_disable_debug_log(enable=True)
 
@@ -200,6 +203,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
             time.sleep(self.TEST_SLEEP_SECS)
             self._print_delimiter()
             logging.info('Starting test: %s', test_name)
+            self.log_message('Starting test: %s'% test_name)
 
     def quick_test_test_end(self):
         """Log and track the test results"""
@@ -232,6 +236,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
             self.pkg_fail_count += 1
 
         logging.info(result_msg)
+        self.log_message(result_msg)
         self._print_delimiter()
         self.bat_tests_results.append(result_msg)
         self.pkg_tests_results.append(result_msg)
@@ -240,6 +245,10 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
             logging.info('Cleanning up and restarting towards next test...')
 
         self.bluetooth_facade.stop_discovery()
+
+        # Store a copy of active devices for raspi reset in the final step
+        self.active_test_devices = self.devices
+
         # Disconnect devices used in the test, and remove the pairing.
         for device_list in self.devices.values():
             for device in device_list:
@@ -379,6 +388,13 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
 
     def quick_test_cleanup(self):
         """ Cleanup any state test server and all device"""
+
+        # Clear any raspi devices at very end of test
+        for device_list in self.active_test_devices.values():
+            for device in device_list:
+                if device is not None:
+                    self.clear_raspi_device(device)
+
         # Reset the adapter
         self.test_reset_on_adapter()
         # Initialize bluetooth_adapter_tests class (also clears self.fails)

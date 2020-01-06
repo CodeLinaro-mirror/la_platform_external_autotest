@@ -7,7 +7,6 @@ import os
 import re
 import sys
 import time
-import traceback
 
 import common
 from autotest_lib.client.bin import utils
@@ -1604,6 +1603,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         # Newer platforms start with 'Google_' while the older ones do not.
         return platform.replace('google_', '')
 
+
     def get_platform(self):
         """Determine the correct platform label for this host.
 
@@ -1611,14 +1611,20 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         """
         release_info = utils.parse_cmd_output('cat /etc/lsb-release',
                                               run_method=self.run)
-        unibuild = release_info.get('CHROMEOS_RELEASE_UNIBUILD') == '1'
         platform = ''
-        if unibuild:
-            cmd = 'mosys platform model'
-            result = self.run(command=cmd, ignore_status=True)
-            if result.exit_status == 0:
-                platform = result.stdout.strip()
+        if release_info.get('CHROMEOS_RELEASE_UNIBUILD') == '1':
+            platform = self.get_platform_from_mosys()
         return platform if platform else self.get_platform_from_fwid()
+
+
+    def get_platform_from_mosys(self):
+        """Get the host platform from mosys command.
+
+        @returns a string representing this host's platform.
+        """
+        cmd = 'mosys platform model'
+        result = self.run(command=cmd, ignore_status=True)
+        return result.stdout.strip() if result.exit_status == 0 else ''
 
 
     def get_architecture(self):
@@ -2037,3 +2043,61 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                               'setup does not support pd controls. Falling '
                               'back to default RPM method.')
         return self._default_power_method
+
+
+    def find_usb_devices(self, idVendor, idProduct):
+        """
+        Get usb device sysfs name for specific device.
+
+        @param idVendor  Vendor ID to search in sysfs directory.
+        @param idProduct Product ID to search in sysfs directory.
+
+        @return Usb node names in /sys/bus/usb/drivers/usb/ that match.
+        """
+        # Look for matching file and cut at position 7 to get dir name.
+        grep_cmd = 'grep {} /sys/bus/usb/drivers/usb/*/{} | cut -f 7 -d /'
+
+        vendor_cmd = grep_cmd.format(idVendor, 'idVendor')
+        product_cmd = grep_cmd.format(idProduct, 'idProduct')
+
+        # Use uniq -d to print duplicate line from both command
+        cmd = 'sort <({}) <({}) | uniq -d'.format(vendor_cmd, product_cmd)
+
+        return self.run(cmd, ignore_status=True).stdout.strip().split('\n')
+
+
+    def bind_usb_device(self, usb_node):
+        """
+        Bind usb device
+
+        @param usb_node Node name in /sys/bus/usb/drivers/usb/
+        """
+        cmd = 'echo {} > /sys/bus/usb/drivers/usb/bind'.format(usb_node)
+        self.run(cmd, ignore_status=True)
+
+
+    def unbind_usb_device(self, usb_node):
+        """
+        Unbind usb device
+
+        @param usb_node Node name in /sys/bus/usb/drivers/usb/
+        """
+        cmd = 'echo {} > /sys/bus/usb/drivers/usb/unbind'.format(usb_node)
+        self.run(cmd, ignore_status=True)
+
+
+    def get_wlan_ip(self):
+        """
+        Get ip address of wlan interface.
+
+        @return ip address of wlan or empty string if wlan is not connected.
+        """
+        cmds = [
+            'iw dev',                   # List wlan physical device
+            'grep Interface',           # Grep only interface name
+            'cut -f 2 -d" "',           # Cut the name part
+            'xargs ifconfig',           # Feed it to ifconfig to get ip
+            'grep -oE "inet [0-9.]+"',  # Grep only ipv4
+            'cut -f 2 -d " "'           # Cut the ip part
+        ]
+        return self.run(' | '.join(cmds), ignore_status=True).stdout.strip()

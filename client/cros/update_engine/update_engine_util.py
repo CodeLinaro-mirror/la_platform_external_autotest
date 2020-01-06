@@ -121,7 +121,7 @@ class UpdateEngineUtil(object):
 
     def _wait_for_update_to_fail(self):
         """Waits for the update to retry until failure."""
-        timeout_minutes = 20
+        timeout_minutes = 8
         timeout = time.time() + 60 * timeout_minutes
         while True:
             if self._check_update_engine_log_for_entry('Reached max attempts ',
@@ -132,8 +132,11 @@ class UpdateEngineUtil(object):
             time.sleep(1)
             self._get_update_engine_status()
             if time.time() > timeout:
-                raise error.TestFail('Update did not fail as expected. Timeout'
-                                     ': %d minutes.' % timeout_minutes)
+                err_msg = ('Update did not fail as expected. Timeout: %d '
+                           'minutes. Last update status: %s') % (
+                           timeout_minutes, self._get_update_engine_status()[
+                               self._CURRENT_OP])
+                raise error.TestFail(err_msg)
 
 
     def _wait_for_update_to_complete(self, finalizing_ok=False):
@@ -166,13 +169,23 @@ class UpdateEngineUtil(object):
             time.sleep(1)
 
 
-    def _get_update_engine_status(self, timeout=3600, ignore_status=True):
-        """Returns a dictionary version of update_engine_client --status"""
+    def _get_update_engine_status(self, timeout=3600, ignore_timeout=True):
+        """
+        Gets a dictionary version of update_engine_client --status.
+
+        @param timeout: How long to wait for the status to return.
+        @param ignore_timeout: True to throw an exception if timeout occurs.
+
+        @return Dictionary of values within update_engine_client --status.
+        @raise: error.AutoservError if command times out
+
+        """
         status = self._run('update_engine_client --status', timeout=timeout,
-                           ignore_timeout=True, ignore_status=ignore_status)
+                           ignore_status=True, ignore_timeout=ignore_timeout)
+
         if status is None:
             return None
-        logging.debug(status)
+        logging.info(status)
         if status.exit_status != 0:
             return None
         status_dict = {}

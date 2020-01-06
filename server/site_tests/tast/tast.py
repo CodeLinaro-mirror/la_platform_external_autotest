@@ -79,6 +79,7 @@ class tast(test.test):
     _REMOTE_BUNDLE_DIR = '/usr/libexec/tast/bundles/remote'
     _REMOTE_DATA_DIR = '/usr/share/tast/data'
     _REMOTE_TEST_RUNNER_PATH = '/usr/bin/remote_test_runner'
+    _DEFAULT_VARS_DIR_PATH = '/etc/tast/vars/private'
 
     # Alternate locations for Tast files when using Server-Side Packaging.
     # These files are installed from autotest_server_package.tar.bz2.
@@ -87,6 +88,7 @@ class tast(test.test):
     _SSP_REMOTE_BUNDLE_DIR = os.path.join(_SSP_ROOT, 'bundles/remote')
     _SSP_REMOTE_DATA_DIR = os.path.join(_SSP_ROOT, 'data')
     _SSP_REMOTE_TEST_RUNNER_PATH = os.path.join(_SSP_ROOT, 'remote_test_runner')
+    _SSP_DEFAULT_VARS_DIR_PATH = os.path.join(_SSP_ROOT, 'vars')
 
     # Prefix added to Tast test names when writing their results to TKO
     # status.log files.
@@ -112,7 +114,7 @@ class tast(test.test):
 
     def initialize(self, host, test_exprs, ignore_test_failures=False,
                    max_run_sec=3600, command_args=[], install_root='/',
-                   run_private_tests=True):
+                   run_private_tests=True, varsfiles=None):
         """
         @param host: remote.RemoteHost instance representing DUT.
         @param test_exprs: Array of strings describing tests to run.
@@ -128,6 +130,8 @@ class tast(test.test):
         @param install_root: Root directory under which Tast binaries are
             installed. Alternate values may be passed by unit tests.
         @param run_private_tests: Download and run private tests.
+        @param varsfiles: list of names of yaml files containing variables set
+            in |-varsfile| arguments.
 
         @raises error.TestFail if the Tast installation couldn't be found.
         """
@@ -139,6 +143,7 @@ class tast(test.test):
         self._install_root = install_root
         self._run_private_tests = run_private_tests
         self._fake_now = None
+        self._varsfiles = varsfiles
 
         # List of JSON objects describing tests that will be run. See Test in
         # src/platform/tast/src/chromiumos/tast/testing/test.go for details.
@@ -152,17 +157,21 @@ class tast(test.test):
         # Error message read from _RUN_ERROR_FILENAME, if any.
         self._run_error = None
 
-        # The data dir can be missing if no remote tests registered data files,
-        # but all other files must exist.
         self._tast_path = self._get_path((self._TAST_PATH, self._SSP_TAST_PATH))
         self._remote_bundle_dir = self._get_path((self._REMOTE_BUNDLE_DIR,
                                                   self._SSP_REMOTE_BUNDLE_DIR))
+        # The data dir can be missing if no remote tests registered data files.
         self._remote_data_dir = self._get_path((self._REMOTE_DATA_DIR,
                                                 self._SSP_REMOTE_DATA_DIR),
                                                allow_missing=True)
         self._remote_test_runner_path = self._get_path(
                 (self._REMOTE_TEST_RUNNER_PATH,
                  self._SSP_REMOTE_TEST_RUNNER_PATH))
+        # Secret vars dir can be missing on public repos.
+        self._default_vars_dir_path = self._get_path(
+                (self._DEFAULT_VARS_DIR_PATH,
+                 self._SSP_DEFAULT_VARS_DIR_PATH),
+                 allow_missing=True)
 
         # Register a hook to write the results of individual Tast tests as
         # top-level entries in the TKO status.log file.
@@ -288,11 +297,13 @@ class tast(test.test):
             '-remoterunner=' + self._remote_test_runner_path,
             '-sshretries=%d' % self._SSH_CONNECT_RETRIES,
         ]
+        if subcommand == 'run':
+            cmd.append('-defaultvarsdir=' + self._default_vars_dir_path)
         cmd.extend(extra_subcommand_args)
         cmd.append('%s:%d' % (self._host.hostname, self._host.port))
         cmd.extend(self._test_exprs)
 
-        logging.info('Running ' +
+        logging.info('Running %s',
                      ' '.join([utils.sh_quote_word(a) for a in cmd]))
         try:
             return utils.run(cmd,
@@ -351,6 +362,10 @@ class tast(test.test):
             '-timeout=' + str(self._max_run_sec),
             '-continueafterfailure=true',
         ] + self._devserver_args + self._get_servo_args()
+
+        if self._varsfiles:
+            for varsfile in self._varsfiles:
+                args.append('-varsfile=%s' % varsfile)
 
         if self._run_private_tests:
             args.append('-downloadprivatebundles=true')

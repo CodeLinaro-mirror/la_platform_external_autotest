@@ -11,6 +11,7 @@ Convenience functions for use by tests or whomever.
 import base64
 import collections
 import commands
+import errno
 import fnmatch
 import glob
 import json
@@ -31,6 +32,7 @@ import uuid
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import magic
 from autotest_lib.client.common_lib import utils
+from autotest_lib.client.common_lib.cros import cros_config
 
 from autotest_lib.client.common_lib.utils import *
 
@@ -325,6 +327,8 @@ INTEL_UARCH_TABLE = {
     '06_47': 'Broadwell',
     '06_4F': 'Broadwell',
     '06_56': 'Broadwell',
+    '06_A5': 'Comet Lake',
+    '06_A6': 'Comet Lake',
     '06_0D': 'Dothan',
     '06_5C': 'Goldmont',
     '06_7A': 'Goldmont',
@@ -332,6 +336,8 @@ INTEL_UARCH_TABLE = {
     '06_45': 'Haswell',
     '06_46': 'Haswell',
     '06_3F': 'Haswell-E',
+    '06_7D': 'Ice Lake',
+    '06_7E': 'Ice Lake',
     '06_3A': 'Ivy Bridge',
     '06_3E': 'Ivy Bridge-E',
     '06_8E': 'Kaby Lake',
@@ -357,6 +363,8 @@ INTEL_UARCH_TABLE = {
     '06_4E': 'Skylake',
     '06_5E': 'Skylake',
     '06_55': 'Skylake',
+    '06_8C': 'Tiger Lake',
+    '06_8D': 'Tiger Lake',
     '06_25': 'Westmere',
     '06_2C': 'Westmere',
     '06_2F': 'Westmere',
@@ -1879,22 +1887,23 @@ def _get_hex_from_file(path, line, prefix, postfix):
     return int(match, 16)
 
 
-# The paths don't change. Avoid running find all the time.
-_hwmon_paths = None
-
-def _get_hwmon_paths(file_pattern):
-    """
-    Returns a list of paths to the temperature sensors.
-    """
+def _get_hwmon_datas(file_pattern):
+    """Returns a list of reading from hwmon."""
     # Some systems like daisy_spring only have the virtual hwmon.
     # And other systems like rambi only have coretemp.0. See crbug.com/360249.
     #    /sys/class/hwmon/hwmon*/
     #    /sys/devices/virtual/hwmon/hwmon*/
     #    /sys/devices/platform/coretemp.0/
-    if not _hwmon_paths:
-        cmd = 'find /sys/class /sys/devices -name "' + file_pattern + '"'
-        _hwon_paths = utils.run(cmd, verbose=False).stdout.splitlines()
-    return _hwon_paths
+    cmd = 'find /sys/class /sys/devices -name "' + file_pattern + '"'
+    _hwmon_paths = utils.run(cmd, verbose=False).stdout.splitlines()
+    for _hwmon_path in _hwmon_paths:
+        try:
+            yield _get_float_from_file(_hwmon_path, 0, None, None) * 0.001
+        except IOError as err:
+            # Files under /sys may get truncated and result in ENODATA.
+            # Ignore those.
+            if err.errno is not errno.ENODATA:
+                raise
 
 
 def get_temperature_critical():
@@ -1902,9 +1911,7 @@ def get_temperature_critical():
     Returns temperature at which we will see some throttling in the system.
     """
     min_temperature = 1000.0
-    paths = _get_hwmon_paths('temp*_crit')
-    for path in paths:
-        temperature = _get_float_from_file(path, 0, None, None) * 0.001
+    for temperature in _get_hwmon_datas('temp*_crit'):
         # Today typical for Intel is 98'C to 105'C while ARM is 85'C. Clamp to 98
         # if Intel device or the lowest known value otherwise.
         result = utils.system_output('crossystem arch', retain_output=True,
@@ -1926,9 +1933,7 @@ def get_temperature_input_max():
     Returns the maximum currently observed temperature.
     """
     max_temperature = -1000.0
-    paths = _get_hwmon_paths('temp*_input')
-    for path in paths:
-        temperature = _get_float_from_file(path, 0, None, None) * 0.001
+    for temperature in _get_hwmon_datas('temp*_input'):
         max_temperature = max(temperature, max_temperature)
     return max_temperature
 
@@ -2102,12 +2107,7 @@ def get_platform():
 
     @returns platform name
     """
-    platform = ''
-    command = 'mosys platform model'
-    result = utils.run(command, ignore_status=True)
-    if result.exit_status == 0:
-        platform = result.stdout.strip()
-
+    platform = cros_config.call_cros_config_get_output('/ name', utils.run)
     if platform == '':
         platform = get_board()
     return platform
@@ -2119,11 +2119,8 @@ def get_sku():
 
     @returns SKU number
     """
-    command = 'mosys platform sku'
-    result = utils.run(command, ignore_status=True)
-    if result.exit_status != 0:
-        return ''
-    return result.stdout.strip()
+    return cros_config.call_cros_config_get_output('/identity sku-id',
+                                                   utils.run)
 
 
 def get_ec_version():

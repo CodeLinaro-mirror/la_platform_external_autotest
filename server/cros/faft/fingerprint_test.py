@@ -19,7 +19,7 @@ class FingerprintTest(test.test):
     _FINGERPRINT_BOARD_NAME_SUFFIX = '_fp'
 
     # Location of firmware from the build on the DUT
-    _FINGERPRINT_BUILD_FW_GLOB = '/opt/google/biod/fw/*_fp*.bin'
+    _FINGERPRINT_BUILD_FW_DIR = '/opt/google/biod/fw'
 
     _GENIMAGES_SCRIPT_NAME = 'gen_test_images.sh'
     _GENIMAGES_OUTPUT_DIR_NAME = 'images'
@@ -55,22 +55,28 @@ class FingerprintTest(test.test):
     _KEY_TYPE_MP = 'mp'
 
     # EC board names for FPMCUs
+    _FP_BOARD_NAME_DARTMONKEY = 'dartmonkey'
     _FP_BOARD_NAME_NOCTURNE = 'nocturne_fp'
     _FP_BOARD_NAME_NAMI = 'nami_fp'
 
     # Map from signing key ID to type of signing key
     _KEY_ID_MAP_ = {
+        # dartmonkey
+        '257a0aa3ac9e81aa4bc3aabdb6d3d079117c5799': _KEY_TYPE_MP,
+
         # nocturne
         '6f38c866182bd9bf7a4462c06ac04fa6a0074351': _KEY_TYPE_MP,
 
         # nami
         '754aea623d69975a22998f7b97315dd53115d723': _KEY_TYPE_PRE_MP,
         '35486c0090ca390408f1fbbf2a182966084fe2f8': _KEY_TYPE_MP
+
     }
 
     # RO versions that are flashed in the factory
     # (for eternity for a given board)
     _GOLDEN_RO_FIRMWARE_VERSION_MAP = {
+        _FP_BOARD_NAME_DARTMONKEY: 'dartmonkey_v2.0.2887-311310808',
         _FP_BOARD_NAME_NOCTURNE: 'nocturne_fp_v2.2.64-58cf5974e',
         _FP_BOARD_NAME_NAMI: 'nami_fp_v2.2.144-7a08e07eb',
     }
@@ -115,6 +121,14 @@ class FingerprintTest(test.test):
                 _FIRMWARE_VERSION_KEY_ID: '35486c0090ca390408f1fbbf2a182966084fe2f8',
             },
         },
+        _FP_BOARD_NAME_DARTMONKEY: {
+            'dartmonkey_v2.0.2887-311310808.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '90716b73d1db5a1b6108530be1d11addf3b13e643bc6f96d417cbce383f3cb18',
+                _FIRMWARE_VERSION_RO_VERSION: 'dartmonkey_v2.0.2887-311310808',
+                _FIRMWARE_VERSION_RW_VERSION: 'dartmonkey_v2.0.2887-311310808',
+                _FIRMWARE_VERSION_KEY_ID: '257a0aa3ac9e81aa4bc3aabdb6d3d079117c5799',
+            }
+        }
     }
 
     _BIOD_UPSTART_JOB_NAME = 'biod'
@@ -125,6 +139,7 @@ class FingerprintTest(test.test):
     _INIT_ENTROPY_CMD = 'bio_wash --factory_init'
 
     _CROS_FP_ARG = '--name=cros_fp'
+    _CROS_CONFIG_FINGERPRINT_PATH = '/fingerprint'
     _ECTOOL_RO_VERSION = 'RO version'
     _ECTOOL_RW_VERSION = 'RW version'
     _ECTOOL_FIRMWARE_COPY = 'Firmware copy'
@@ -353,13 +368,36 @@ class FingerprintTest(test.test):
         self.set_hardware_write_protect(enable_hardware_write_protect)
 
     def get_fp_board(self):
-        """Returns name of fingerprint EC."""
+        """Returns name of fingerprint EC.
+
+        nocturne and nami are special cases and have "_fp" appended. Newer
+        FPMCUs have unique names.
+        See go/cros-fingerprint-firmware-branching-and-signing.
+        """
+
+        # For devices that don't have unibuild support (which is required to
+        # use cros_config).
+        # TODO(https://crrev.com/i/2313151): nami has unibuild support, but
+        # needs its model.yaml updated.
+        # TODO(https://crbug.com/1030862): remove when nocturne has cros_config
+        #  support.
         board = self.host.get_board().replace(ds_constants.BOARD_PREFIX, '')
-        return board + self._FINGERPRINT_BOARD_NAME_SUFFIX
+        if board == 'nami' or board == 'nocturne':
+            return board + self._FINGERPRINT_BOARD_NAME_SUFFIX
+
+        # Use cros_config to get fingerprint board.
+        result = self._run_cros_config_cmd('board')
+        if result.exit_status != 0:
+            raise error.TestFail(
+                'Unable to get fingerprint board with cros_config')
+        return result.stdout.rstrip()
 
     def get_build_fw_file(self):
         """Returns full path to build FW file on DUT."""
-        ls_cmd = 'ls ' + self._FINGERPRINT_BUILD_FW_GLOB
+
+        fp_board = self.get_fp_board()
+        ls_cmd = 'ls ' + self._FINGERPRINT_BUILD_FW_DIR + '/' + fp_board \
+                 + '*.bin'
         result = self.run_cmd(ls_cmd)
         if result.exit_status != 0:
             raise error.TestFail('Unable to find firmware from build on device')
@@ -719,6 +757,13 @@ class FingerprintTest(test.test):
     def _run_ectool_cmd(self, command):
         """Runs ectool on DUT; return result with output and exit code."""
         cmd = 'ectool ' + self._CROS_FP_ARG + ' ' + command
+        result = self.run_cmd(cmd)
+        return result
+
+    def _run_cros_config_cmd(self, command):
+        """Runs cros_config on DUT; return result with output and exit code."""
+        cmd = 'cros_config ' + self._CROS_CONFIG_FINGERPRINT_PATH + ' ' \
+              + command
         result = self.run_cmd(cmd)
         return result
 
