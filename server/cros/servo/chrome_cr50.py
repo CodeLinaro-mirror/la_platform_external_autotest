@@ -32,6 +32,8 @@ class ChromeCr50(chrome_ec.ChromeConsole):
     provides many interfaces to set and get its behavior via console commands.
     This class is to abstract these interfaces.
     """
+    PROD_RW_KEYIDS = ['0x87b73b67', '0xde88588d']
+    PROD_RO_KEYIDS = ['0xaa66150f']
     OPEN = 'open'
     UNLOCK = 'unlock'
     LOCK = 'lock'
@@ -120,7 +122,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
            'BOARD_NEEDS_SYS_RST_PULL_UP' : 1 << 5,
            'BOARD_USE_PLT_RESET'         : 1 << 6,
            'BOARD_WP_ASSERTED'           : 1 << 8,
-           'BOARD_FORCING_WP '           : 1 << 9,
+           'BOARD_FORCING_WP'            : 1 << 9,
            'BOARD_NO_RO_UART'            : 1 << 10,
            'BOARD_CCD_STATE_MASK'        : 3 << 11,
            'BOARD_DEEP_SLEEP_DISABLED'   : 1 << 13,
@@ -133,6 +135,22 @@ class ChromeCr50(chrome_ec.ChromeConsole):
            'BOARD_ALLOW_CHANGE_TPM_MODE' : 1 << 20,
     }
 
+    # CR50 reset flags as defined in platform ec_commands.h. These are only the
+    # flags used by cr50.
+    RESET_FLAGS = {
+           'RESET_FLAG_OTHER'            : 1 << 0,
+           'RESET_FLAG_BROWNOUT'         : 1 << 2,
+           'RESET_FLAG_POWER_ON'         : 1 << 3,
+           'RESET_FLAG_SOFT'             : 1 << 5,
+           'RESET_FLAG_HIBERNATE'        : 1 << 6,
+           'RESET_FLAG_RTC_ALARM'        : 3 << 7,
+           'RESET_FLAG_WAKE_PIN'         : 1 << 8,
+           'RESET_FLAG_HARD'             : 1 << 11,
+           'RESET_FLAG_USB_RESUME'       : 1 << 14,
+           'RESET_FLAG_RDD'              : 1 << 15,
+           'RESET_FLAG_RBOX'             : 1 << 16,
+           'RESET_FLAG_SECURITY'         : 1 << 17,
+    }
 
     def __init__(self, servo, faft_config):
         """Initializes a ChromeCr50 object.
@@ -565,9 +583,9 @@ class ChromeCr50(chrome_ec.ChromeConsole):
     def using_prod_rw_keys(self):
         """Returns True if the RW keyid is prod"""
         rv = self.send_command_retry_get_output('sysinfo',
-                ['RW keyid:.*\(([a-z]+)\)'], safe=True)
-        logging.info(rv)
-        return rv[0][1] == 'prod'
+                ['RW keyid:\s+(0x[0-9a-f]{8})'], safe=True)[0][1]
+        logging.info('RW Keyid: 0x%s', rv)
+        return rv in self.PROD_RW_KEYIDS
 
 
     def get_active_board_id_str(self):
@@ -939,16 +957,24 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         return result.lower() == 'enabled'
 
 
-    def keyladder_is_enabled(self):
+    def get_keyladder_state(self):
         """Get the status of H1 Key Ladder.
 
-        @return: True if H1 Key Ladder is enabled. False otherwise.
+        @return: The keyladder state string. prod or dev both mean enabled.
         """
         result = self.send_command_retry_get_output('sysinfo',
-                ['(?i)Key\s+Ladder:\s+(enabled|disabled)'], safe=True)[0][1]
+                ['(?i)Key\s+Ladder:\s+(enabled|prod|dev|disabled)'],
+                safe=True)[0][1]
         logging.debug(result)
+        return result
 
-        return result.lower() == 'enabled'
+
+    def keyladder_is_disabled(self):
+        """Get the status of H1 Key Ladder.
+
+        @return: True if H1 Key Ladder is disabled. False otherwise.
+        """
+        return self.get_keyladder_state() == 'disabled'
 
 
     def get_sleepmask(self):
@@ -1067,8 +1093,18 @@ class ChromeCr50(chrome_ec.ChromeConsole):
 
 
     def get_reset_cause(self):
-        """Returns a string with the sources for the last cr50 reset."""
+        """Returns the reset flags for the last reset."""
         rv = self.send_command_retry_get_output('sysinfo',
-                ['Reset flags:.*\((.*)\)'], compare_output=True)[0][1]
+                ['Reset flags:\s+0x([0-9a-f]{8})\s'], compare_output=True)[0][1]
         logging.info('reset cause: %s', rv)
-        return rv
+        return int(rv, 16)
+
+
+    def was_reset(self, reset_type):
+        """Returns 1 if the reset type is found in the reset_cause.
+
+        @param reset_type: reset name in string type.
+        """
+        reset_cause = self.get_reset_cause()
+        reset_flag = self.RESET_FLAGS[reset_type]
+        return bool(reset_cause & reset_flag)

@@ -435,6 +435,7 @@ def get_extra_args(modules, is_public):
     extra_args = set()
     preconditions = []
     login_preconditions = []
+    prerequisites = []
     for module in modules:
         if is_public:
             extra_args.add('warn_on_test_retry=False')
@@ -444,6 +445,8 @@ def get_extra_args(modules, is_public):
             preconditions.extend(CONFIG['PRECONDITION'].get(module, []))
             login_preconditions.extend(
                 CONFIG['LOGIN_PRECONDITION'].get(module, []))
+        prerequisites.extend(CONFIG['PREREQUISITES'].get(module,[]))
+
     # Notice: we are just squishing the preconditions for all modules together
     # with duplicated command removed. This may not always be correct.
     # In such a case one should split the bookmarks in a way that the modules
@@ -459,6 +462,9 @@ def get_extra_args(modules, is_public):
     if login_preconditions:
         extra_args.add('login_precondition_commands=[%s]' % ', '.join(
             deduped(login_preconditions)))
+    if prerequisites:
+        extra_args.add("prerequisites=['%s']" % "', '".join(
+            deduped(prerequisites)))
     return sorted(list(extra_args))
 
 
@@ -654,7 +660,8 @@ def calculate_timeout(modules, suites):
 
     timeout = 0
     # First module gets 1h (standard), all other half hour extra (heuristic).
-    delta = 3600
+    default_timeout = int(3600 * CONFIG['CTS_TIMEOUT_DEFAULT'])
+    delta = default_timeout
     for module in modules:
         if module in CONFIG['CTS_TIMEOUT']:
             # Modules that run very long are encoded here.
@@ -668,7 +675,7 @@ def calculate_timeout(modules, suites):
             timeout += 300
         else:
             timeout += delta
-            delta = 1800
+            delta = default_timeout // 2
     return timeout
 
 
@@ -720,7 +727,6 @@ def get_controlfile_content(combined,
     for target, config in get_extra_modules_dict(is_public, abi).items():
         if combined in config['SUBMODULES']:
             target_module = target
-    is_camerabox_test = (camera_facing is not None)
     return _CONTROLFILE_TEMPLATE.render(
         year=CONFIG['COPYRIGHT_YEAR'],
         name=name,
@@ -731,7 +737,7 @@ def get_controlfile_content(combined,
             modules,
             abi,
             is_public,
-            is_camerabox_test=is_camerabox_test),
+            is_camerabox_test=(camera_facing is not None)),
         extra_artifacts=get_extra_artifacts(modules),
         extra_artifacts_host=get_extra_artifacts_host(modules),
         job_retries=get_job_retries(modules, is_public),
@@ -744,8 +750,7 @@ def get_controlfile_content(combined,
         tag=tag,
         uri=uri,
         DOC=get_doc(modules, abi, is_public),
-        servo_support_needed=(not is_camerabox_test and
-            servo_support_needed(modules, is_public)),
+        servo_support_needed = servo_support_needed(modules, is_public),
         max_retries=get_max_retries(modules, abi, suites, is_public),
         timeout=calculate_timeout(modules, suites),
         run_template=get_run_template(modules, is_public),
