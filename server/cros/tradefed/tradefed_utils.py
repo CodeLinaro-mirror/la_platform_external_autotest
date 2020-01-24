@@ -7,6 +7,7 @@ import logging
 import os
 import random
 import re
+from xml.etree import ElementTree
 
 from autotest_lib.client.bin import utils as client_utils
 from autotest_lib.client.common_lib import utils as common_utils
@@ -14,6 +15,7 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.server import utils
 from autotest_lib.server.cros import lockfile
 
+PERF_MODULE_NAME_PREFIX = 'cheets_CTS.'
 
 @contextlib.contextmanager
 def lock(filename):
@@ -190,3 +192,62 @@ def select_32bit_java():
             os.environ['JAVA_HOME'] = java
             os.environ['PATH'] = (
                 os.path.join(java, 'bin') + os.pathsep + os.environ['PATH'])
+
+# A similar implementation in Java can be found at
+# https://android.googlesource.com/platform/test/suite_harness/+/refs/heads/\
+# pie-cts-dev/common/util/src/com/android/compatibility/common/util/\
+# ResultHandler.java
+def get_test_result_xml_path(results_destination):
+    """Get the path of test_result.xml from the last session."""
+    last_result_path = None
+    for dir in os.listdir(results_destination):
+        result_dir = os.path.join(results_destination, dir)
+        result_path = os.path.join(result_dir, 'test_result.xml')
+        # We use the lexicographically largest path, because |dir| are
+        # of format YYYY.MM.DD_HH.MM.SS. The last session will always
+        # have the latest date which leads to the lexicographically
+        # largest path.
+        if last_result_path and last_result_path > result_path:
+            continue
+        # We need to check for `islink` as `isdir` returns true if |result_dir|
+        # is a symbolic link to a directory.
+        if not os.path.isdir(result_dir) or os.path.islink(result_dir):
+            continue
+        if not os.path.exists(result_path):
+            continue
+        last_result_path = result_path
+    return last_result_path
+
+
+def get_perf_metrics_from_test_result_xml(result_path):
+    """Parse test_result.xml and each <Metric /> is mapped to a dict that
+    can be used as kwargs of |TradefedTest.output_perf_value|."""
+    try:
+        root = ElementTree.parse(result_path)
+        for module in root.iter('Module'):
+            module_name = module.get('name')
+            for testcase in module.iter('TestCase'):
+                testcase_name = testcase.get('name')
+                for test in testcase.iter('Test'):
+                    test_name = test.get('name')
+                    for metric in test.iter('Metric'):
+                        score_type = metric.get('score_type')
+                        if score_type not in ['higher_better', 'lower_better']:
+                            logging.warning(
+                                'Unsupported score_type in %s/%s/%s',
+                                module_name, testcase_name, test_name)
+                            continue
+                        higher_is_better = (score_type == 'higher_better')
+                        units = metric.get('score_unit')
+                        yield dict(
+                            description=testcase_name + '#' + test_name,
+                            value=metric[0].text,
+                            units=units,
+                            higher_is_better=higher_is_better,
+                            graph=PERF_MODULE_NAME_PREFIX + module_name
+                        )
+    except Exception as e:
+        logging.warning(
+            'Exception raised in '
+            '|tradefed_utils.get_perf_metrics_from_test_result_xml|: {'
+            '0}'.format(e))

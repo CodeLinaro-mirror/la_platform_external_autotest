@@ -139,7 +139,7 @@ class ChameleonConnection(object):
         self._proxy_generator = proxy_generator or self._create_server_proxy
 
         self._ready_test_name = ready_test_name
-        self.chameleond_proxy = None
+        self._chameleond_proxy = None
 
 
     def _create_server_proxy(self):
@@ -168,7 +168,7 @@ class ChameleonConnection(object):
 
     def _reconnect(self):
         """Reconnect to chameleond."""
-        self.chameleond_proxy = self._proxy_generator()
+        self._chameleond_proxy = self._proxy_generator()
 
 
     def __call_server(self, name, *args, **kwargs):
@@ -181,15 +181,22 @@ class ChameleonConnection(object):
 
         @return: the result returned by the remote method.
 
+        @raise ChameleonConnectionError if the call failed after a reconnection.
+
         """
         try:
-            return getattr(self.chameleond_proxy, name)(*args, **kwargs)
+            return getattr(self._chameleond_proxy, name)(*args, **kwargs)
         except (AttributeError, socket.error):
             # Reconnect and invoke the method again.
             logging.info('Reconnecting chameleond proxy: %s', name)
             self._reconnect()
-            return getattr(self.chameleond_proxy, name)(*args, **kwargs)
-
+            try:
+                return getattr(self._chameleond_proxy, name)(*args, **kwargs)
+            except (socket.error) as e:
+                raise ChameleonConnectionError(
+                        ("The RPC call %s still failed with %s"
+                         " after a reconnection.") % (name, e))
+        return None
 
     def __getattr__(self, name):
         """Get the callable _Method object.
@@ -318,6 +325,11 @@ class ChameleonBoard(object):
         self._chameleond_proxy.Reboot()
 
 
+    def get_bt_pkg_version(self):
+        """ Read the current version of chameleond."""
+        return self._chameleond_proxy.get_bt_pkg_version()
+
+
     def _get_log(self):
         """Get log from chameleon. It will be registered by atexit.
 
@@ -326,6 +338,9 @@ class ChameleonBoard(object):
         """
         self.host.get_file(CHAMELEOND_LOG_REMOTE_PATH, self._output_log_file)
 
+    def log_message(self, msg):
+        """Log a message in chameleond log and system log."""
+        self._chameleond_proxy.log_message(msg)
 
     def get_all_ports(self):
         """Gets all the ports on Chameleon board which are connected.
@@ -383,6 +398,16 @@ class ChameleonBoard(object):
         @return: A USBController object.
         """
         return self._usb_ctrl
+
+
+    def get_bluetooth_base(self):
+        """Gets the Bluetooth base object on Chameleon.
+
+        This is a base object that does not emulate any Bluetooth device.
+
+        @return: A BluetoothBaseFlow object.
+        """
+        return self._chameleond_proxy.bluetooth_base
 
 
     def get_bluetooth_hid_mouse(self):
@@ -461,6 +486,13 @@ class ChameleonBoard(object):
         @return: A BluetoothHIDFlow object.
         """
         return self._chameleond_proxy.ble_keyboard
+
+    def get_platform(self):
+        """ Get the Hardware Platform of the chameleon host
+
+        @return: CHROMEOS/RASPI
+        """
+        return self._chameleond_proxy.get_platform()
 
 
 class ChameleonPort(object):
@@ -608,12 +640,12 @@ class ChameleonVideoInput(ChameleonPort):
         @param edid: An Edid object or NO_EDID.
         """
         if edid is edid_lib.NO_EDID:
-          self.chameleond_proxy.ApplyEdid(self.port_id, self._EDID_ID_DISABLE)
+            self.chameleond_proxy.ApplyEdid(self.port_id, self._EDID_ID_DISABLE)
         else:
-          edid_binary = xmlrpclib.Binary(edid.data)
-          edid_id = self.chameleond_proxy.CreateEdid(edid_binary)
-          self.chameleond_proxy.ApplyEdid(self.port_id, edid_id)
-          self.chameleond_proxy.DestroyEdid(edid_id)
+            edid_binary = xmlrpclib.Binary(edid.data)
+            edid_id = self.chameleond_proxy.CreateEdid(edid_binary)
+            self.chameleond_proxy.ApplyEdid(self.port_id, edid_id)
+            self.chameleond_proxy.DestroyEdid(edid_id)
 
     def set_edid_from_file(self, filename, check_video_input=True):
         """Sets EDID from a file.

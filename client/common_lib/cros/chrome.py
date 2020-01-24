@@ -281,10 +281,29 @@ class Chrome(object):
         """Returns a telemetry browser instance."""
         return self._browser
 
-    def get_extension(self, extension_path):
+    def get_extension(self, extension_path, retry=5):
         """Fetches a telemetry extension instance given the extension path."""
+        def _has_ext(ext):
+            """
+            Return True if the extension is fully loaded.
+
+            Sometimes an extension will be in the _extensions_to_load, but not
+            be fully loaded, and will error when trying to fetch from
+            self.browser.extensions. Happens most common when ARC is enabled.
+            This will add a wait/retry.
+
+            @param ext: the extension to look for
+            @returns True if found, False if not.
+            """
+            try:
+                return bool(self.browser.extensions[ext])
+            except KeyError:
+                return False
+
         for ext in self._extensions_to_load:
             if extension_path == ext.path:
+                utils.poll_for_condition(lambda: _has_ext(ext),
+                                         timeout=retry)
                 return self.browser.extensions[ext]
         return None
 
@@ -309,6 +328,22 @@ class Chrome(object):
         return utils.poll_for_condition(
             lambda: ext.EvaluateJavaScript('window.__login_status'),
             timeout=10)
+
+    def disable_dim_display(self):
+        """Avoid dim display.
+
+        @returns True if success otherwise False.
+        """
+        ext = self.autotest_ext
+        if not ext:
+            return False
+        try:
+            ext.ExecuteJavaScript(
+                    '''chrome.power.requestKeepAwake("display")''')
+        except:
+            logging.error("failed to disable dim display")
+            return False
+        return True
 
     def get_visible_notifications(self):
         """Returns an array of visible notifications of Chrome.

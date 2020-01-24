@@ -1,9 +1,11 @@
 # Copyright 2018 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import logging
 import time
 
 from autotest_lib.client.bin import test
+from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros import service_stopper
 from autotest_lib.client.cros.power import power_dashboard
 from autotest_lib.client.cros.power import power_rapl
@@ -16,11 +18,13 @@ class power_Test(test.test):
     """Optional base class power related tests."""
     version = 1
 
-    def initialize(self, seconds_period=20., pdash_note=''):
+    def initialize(self, seconds_period=20., pdash_note='',
+                   force_discharge=False):
         """Perform necessary initialization prior to power test run.
 
         @param seconds_period: float of probing interval in seconds.
         @param pdash_note: note of the current run to send to power dashboard.
+        @param force_discharge: force battery to discharge during the test.
 
         @var backlight: power_utils.Backlight object.
         @var keyvals: dictionary of result keyvals.
@@ -45,6 +49,7 @@ class power_Test(test.test):
         self.status = power_status.get_status()
 
         self._checkpoint_logger = power_status.CheckpointLogger()
+        self._seconds_period = seconds_period
 
         measurements = []
         if not self.status.on_ac():
@@ -72,6 +77,11 @@ class power_Test(test.test):
         self._meas_logs = [self._plog, self._tlog, self._clog]
 
         self._pdash_note = pdash_note
+
+        self._force_discharge = force_discharge
+        if force_discharge:
+            if not power_utils.charge_control_by_ectool(False):
+                raise error.TestError('Could not run battery force discharge.')
 
     def warmup(self, warmup_time=30):
         """Warm up.
@@ -144,7 +154,7 @@ class power_Test(test.test):
         core_keyvals = power_utils.get_core_keyvals(self.keyvals)
         self.write_perf_keyval(core_keyvals)
 
-    def _publish_dashboard(self):
+    def publish_dashboard(self):
         """Report results to chromeperf & power dashboard."""
 
         self.publish_keyvals()
@@ -187,11 +197,14 @@ class power_Test(test.test):
         for log in self._meas_logs:
             log.done = True
         super(power_Test, self).postprocess_iteration()
-        self._publish_dashboard()
+        self.publish_dashboard()
         self._save_results()
 
     def cleanup(self):
         """Reverse setting change in initialization."""
+        if self._force_discharge:
+            if not power_utils.charge_control_by_ectool(True):
+                logging.warn('Can not restore from force discharge.')
         if self.backlight:
             self.backlight.restore()
         self._services.restore_services()

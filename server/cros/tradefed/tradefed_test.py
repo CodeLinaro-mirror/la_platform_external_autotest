@@ -38,9 +38,6 @@ from autotest_lib.server.cros.tradefed import tradefed_chromelogin as login
 from autotest_lib.server.cros.tradefed import tradefed_constants as constants
 from autotest_lib.server.cros.tradefed import tradefed_utils
 
-# For convenience, add to our scope.
-parse_tradefed_result = tradefed_utils.parse_tradefed_result
-
 # TODO(kinaba): Move to tradefed_utils together with the setup/cleanup methods.
 MediaAsset = namedtuple('MediaAssetInfo', ['uri', 'localpath'])
 
@@ -157,6 +154,16 @@ class TradefedTest(test.test):
         self._notest_modules = self._get_expected_failures('notest_modules',
                 bundle)
         self._hard_reboot_on_failure = hard_reboot_on_failure
+
+    def postprocess(self):
+        """Postprocess: output performance values."""
+        path = tradefed_utils.get_test_result_xml_path(
+            os.path.join(self.resultsdir,
+                         self._get_tradefed_base_dir()))
+        if path:
+            for metric in tradefed_utils.get_perf_metrics_from_test_result_xml(
+                path):
+                self.output_perf_value(**metric)
 
     def cleanup(self):
         """Cleans up any dirtied state."""
@@ -933,7 +940,8 @@ class TradefedTest(test.test):
         self._collect_tradefed_global_log(output, result_destination)
         # Result parsing must come after all other essential operations as test
         # warnings, errors and failures can be raised here.
-        return parse_tradefed_result(output.stdout, self._waivers)
+        return tradefed_utils.parse_tradefed_result(output.stdout,
+                                                    self._waivers)
 
     def _setup_result_directories(self):
         """Sets up the results and logs directories for tradefed.

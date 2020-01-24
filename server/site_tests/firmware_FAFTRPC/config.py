@@ -1,5 +1,4 @@
 import operator
-import xmlrpclib
 
 from autotest_lib.client.common_lib.cros import chip_utils
 
@@ -113,6 +112,18 @@ RPC_CATEGORIES = [
                 "failing_args": [
                     NO_ARGS,
                     ("ls", "-l", 'foo'),
+                ],
+            },
+            {
+                "method_name": "RunShellCommandGetStatus",
+                "passing_args": [
+                    ("ls ''",),
+                ],
+            },
+            {
+                "method_name": "RunShellCommand",
+                "failing_args": [
+                    ("ls ''",),
                 ],
             },
             {
@@ -410,7 +421,7 @@ RPC_CATEGORIES = [
                 "method_name": "RebootToSwitchSlot",
                 "passing_args": [NO_ARGS],
                 "failing_args": [ONE_INT_ARG, ONE_STR_ARG],
-                "allow_error_msg": "ShellError",
+                "allow_error_msg": "CmdError",
             },
         ],
     },
@@ -747,7 +758,3 @@ RPC_CATEGORIES = [
         ]
     }
 ]
-RPC_ERRORS = (
-    xmlrpclib.Fault,
-    # grpc.RpcError, # TODO (gredelston): Un-comment when grpc is available
-)
