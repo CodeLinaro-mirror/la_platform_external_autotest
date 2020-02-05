@@ -538,6 +538,13 @@ class SysStat(object):
                self.battery.charge_full_design
 
 
+    def percent_display_charge(self):
+        """Returns current display charge in percent.
+        """
+        keyvals = parse_power_supply_info()
+        return float(keyvals['Battery']['display percentage'])
+
+
     def assert_battery_state(self, percent_initial_charge_min):
         """Check initial power configuration state is battery.
 
@@ -562,7 +569,7 @@ class SysStat(object):
 
     def assert_battery_in_range(self, min_level, max_level):
         """Raise a error.TestFail if the battery level is not in range."""
-        current_percent = self.percent_current_charge()
+        current_percent = self.percent_display_charge()
         if not (min_level <= current_percent <= max_level):
             raise error.TestFail('battery must be in range [{}, {}]'.format(
                                  min_level, max_level))
@@ -1214,7 +1221,7 @@ class GPUFreqStats(AbstractStats):
             logging.debug("Current GPU freq: %s", cur_mhz)
             logging.debug("All GPU freqs: %s", self._freqs)
 
-        super(GPUFreqStats, self).__init__(name='gpu', incremental=incremental)
+        super(GPUFreqStats, self).__init__(name='gpufreq', incremental=incremental)
 
 
     @classmethod
@@ -1382,6 +1389,8 @@ def get_available_cpu_stats():
     for cpu_group in cpu_sibling_groups:
         ret.append(CPUFreqStats(cpu_group))
         ret.append(CPUIdleStats(cpu_group))
+    if has_rc6_support():
+        ret.append(GPURC6Stats())
     return ret
 
 
@@ -2446,15 +2455,36 @@ class RC6ResidencyStats(object):
     """
     def __init__(self):
         self._rc6_enable_checked = False
-        self._initial_stat = self._parse_rc6_residency_info()
+        self._previous_stat = self._parse_rc6_residency_info()
+        self._accumulated_stat = 0
 
-    def get_accumulated_residency_secs(self):
+    def get_accumulated_residency_msecs(self):
         """Check number of RC6 state entry since the class has been initialized.
 
-        @returns int of RC6 residency in seconds since instantiation.
+        @returns int of RC6 residency in milliseconds since instantiation.
         """
         current_stat = self._parse_rc6_residency_info()
-        return (current_stat - self._initial_stat) * 1e-3
+
+        # The problem here is that we cannot assume the rc6_residency_ms is
+        # monotonically increasing by current kernel i915 implementation.
+        #
+        # Considering different hardware has different wraparound period,
+        # this is a mitigation plan to deal with different wraparound period
+        # on various platforms, in order to make the test platform agnostic.
+        #
+        # This scarifes the accuracy of RC6 residency a bit, up on the calling
+        # period.
+        #
+        # Reference: Bug 94852 - [SKL] rc6_residency_ms unreliable
+        # (https://bugs.freedesktop.org/show_bug.cgi?id=94852)
+        if current_stat < self._previous_stat:
+          logging.warning('GPU: Detect rc6_residency_ms wraparound')
+          self._accumulated_stat += current_stat
+        else:
+          self._accumulated_stat += current_stat - self._previous_stat
+
+        self._previous_stat = current_stat
+        return self._accumulated_stat
 
     def _is_rc6_enable(self):
         """
@@ -2467,7 +2497,7 @@ class RC6ResidencyStats(object):
         if not os.path.exists(path):
             raise error.TestFail('RC6 enable file not found.')
 
-        return int(utils.read_one_line(path)) == 1
+        return (int(utils.read_one_line(path)) & 0x1) == 0x1
 
     def _parse_rc6_residency_info(self):
         """
@@ -2639,3 +2669,50 @@ class PCHPowergatingStats(object):
 
             ret.append({'name': name, 'state': state})
         self._stat = ret
+
+def has_rc6_support():
+    """
+    Helper to examine that RC6 is enabled with residency counter.
+
+    @returns Boolean of RC6 support status.
+    """
+    enable_path = '/sys/class/drm/card0/power/rc6_enable'
+    residency_path = '/sys/class/drm/card0/power/rc6_residency_ms'
+
+    has_rc6_enabled = os.path.exists(enable_path)
+    has_rc6_residency = False
+    rc6_enable_mask = 0
+
+    if has_rc6_enabled:
+        # TODO (harry.pan): Some old chip has RC6P and RC6PP
+        # in the bits[1:2]; in case of that, ideally these time
+        # slice will fall into RC0, fix it up if required.
+        rc6_enable_mask = int(utils.read_one_line(enable_path))
+        has_rc6_enabled &= (rc6_enable_mask) & 0x1 == 0x1
+        has_rc6_residency = os.path.exists(residency_path)
+
+    logging.debug("GPU: RC6 residency support: %s, mask: 0x%x",
+                  {True: "yes", False: "no"} [has_rc6_enabled and has_rc6_residency],
+                  rc6_enable_mask)
+
+    return (has_rc6_enabled and has_rc6_residency)
+
+class GPURC6Stats(AbstractStats):
+    """
+    GPU RC6 statistics to give ratio of RC6 and RC0 residency
+
+    Protected Attributes:
+      _rc6: object of RC6ResidencyStats
+    """
+    def __init__(self):
+        self._rc6 = RC6ResidencyStats()
+        super(GPURC6Stats, self).__init__(name='gpuidle')
+
+    def _read_stats(self):
+        total = int(time.time() * 1000)
+        msecs = self._rc6.get_accumulated_residency_msecs()
+        stats = collections.defaultdict(int)
+        stats['RC6'] += msecs
+        stats['RC0'] += total - msecs
+        logging.debug("GPU: RC6 residency: %d ms", msecs)
+        return stats

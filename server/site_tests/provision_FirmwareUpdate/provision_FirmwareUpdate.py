@@ -56,7 +56,7 @@ class provision_FirmwareUpdate(test.test):
             return None
 
     def run_once(self, host, value, rw_only=False, stage_image_to_usb=False,
-                flash_device=None):
+                flash_device=None, get_release_from_image_archive=False):
         """The method called by the control file to start the test.
 
         @param host:  a CrosHost object of the machine to update.
@@ -70,8 +70,17 @@ class provision_FirmwareUpdate(test.test):
                              Use this to choose one other than the default
                              device when  servod has run in dual V4 device mode.
                              e.g. flash_device='ccd_cr50'
+        @raise TestFail: if the firmware version remains unchanged.
+               TestNAError: if the test environment is not properly set.
+                            e.g. the servo type doesn't support this test.
         """
         orig_act_dev = None
+
+        if flash_device == 'ccd_cr50':
+            servo_type = host.servo.get_servo_version()
+            if flash_device not in servo_type:
+                raise error.TestNAError('Unsupporting servo type: %s' %
+                                        servo_type)
         try:
             host.repair_servo()
 
@@ -82,6 +91,13 @@ class provision_FirmwareUpdate(test.test):
             if flash_device == 'ccd_cr50':
                 orig_act_dev = host.servo.get('active_v4_device').strip()
                 host.servo.set('active_v4_device', 'ccd_cr50')
+
+            # If build info was not given and explicitly it was requested to
+            # get the release version from image archive search, then
+            # do it so.
+            if value == None and get_release_from_image_archive:
+                board = host.servo.get_board()
+                value = host.get_latest_release_version(board)
 
             host.firmware_install(build=value, rw_only=rw_only,
                                   dest=self.resultsdir)

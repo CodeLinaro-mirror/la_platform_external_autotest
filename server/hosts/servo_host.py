@@ -250,16 +250,24 @@ class ServoHost(base_servohost.BaseServoHost):
     def start_servod(self, quick_startup=False):
         """Start the servod process on servohost.
         """
+        # Skip if running on the localhost.(crbug.com/1038168)
+        if self.is_localhost():
+            logging.debug("Servohost is a localhost, skipping start servod.")
+            return
+
+        cmd = 'start servod'
         if self.servo_board:
-            cmd = 'start servod BOARD=%s' % self.servo_board
+            cmd += ' BOARD=%s' % self.servo_board
             if self.servo_model:
                 cmd += ' MODEL=%s' % self.servo_model
-            cmd += ' PORT=%d' % self.servo_port
-            if self.servo_serial:
-                cmd += ' SERIAL=%s' % self.servo_serial
-            self.run(cmd)
         else:
-            raise hosts.AutoservVerifyError('Servo board is not configured!')
+            logging.warning('Board for DUT is unknown; starting servod'
+                            ' assuming a pre-configured board.')
+
+        cmd += ' PORT=%d' % self.servo_port
+        if self.servo_serial:
+            cmd += ' SERIAL=%s' % self.servo_serial
+        self.run(cmd, timeout=60)
 
         # There's a lag between when `start servod` completes and when
         # the _ServodConnectionVerifier trigger can actually succeed.
@@ -282,8 +290,14 @@ class ServoHost(base_servohost.BaseServoHost):
     def stop_servod(self):
         """Stop the servod process on servohost.
         """
+        # Skip if running on the localhost.(crbug.com/1038168)
+        if self.is_localhost():
+            logging.debug("Servohost is a localhost, skipping stop servod.")
+            return
+
         logging.debug('Stopping servod on port %s', self.servo_port)
-        self.run('stop servod PORT=%d' % self.servo_port, ignore_status=True)
+        self.run('stop servod PORT=%d' % self.servo_port,
+                 timeout=60, ignore_status=True)
         logging.debug('Wait %s seconds for servod process fully teardown.',
                       SERVOD_TEARDOWN_TIMEOUT)
         time.sleep(SERVOD_TEARDOWN_TIMEOUT)
@@ -510,7 +524,16 @@ def create_servo_host(dut, servo_args, try_lab_servo=False,
         return None
 
     newhost = ServoHost(**servo_args)
-    newhost.restart_servod(quick_startup=True)
+    try:
+        newhost.restart_servod(quick_startup=True)
+    except error.AutoservSSHTimeout:
+        logging.warning("Restart servod failed due ssh connection "
+                        "to servohost timed out. This error is forgiven"
+                        " here, we will retry in servo repair process.")
+    except error.AutoservRunError as e:
+        logging.warning("Restart servod failed due to:\n%s\n"
+                        "This error is forgiven here, we will retry"
+                        " in servo repair process.", str(e))
 
     # TODO(gregorynisbet): Clean all of this up.
     logging.debug('create_servo_host: attempt to set info store on '
