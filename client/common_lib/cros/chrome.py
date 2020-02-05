@@ -52,6 +52,7 @@ class Chrome(object):
 
     BROWSER_TYPE_LOGIN = 'system'
     BROWSER_TYPE_GUEST = 'system-guest'
+    AUTOTEST_EXT_ID = 'behllobkkfkfnphdnhnkndlbkcpglgmj'
 
     def __init__(self, logged_in=True, extension_paths=None, autotest_ext=False,
                  num_tries=3, extra_browser_args=None,
@@ -59,7 +60,8 @@ class Chrome(object):
                  dont_override_profile=False, disable_gaia_services=True,
                  disable_default_apps=True, auto_login=True, gaia_login=False,
                  username=None, password=None, gaia_id=None,
-                 arc_mode=None, disable_arc_opt_in=True,
+                 arc_mode=None, arc_timeout=None,
+                 disable_arc_opt_in=True,
                  disable_arc_opt_in_verification=True,
                  disable_arc_cpu_restriction=True,
                  disable_app_sync=False,
@@ -100,6 +102,7 @@ class Chrome(object):
         @param gaia_id: Log in using this gaia_id instead of the default.
         @param arc_mode: How ARC instance should be started.  Default is to not
                          start.
+        @param arc_timeout: Timeout to wait for ARC to boot.
         @param disable_arc_opt_in: For opt in flow autotest. This option is used
                                    to disable the arc opt in flow.
         @param disable_arc_opt_in_verification:
@@ -152,11 +155,6 @@ class Chrome(object):
         if extension_paths is None:
             extension_paths = []
 
-        if autotest_ext:
-            self._autotest_ext_path = os.path.join(os.path.dirname(__file__),
-                                                   'autotest_private_ext')
-            extension_paths.append(self._autotest_ext_path)
-
         finder_options = browser_options.BrowserFinderOptions()
         if proxy_server:
             finder_options.browser_options.AppendExtraBrowserArgs(
@@ -181,6 +179,13 @@ class Chrome(object):
                 finder_options.browser_options.AppendExtraBrowserArgs(
                     ['--arc-play-store-auto-update=off'])
             logged_in = True
+
+        if autotest_ext:
+            self._autotest_ext_path = os.path.join(os.path.dirname(__file__),
+                                                   'autotest_private_ext')
+            extension_paths.append(self._autotest_ext_path)
+            finder_options.browser_options.AppendExtraBrowserArgs(
+                ['--whitelisted-extension-id=%s' % self.AUTOTEST_EXT_ID])
 
         self._browser_type = (self.BROWSER_TYPE_LOGIN
                               if logged_in else self.BROWSER_TYPE_GUEST)
@@ -255,7 +260,7 @@ class Chrome(object):
                                 browser=self.browser,
                                 autotest_ext=self.autotest_ext,
                                 wait_for_provisioning=wait_for_provisioning)
-                    arc_util.post_processing_after_browser(self)
+                    arc_util.post_processing_after_browser(self, arc_timeout)
                 if enable_assistant:
                     assistant_util.enable_assistant(self.autotest_ext)
                 break

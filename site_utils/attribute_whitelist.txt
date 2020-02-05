@@ -41,11 +41,13 @@ suite:arc-gts-qual
 suite:arc-gts-tot
 suite:arc-gts-test
 suite:arc-unit-test
+suite:arc-vts
 suite:audio
 suite:audio_advanced
 suite:audio_basic
 suite:audio_essential
 suite:au_fsi
+suite:au-oobe
 suite:au-perbuild
 suite:av_webcam
 suite:bluestreak-partners
@@ -193,6 +195,7 @@ suite:power_sanity
 suite:powerplay
 suite:push_to_prod
 suite:regression
+suite:rlz
 suite:runtime_probe_perbuild
 suite:sanity
 suite:sb65-presubmit
