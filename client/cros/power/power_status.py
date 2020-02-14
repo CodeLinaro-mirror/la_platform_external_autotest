@@ -448,6 +448,10 @@ class SysStat(object):
             logging.warning("System does not provide power sysfs interface")
 
         self.thermal = ThermalStat()
+        if self.battery_path:
+            self.sys_low_batt_p = float(utils.system_output(
+                    'check_powerd_config --low_battery_shutdown_percent',
+                    ignore_status=True) or 4.0)
 
 
     def refresh(self):
@@ -573,6 +577,16 @@ class SysStat(object):
         if not (min_level <= current_percent <= max_level):
             raise error.TestFail('battery must be in range [{}, {}]'.format(
                                  min_level, max_level))
+
+    def is_low_battery(self, low_batt_margin_p=2.0):
+        """Returns True if battery current charge is low
+
+        @param low_batt_margin_p: percentage of battery that would be added to
+                                  system low battery level.
+        """
+        return (self.battery_discharging() and
+                self.percent_current_charge() < self.sys_low_batt_p +
+                                                low_batt_margin_p)
 
 
 def get_status():
@@ -2458,6 +2472,22 @@ class RC6ResidencyStats(object):
         self._previous_stat = self._parse_rc6_residency_info()
         self._accumulated_stat = 0
 
+        # Setup max RC6 residency count for modern chips. The table order
+        # is in small/big-core first, follows by the uarch name. We don't
+        # need to deal with the wraparound for devices with v4.17+ kernel
+        # which has the commit 817cc0791823 ("drm/i915: Handle RC6 counter wrap").
+        cpu_uarch = utils.get_intel_cpu_uarch()
+        self._max_counter = {
+          # Small-core w/ GEN9 LP graphics
+          'Airmont':      3579125,
+          'Goldmont':     3579125,
+          # Big-core
+          'Broadwell':    5497558,
+          'Haswell':      5497558,
+          'Kaby Lake':    5497558,
+          'Skylake':      5497558,
+        }.get(cpu_uarch, None)
+
     def get_accumulated_residency_msecs(self):
         """Check number of RC6 state entry since the class has been initialized.
 
@@ -2477,9 +2507,18 @@ class RC6ResidencyStats(object):
         #
         # Reference: Bug 94852 - [SKL] rc6_residency_ms unreliable
         # (https://bugs.freedesktop.org/show_bug.cgi?id=94852)
+        #
+        # However for modern processors with a known overflow count, apply
+        # constant of RC6 max counter to improve accuracy.
+        #
+        # Note that the max counter is bound for sysfs overflow, while the
+        # accumulated residency here is the diff against the first reading.
         if current_stat < self._previous_stat:
-          logging.warning('GPU: Detect rc6_residency_ms wraparound')
-          self._accumulated_stat += current_stat
+          if self._max_counter is None:
+            logging.warning('GPU: Detect rc6_residency_ms wraparound')
+            self._accumulated_stat += current_stat
+          else:
+            self._accumulated_stat += current_stat + (self._max_counter - self._previous_stat)
         else:
           self._accumulated_stat += current_stat - self._previous_stat
 

@@ -14,14 +14,15 @@ from autotest_lib.client.common_lib.cros import cr50_utils
 from autotest_lib.server.cros.servo import chrome_ec
 
 
-def servo_v4_command(func):
-    """Decorator for methods only relevant to tests running with servo v4."""
+def dts_control_command(func):
+    """For methods that should only run when dts mode control is supported."""
     @functools.wraps(func)
     def wrapper(instance, *args, **kwargs):
-        """Ignore servo v4 functions it's not being used."""
-        if instance.using_servo_v4():
+        """Ignore those functions if dts mode control is not supported."""
+        if instance._servo.dts_mode_is_valid():
             return func(instance, *args, **kwargs)
-        logging.info("not using servo v4. ignoring %s", func.func_name)
+        logging.info('Servo setup does not support DTS mode. ignoring %s',
+                     func.func_name)
     return wrapper
 
 
@@ -539,9 +540,45 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         self.send_command('bid 0x%x 0x%x' % (chip_bid, chip_flags))
 
 
-    def eraseflashinfo(self):
-        """Run eraseflashinfo."""
-        self.send_command('eraseflashinfo')
+    def get_board_id(self):
+        """Get the chip board id type and flags.
+
+        bid_type_inv will be '' if the bid output doesn't show it. If no board
+        id type inv is shown, then board id is erased will just check the type
+        and flags.
+
+        @returns a tuple (A string of bid_type:bid_type_inv:bid_flags,
+                          True if board id is erased)
+        """
+        bid = self.send_command_retry_get_output('bid',
+                    ['Board ID: (\S{8}):?(|\S{8}), flags (\S{8})\s'],
+                    safe=True)[0][1:]
+        bid_str = ':'.join(bid)
+        bid_is_erased =  set(bid).issubset({'', 'ffffffff'})
+        logging.info('chip board id: %s', bid_str)
+        logging.info('chip board id is erased: %s',
+                     'yes' if bid_is_erased else 'no')
+        return bid_str, bid_is_erased
+
+
+    def eraseflashinfo(self, retries=10):
+        """Run eraseflashinfo.
+
+        @returns True if the board id is erased
+        """
+        for i in range(retries):
+            # The console could drop characters while matching 'eraseflashinfo'.
+            # Retry if the command times out. It's ok to run eraseflashinfo
+            # multiple times.
+            rv = self.send_command_retry_get_output(
+                    'eraseflashinfo', ['eraseflashinfo(.*)>'])[0][1].strip()
+            logging.info('eraseflashinfo output: %r', rv)
+            bid_erased = self.get_board_id()[1]
+            eraseflashinfo_issue = 'Busy' in rv or 'do_flash_op' in rv
+            if not eraseflashinfo_issue and bid_erased:
+                break
+            logging.info('Retrying eraseflashinfo')
+        return bid_erased
 
 
     def rollback(self):
@@ -618,11 +655,6 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         return self.get_active_version_info()[1].strip()
 
 
-    def using_servo_v4(self):
-        """Returns true if the console is being served using servo v4"""
-        return 'servo_v4' in self._servo.get_servo_version()
-
-
     def ccd_is_enabled(self):
         """Return True if ccd is enabled.
 
@@ -630,7 +662,6 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         a flex cable is being used, use the CCD_MODE_L gpio setting to determine
         if Cr50 has ccd enabled.
 
-        Returns:
         @return: 'off' or 'on' based on whether the cr50 console is working.
         """
         if self._servo.main_device_is_ccd():
@@ -639,7 +670,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
             return not bool(self.gpioget('CCD_MODE_L'))
 
 
-    @servo_v4_command
+    @dts_control_command
     def wait_for_stable_ccd_state(self, state, timeout, raise_error):
         """Wait up to timeout seconds for CCD to be 'on' or 'off'
 
@@ -673,31 +704,31 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         logging.info("ccd is %r", 'on' if enabled else 'off')
 
 
-    @servo_v4_command
+    @dts_control_command
     def wait_for_ccd_disable(self, timeout=60, raise_error=True):
         """Wait for the cr50 console to stop working"""
         self.wait_for_stable_ccd_state('off', timeout, raise_error)
 
 
-    @servo_v4_command
+    @dts_control_command
     def wait_for_ccd_enable(self, timeout=60, raise_error=False):
         """Wait for the cr50 console to start working"""
         self.wait_for_stable_ccd_state('on', timeout, raise_error)
 
 
-    @servo_v4_command
+    @dts_control_command
     def ccd_disable(self, raise_error=True):
         """Change the values of the CC lines to disable CCD"""
         logging.info("disable ccd")
-        self._servo.set_servo_v4_dts_mode('off')
+        self._servo.set_dts_mode('off')
         self.wait_for_ccd_disable(raise_error=raise_error)
 
 
-    @servo_v4_command
+    @dts_control_command
     def ccd_enable(self, raise_error=False):
         """Reenable CCD and reset servo interfaces"""
         logging.info("reenable ccd")
-        self._servo.set_servo_v4_dts_mode('on')
+        self._servo.set_dts_mode('on')
         # If the test is actually running with ccd, wait for USB communication
         # to come up after reset.
         if self._servo.main_device_is_ccd():
@@ -901,17 +932,16 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         return float(result[0][1])
 
 
-    def servo_v4_supports_dts_mode(self):
-        """Returns True if cr50 registers changes in servo v4 dts mode."""
+    def servo_dts_mode_is_valid(self):
+        """Returns True if cr50 registers change in servo dts mode."""
         # This is to test that Cr50 actually recognizes the change in ccd state
         # We cant do that with tests using ccd, because the cr50 communication
         # goes down once ccd is enabled.
-        if (self._servo.get_servo_version(active=True) !=
-            'servo_v4_with_servo_micro'):
+        if not self._servo.dts_mode_is_safe():
             return False
 
         ccd_start = 'on' if self.ccd_is_enabled() else 'off'
-        dts_start = self._servo.get('servo_v4_dts_mode')
+        dts_start = self._servo.get_dts_mode()
         try:
             # Verify both ccd enable and disable
             self.ccd_disable(raise_error=True)
@@ -920,7 +950,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         except Exception, e:
             logging.info(e)
             rv = False
-        self._servo.set_servo_v4_dts_mode(dts_start)
+        self._servo.set_dts_mode(dts_start)
         self.wait_for_stable_ccd_state(ccd_start, 60, True)
         logging.info('Test setup does%s support servo DTS mode',
                 '' if rv else 'n\'t')

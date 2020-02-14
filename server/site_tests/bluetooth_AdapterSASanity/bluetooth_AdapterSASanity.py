@@ -9,6 +9,7 @@ import logging
 from autotest_lib.server.cros.bluetooth import advertisements_data
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_quick_tests import \
      BluetoothAdapterQuickTests
+from autotest_lib.server.cros.bluetooth import bluetooth_dbus_api_tests
 from autotest_lib.server.cros.bluetooth import bluetooth_default_state_test
 from autotest_lib.server.cros.bluetooth import bluetooth_valid_address_test
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_leadvertising_tests \
@@ -18,7 +19,9 @@ from autotest_lib.server.cros.bluetooth.bluetooth_adapter_leadvertising_tests \
 class bluetooth_AdapterSASanity(BluetoothAdapterQuickTests,
         bluetooth_default_state_test.bluetooth_Sanity_DefaultStateTest,
         bluetooth_valid_address_test.bluetooth_Sanity_ValidAddressTest,
+        bluetooth_dbus_api_tests.BluetoothDBusAPITests,
         bluetooth_AdapterLEAdvertising):
+
     """A Batch of Bluetooth stand alone sanity tests. This test is written as
        a batch of tests in order to reduce test time, since auto-test ramp up
        time is costy. The batch is using BluetoothAdapterQuickTests wrapper
@@ -143,6 +146,18 @@ class bluetooth_AdapterSASanity(BluetoothAdapterQuickTests,
         self.valid_address_test()
 
 
+    @test_wrapper('Valid adapter ID test')
+    def sa_valid_id_test(self):
+        """Verify that the adapter has a correctly-formatted ID"""
+        self.test_check_valid_adapter_id()
+
+
+    @test_wrapper('Valid adapter alias test')
+    def sa_valid_alias_test(self):
+        """Verify that the adapter has a correctly-formatted alias"""
+        self.test_check_valid_alias()
+
+
     @test_wrapper('Multiple LE advertising test')
     def sa_multiple_advertising_test(self):
         """Run all test cases for multiple advertisements."""
@@ -174,6 +189,23 @@ class bluetooth_AdapterSASanity(BluetoothAdapterQuickTests,
             advertisements_data.ADVERTISEMENTS, 'reboot', \
             num_iterations=1)
 
+    @test_wrapper('DBUS API tests')
+    def sa_dbus_api_tests(self):
+        """ Verify that the Bluetooth DBus API calls work."""
+        self.test_dbus_start_discovery_success()
+        self.test_dbus_start_discovery_fail_discovery_in_progress()
+        self.test_dbus_start_discovery_fail_power_off()
+        self.test_dbus_stop_discovery_success()
+        self.test_dbus_stop_discovery_fail_discovery_not_in_progress()
+        self.test_dbus_stop_discovery_fail_power_off()
+        self.test_dbus_pause_discovery_success()
+        self.test_dbus_pause_discovery_success_no_discovery_in_progress()
+        self.test_dbus_pause_discovery_fail_already_paused()
+        self.test_dbus_pause_discovery_fail_power_off()
+        self.test_dbus_get_supported_capabilities_success()
+        self.test_dbus_get_supported_capabilities_success_power_off()
+
+
 
     @batch_wrapper('Stand Alone Sanity')
     def sa_sanity_batch_run(self, num_iterations=1, test_name=None):
@@ -194,6 +226,7 @@ class bluetooth_AdapterSASanity(BluetoothAdapterQuickTests,
         self.sa_adapter_discoverable_timeout_test()
         self.sa_default_state_test()
         self.sa_valid_address_test()
+        #self.sa_dbus_api_tests()  # Disabled since tests is not stable yet.
 
 
     def run_once(self, host, num_iterations=1, test_name=None,

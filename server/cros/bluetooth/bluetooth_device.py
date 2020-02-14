@@ -448,19 +448,23 @@ class BluetoothDevice(object):
         return self._decode_json_base64(encoded_devices)
 
 
-    def get_device_properties(self, address):
-        """Read information about remote devices known to the adapter.
+    def get_device_property(self, address, prop_name):
+        """Read a property of BT device by directly querying device dbus object
 
-        An example of the device information of RN-42 looks like
+        @param address: Address of the device to query
+        @param prop_name: Property to be queried
 
-        @param address: Address of the device to pair.
-
-        @returns: a dictionary of device properties of the device on success;
-                  an empty dictionary otherwise.
-
+        @return The property if device is found and has property, None otherwise
         """
-        encoded_devices = self._proxy.get_device_by_address(address)
-        return self._decode_json_base64(encoded_devices)
+
+        prop_val = self._proxy.get_device_property(address, prop_name)
+
+        # Handle dbus error case returned by xmlrpc_server.dbus_safe decorator
+        if prop_val is None:
+            return prop_val
+
+        # Decode and return property value
+        return self._decode_json_base64(prop_val)
 
 
     def start_discovery(self):
@@ -469,7 +473,7 @@ class BluetoothDevice(object):
         Obtain the discovered device information using get_devices(), called
         stop_discovery() when done.
 
-        @return True on success, False otherwise.
+        @return (True, None) on success, (False, <error>) otherwise.
 
         """
         return self._proxy.start_discovery()
@@ -478,10 +482,58 @@ class BluetoothDevice(object):
     def stop_discovery(self):
         """Stop discovery of remote devices.
 
-        @return True on success, False otherwise.
+        @return (True, None) on success, (False, <error>) otherwise.
 
         """
         return self._proxy.stop_discovery()
+
+    def pause_discovery(self, system_suspend_resume=False):
+        """ Pause discovery of remote devices
+
+        @params: boolean system_suspend_resume Is this request related to
+                 system suspend resume.
+
+        @return (True, None) on success (False, <error>) otherwise
+        """
+        return self._proxy.pause_discovery(system_suspend_resume)
+
+    def unpause_discovery(self, system_suspend_resume=False):
+        """ Unpause discovery of remote devices
+
+        @params: boolean system_suspend_resume Is this request related to
+                 system suspend resume.
+
+        @return (True, None) on success (False, <error>) otherwise
+        """
+        return self._proxy.unpause_discovery(system_suspend_resume)
+
+
+    def pause_discovery(self, system_suspend_resume=False):
+        """Pause discovery of remote devices.
+
+        This pauses all device discovery sessions.
+
+        @param system_suspend_resume: whether the
+               request is related to system suspend/resume.
+
+        @return True on success, False otherwise.
+
+        """
+        return self._proxy.pause_discovery(system_suspend_resume)
+
+
+    def unpause_discovery(self, system_suspend_resume=False):
+        """Unpause discovery of remote devices.
+
+        This unpauses all device discovery sessions.
+
+        @param system_suspend_resume: whether the
+               request is related to system suspend/resume.
+
+        @return True on success, False otherwise.
+
+        """
+        return self._proxy.unpause_discovery(system_suspend_resume)
 
 
     def is_discovering(self):
@@ -510,6 +562,11 @@ class BluetoothDevice(object):
         """
         return json.loads(self._proxy.get_dev_info())
 
+    def get_supported_capabilities(self):
+        """ Get the supported_capabilities of the adapter
+        @returns (capabilities,None) on success (None, <error>) on failure
+        """
+        return self._proxy.get_supported_capabilities()
 
     def register_profile(self, path, uuid, options):
         """Register new profile (service).
@@ -764,6 +821,50 @@ class BluetoothDevice(object):
             uuid, address, base64.standard_b64encode(bytes_to_write))
 
 
+    def start_notify(self, address, uuid, cccd_value):
+        """Starts the notification session on the gatt characteristic.
+
+        @param address: The MAC address of the remote device.
+        @param uuid: The uuid of the characteristic.
+        @param cccd_value: Possible CCCD values include
+               0x00 - inferred from the remote characteristic's properties
+               0x01 - notification
+               0x02 - indication
+
+        @returns: True if the operation succeeds.
+                  False if the characteristic is not found, or
+                      if a DBus exception was raised by the operation.
+
+        """
+        return self._proxy.start_notify(address, uuid, cccd_value)
+
+
+    def stop_notify(self, address, uuid):
+        """Stops the notification session on the gatt characteristic.
+
+        @param address: The MAC address of the remote device.
+        @param uuid: The uuid of the characteristic.
+
+        @returns: True if the operation succeeds.
+                  False if the characteristic is not found, or
+                      if a DBus exception was raised by the operation.
+
+        """
+        return self._proxy.stop_notify(address, uuid)
+
+
+    def is_notifying(self, address, uuid):
+        """Is the GATT characteristic in a notifying session?
+
+        @param address: The MAC address of the remote device.
+        @param uuid: The uuid of the characteristic.
+
+        @return True if it is in a notification session. False otherwise.
+
+        """
+        return self._proxy.is_notifying(address, uuid)
+
+
     def is_characteristic_path_resolved(self, uuid, address):
         """Checks whether a characteristic is in the object tree.
 
@@ -866,6 +967,29 @@ class BluetoothDevice(object):
 
         """
         return self._proxy.get_connection_info(address)
+
+
+    def set_discovery_filter(self, filter):
+        """Set the discovery filter.
+
+        @param filter: The discovery filter to set.
+
+        @return True on success, False otherwise.
+
+        """
+        return self._proxy.set_discovery_filter(filter)
+
+
+    def set_le_connection_parameters(self, address, parameters):
+        """Set the LE connection parameters.
+
+        @param address: The MAC address of the device.
+        @param parameters: The LE connection parameters to set.
+
+        @return: True on success. False otherwise.
+
+        """
+        return self._proxy.set_le_connection_parameters(address, parameters)
 
 
     def close(self, close_host=True):

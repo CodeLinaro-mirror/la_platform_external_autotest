@@ -7,9 +7,9 @@ from autotest_lib.server.cros.bluetooth import bluetooth_test
 
 AUTHOR = 'chromeos-bluetooth'
 NAME = 'bluetooth_AdapterSASanity'
-PURPOSE = ('batch of Bluetooth stand along sanity tests')
+PURPOSE = ('batch of Bluetooth stand alone sanity tests')
 CRITERIA = 'Pass all sanity test'
-ATTRIBUTES = 'suite:bluetooth'
+ATTRIBUTES = 'suite:bluetooth_standalone, suite:bluetooth_qualification'
 TIME = 'MEDIUM'
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'bluetooth'
