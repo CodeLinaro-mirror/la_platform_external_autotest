@@ -58,6 +58,9 @@ class Cr50Test(FirmwareTest):
     # error during the flash operation. Just search for do_flash_op to simplify
     # the search string and make it applicable to all flash op errors.
     CR50_FLASH_OP_ERROR_MSG = 'do_flash_op'
+    # USB issues may show up with the timer sof calibration overflow interrupt.
+    # Count these during cleanup.
+    CR50_USB_ERROR = 'timer_sof_calibration_overflow_int'
 
     def initialize(self, host, cmdline_args, full_args,
                    restore_cr50_image=False, restore_cr50_board_id=False,
@@ -108,21 +111,27 @@ class Cr50Test(FirmwareTest):
 
         # We successfully saved the device state
         self._saved_state |= self.INITIAL_IMAGE_STATE
+        # Try and download all images necessary to restore cr50 state.
         try:
             self._save_dbg_image(full_args.get('cr50_dbg_image_path', ''))
             self._saved_state |= self.DBG_IMAGE
+        except Exception as e:
+            logging.warning('Error saving DBG image: %s', str(e))
+            if restore_cr50_image:
+                raise error.TestNAError('Need DBG image: %s' % str(e))
+        try:
             self._save_original_images(full_args.get('release_path', ''))
             self._saved_state |= self.DEVICE_IMAGES
+        except Exception as e:
+            logging.warning('Error saving ChromeOS image cr50 firmware: %s',
+                            str(e))
+        try:
             self._save_eraseflashinfo_image(
                     full_args.get('cr50_eraseflashinfo_image_path', ''))
             self._saved_state |= self.ERASEFLASHINFO_IMAGE
         except Exception as e:
-            logging.warning('Error saving images: %s', str(e))
-            if (restore_cr50_image and
-                not self._saved_cr50_state(self.DBG_IMAGE)):
-                raise error.TestNAError('Need DBG image: %s' % str(e))
-            elif (restore_cr50_board_id and
-                  self._saved_cr50_state(self.ERASEFLASHINFO_IMAGE)):
+            logging.warning('Error saving eraseflashinfo image: %s', str(e))
+            if restore_cr50_board_id:
                 raise error.TestNAError('Need eraseflashinfo image: %s' %
                                         str(e))
 
@@ -320,15 +329,26 @@ class Cr50Test(FirmwareTest):
         self.cr50_update(image)
 
 
-    def _restore_running_cr50_image(self, state_mismatch):
-        """Restore the cr50 image and board id.
+    def update_cr50_image_and_board_id(self, image_path, bid):
+        """Set the chip board id and updating the cr50 image.
 
         Make 3 attempts to update to the original image. Use a rollback from
         the DBG image to erase the state that can only be erased by a DBG image.
-        Set the chip board id during rollback
+        Set the chip board id during rollback.
 
-        @param state_mismatch: a dictionary of the mismatched state.
+        @param image_path: path of the image to update to.
+        @param bid: the board id to set.
         """
+        current_bid = cr50_utils.GetChipBoardId(self.host)
+        bid_mismatch = current_bid != bid
+        set_bid = bid_mismatch and bid != cr50_utils.ERASED_CHIP_BID
+        bid_is_erased = current_bid == cr50_utils.ERASED_CHIP_BID
+        eraseflashinfo = bid_mismatch and not bid_is_erased
+
+        if (eraseflashinfo and not
+            self._saved_cr50_state(self.ERASEFLASHINFO_IMAGE)):
+            raise error.TestFail('Did not save eraseflashinfo image')
+
         # Remove prepvt and prod iamges, so they don't interfere with the test
         # rolling back and updating to images that my be older than the images
         # on the device.
@@ -336,28 +356,17 @@ class Cr50Test(FirmwareTest):
             self.host.run('rm %s' % cr50_utils.CR50_PREPVT, ignore_status=True)
             self.host.run('rm %s' % cr50_utils.CR50_PROD, ignore_status=True)
 
-        bid_mismatch = 'chip_bid' in state_mismatch
-        original_bid = self._original_image_state['chip_bid']
-        set_bid = bid_mismatch and original_bid != cr50_utils.ERASED_CHIP_BID
-        bid_is_erased = (cr50_utils.GetChipBoardId(self.host) ==
-                         cr50_utils.ERASED_CHIP_BID)
-        eraseflashinfo = bid_mismatch and not bid_is_erased
-
-        if (eraseflashinfo and not
-            self._saved_cr50_state(self.ERASEFLASHINFO_IMAGE)):
-            raise error.TestFail('Did not save eraseflashinfo image')
-
         if eraseflashinfo:
             self.run_update_to_eraseflashinfo()
 
         self._retry_cr50_update(self._dbg_image_path, 3, False)
 
-        chip_bid = original_bid[0]
-        chip_flags = original_bid[2]
+        chip_bid = bid[0]
+        chip_flags = bid[2]
         if set_bid:
             self.cr50.set_board_id(chip_bid, chip_flags)
 
-        self._retry_cr50_update(self.get_saved_cr50_original_path(), 3, True)
+        self._retry_cr50_update(image_path, 3, True)
 
 
     def _cleanup_required(self, state_mismatch, image_type):
@@ -422,11 +431,12 @@ class Cr50Test(FirmwareTest):
         return state
 
 
-    def _check_original_image_state(self):
-        """Compare the current cr50 state to the original state.
+    def _check_running_image_and_board_id(self, expected_state):
+        """Compare the current image and board id to the given state.
 
+        @param expected_state: A dictionary of the state to compare to.
         @return: A dictionary with the state that is wrong as the key and the
-                 new and old state as the value
+                 expected and current state as the value.
         """
         if not (self._saved_state & self.INITIAL_IMAGE_STATE):
             logging.warning('Did not save the original state. Cannot verify it '
@@ -436,16 +446,27 @@ class Cr50Test(FirmwareTest):
         cr50_utils.ClearUpdateStateAndReboot(self.host)
 
         mismatch = {}
-        new_state = self.get_image_and_bid_state()
+        state = self.get_image_and_bid_state()
 
-        for k, new_val in new_state.iteritems():
-            original_val = self._original_image_state[k]
-            if new_val != original_val:
-                mismatch[k] = 'old: %s, new: %s' % (original_val, new_val)
+        for k, expected_val in expected_state.iteritems():
+            val = state[k]
+            if val != expected_val:
+                mismatch[k] = 'expected: %s, current: %s' % (expected_val, val)
 
         if mismatch:
             logging.warning('State Mismatch:\n%s', pprint.pformat(mismatch))
-        else:
+        return mismatch
+
+
+    def _check_original_image_state(self):
+        """Compare the current cr50 state to the original state.
+
+        @return: A dictionary with the state that is wrong as the key and the
+                 new and old state as the value
+        """
+        mismatch = self._check_running_image_and_board_id(
+                self._original_image_state)
+        if not mismatch:
             logging.info('The device is in the original state')
         return mismatch
 
@@ -504,13 +525,17 @@ class Cr50Test(FirmwareTest):
             return
 
         flash_error_count = 0
+        usb_error_count = 0
         with open(self.cr50_uart_file, 'r') as f:
             for line in f:
                 if self.CR50_FLASH_OP_ERROR_MSG in line:
                     flash_error_count += 1
+                if self.CR50_USB_ERROR in line:
+                    usb_error_count += 1
 
         # Log any flash operation errors.
         logging.info('do_flash_op count: %d', flash_error_count)
+        logging.info('usb error count: %d', usb_error_count)
 
 
     def _try_to_bring_dut_up(self):
@@ -545,7 +570,9 @@ class Cr50Test(FirmwareTest):
 
         # Use the DBG image to restore the original image.
         if self._cleanup_required(state_mismatch, self.DBG_IMAGE):
-            self._restore_running_cr50_image(state_mismatch)
+            self.update_cr50_image_and_board_id(
+                    self.get_saved_cr50_original_path(),
+                    self._original_image_state['chip_bid'])
 
         new_mismatch = self._check_original_image_state()
         # Copy the original .prod and .prepvt images back onto the DUT.
