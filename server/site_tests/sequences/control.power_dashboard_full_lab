@@ -17,8 +17,6 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils
 
 CLIENT_TESTS = [
-    ('power_Standby', {
-        'tag' : 'fast', 'sample_hours' : 0.334, 'test_hours' : 0.334}),
     ('power_LoadTest', {
         'tag' : '1hour', 'loop_time' : 3600, 'loop_count' : 1,
         'test_low_batt_p' : 6}),
@@ -28,6 +26,8 @@ CLIENT_TESTS = [
         'tag' : 'sw_decoder', 'use_hw_decode' : False}),
     ('power_Display', {}),
     ('power_WebGL', {}),
+    ('power_Standby', {
+        'tag' : 'fast', 'sample_hours' : 0.334, 'test_hours' : 0.334}),
 ]
 
 SERVO_V4_ETH_VENDOR = '0bda'
@@ -60,7 +60,11 @@ def run_client_test(machine):
     can_switch_to_wlan = len(eth_usb) == 1 and eth_usb[0] and wlan_ip
     if can_switch_to_wlan:
         wlan_machine = machine
-        wlan_machine['hostname'] = wlan_ip
+        if utils.host_is_in_power_lab(machine['hostname']):
+            wlan_machine['hostname'] = \
+                utils.get_power_lab_wlan_hostname(machine['hostname'])
+        else:
+            wlan_machine['hostname'] = wlan_ip
         client = hosts.create_host(wlan_machine)
         eth_node = eth_usb[0]
 

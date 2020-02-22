@@ -446,7 +446,7 @@ def get_extra_args(modules, is_public):
             preconditions.extend(CONFIG['PRECONDITION'].get(module, []))
             login_preconditions.extend(
                 CONFIG['LOGIN_PRECONDITION'].get(module, []))
-        prerequisites.extend(CONFIG['PREREQUISITES'].get(module,[]))
+            prerequisites.extend(CONFIG['PREREQUISITES'].get(module,[]))
 
     # Notice: we are just squishing the preconditions for all modules together
     # with duplicated command removed. This may not always be correct.
@@ -656,6 +656,7 @@ def calculate_timeout(modules, suites):
     if 'suite:bvt-arc' in suites:
         return int(3600 * CONFIG['BVT_TIMEOUT'])
     if CONFIG.get('QUAL_SUITE_NAMES') and \
+            CONFIG.get('QUAL_TIMEOUT') and \
             ((set(CONFIG['QUAL_SUITE_NAMES']) & set(suites)) and \
             not (_COLLECT in modules or _PUBLIC_COLLECT in modules)):
         return int(3600 * CONFIG['QUAL_TIMEOUT'])

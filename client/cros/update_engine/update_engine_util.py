@@ -3,9 +3,11 @@
 # found in the LICENSE file.
 
 import datetime
+import json
 import logging
 import os
 import re
+import requests
 import shutil
 import time
 
@@ -208,23 +210,24 @@ class UpdateEngineUtil(object):
         @return Boolean if the update engine log contains the entry.
 
         """
-        if update_engine_log:
-            result = self._run('echo "%s" | grep "%s"' % (update_engine_log,
-                                                          entry),
-                               ignore_status=True)
-        else:
-            result = self._run('cat %s | grep "%s"' % (
-                self._UPDATE_ENGINE_LOG, entry), ignore_status=True)
+        if isinstance(entry, str):
+            # Create a tuple of strings so we can itarete over it.
+            entry = (entry,)
 
-        if result.exit_status != 0:
-            if raise_error:
-                error_str = 'Did not find expected string in update_engine ' \
-                            'log: %s' % entry
-                logging.debug(error_str)
-                raise error.TestFail(err_str if err_str else error_str)
-            else:
-                return False
-        return True
+        if not update_engine_log:
+            update_engine_log = self._run(
+                'cat %s' % self._UPDATE_ENGINE_LOG).stdout
+
+        if all(msg in update_engine_log for msg in entry):
+            return True
+
+        if not raise_error:
+            return False
+
+        error_str = ('Did not find expected string(s) in update_engine log: '
+                     '%s' % entry)
+        logging.debug(error_str)
+        raise error.TestFail(err_str if err_str else error_str)
 
 
     def _is_update_finished_downloading(self):
@@ -254,14 +257,50 @@ class UpdateEngineUtil(object):
         return completed >= progress
 
 
+    def _get_payload_properties_file(self, payload_url, target_dir, **kwargs):
+        """
+        Downloads the payload properties file into a directory.
+
+        @param payload_url: The URL to the update payload file.
+        @param target_dir: The directory to download the file into.
+        @param kwargs: A dictionary of key/values that needs to be overridden on
+                the payload properties file.
+
+        """
+        payload_props_url = payload_url + '.json'
+        _, _, file_name = payload_props_url.rpartition('/')
+        try:
+            response = json.loads(requests.get(payload_props_url).text)
+
+            # Override existing keys if any.
+            for k, v in kwargs.iteritems():
+                # Don't set default None values. We don't want to override good
+                # values to None.
+                if v is not None:
+                    response[k] = v
+
+            with open(os.path.join(target_dir, file_name), 'w') as fp:
+                json.dump(response, fp)
+
+        except (requests.exceptions.RequestException,
+                IOError,
+                ValueError) as err:
+            raise error.TestError(
+                'Failed to get update payload properties: %s with error: %s' %
+                (payload_props_url, err))
+
+
     def _check_for_update(self, server='http://127.0.0.1', port=8082,
-                          interactive=True, ignore_status=False,
-                          wait_for_completion=False, **kwargs):
+                          update_path='update', interactive=True,
+                          ignore_status=False, wait_for_completion=False,
+                          **kwargs):
         """
         Starts a background update check.
 
         @param server: The omaha server to call in the update url.
         @param port: The omaha port to call in the update url.
+        @param update_path: The /update part of the URL. When using a lab
+                            devserver, pass update/<board>-release/RXX-X.X.X.
         @param interactive: True if we are doing an interactive update.
         @param ignore_status: True if we should ignore exceptions thrown.
         @param wait_for_completion: True for --update, False for
@@ -274,9 +313,10 @@ class UpdateEngineUtil(object):
                 values.
         """
         update = 'update' if wait_for_completion else 'check_for_update'
+        update_path = update_path.lstrip('/')
         query = '&'.join('%s=%s' % (k, v) for k, v in kwargs.items())
-        cmd = 'update_engine_client --%s --omaha_url="%s:%d/update?%s"' % (
-            update, server, port, query)
+        cmd = 'update_engine_client --%s --omaha_url="%s:%d/%s?%s"' % (
+            update, server, port, update_path, query)
 
         if not interactive:
           cmd += ' --interactive=false'

@@ -150,6 +150,15 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
     _FW_IMAGE_URL_PATTERN = CONFIG.get_config_value(
             'CROS', 'firmware_url_pattern', type=str)
 
+    # Regular expression for extracting EC version string
+    _EC_REGEX = '(%s_\w*[-\.]\w*[-\.]\w*[-\.]\w*)'
+
+    # Regular expression for extracting BIOS version string
+    _BIOS_REGEX = '(%s\.\w*\.\w*\.\w*)'
+
+    # Command to update firmware located on DUT
+    _FW_UPDATE_CMD = 'chromeos-firmwareupdate --mode=recovery -i %s %s'
+
     @staticmethod
     def check_host(host, timeout=10):
         """
@@ -651,8 +660,20 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         else:
             raise error.AutoservError('Cannot find the latest firmware')
 
+    @staticmethod
+    def get_version_from_image(image, version_regex):
+        with open(image, 'rb') as f:
+            image_data = f.read()
+        match = re.findall(version_regex, image_data)
+        if match:
+            return match[0]
+        else:
+            raise error.TestFail('Failed to read version from %s.' % image)
+
+
     def firmware_install(self, build=None, rw_only=False, dest=None,
-                         local_tarball=None):
+                         local_tarball=None, verify_version=False,
+                         try_scp=False):
         """Install firmware to the DUT.
 
         Use stateful update if the DUT is already running the same build.
@@ -673,6 +694,10 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         @param dest: Directory to store the firmware in.
         @param local_tarball: Path to local firmware image for installing
                               without devserver.
+        @param verify_version: True to verify EC and BIOS versions after
+                               programming firmware, default is False.
+        @param try_scp: False to always program using servo, true to try copying
+                        the firmware and programming from the DUT.
 
         TODO(dshi): After bug 381718 is fixed, update here with corresponding
                     exceptions that could be raised.
@@ -717,12 +742,88 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             local_tarball = os.path.join(dest, os.path.basename(fwurl))
             ds.download_file(fwurl, local_tarball)
 
-        # Program firmware using servo
+        # Extract EC image from tarball
+        logging.info('Extracting EC image.')
+        ec_image = self.servo.extract_ec_image(board, model, local_tarball)
+
+        # Extract BIOS image from tarball
+        logging.info('Extracting BIOS image.')
+        bios_image = self.servo.extract_bios_image(board, model, local_tarball)
+
+        # Clear firmware version labels
+        self._clear_fw_version_labels(rw_only)
+
+        # Install firmware from local tarball
         try:
-            self._clear_fw_version_labels(rw_only)
-            self.servo.program_firmware(board, model, local_tarball, rw_only)
-            if utils.host_is_in_lab_zone(self.hostname):
-                self._add_fw_version_label(build, rw_only)
+            # Check if DUT is available and copying to DUT is enabled
+            if self.is_up() and try_scp:
+                # DUT is available, make temp firmware directory to store images
+                logging.info('Making temp folder.')
+                dest_folder = '/tmp/firmware'
+                self.run('mkdir -p ' + dest_folder)
+
+                # Send BIOS firmware image to DUT
+                logging.info('Sending BIOS firmware.')
+                dest_bios_path = os.path.join(dest_folder,
+                                              os.path.basename(bios_image))
+                self.send_file(bios_image, dest_bios_path)
+
+                # Initialize firmware update command for BIOS image
+                fw_cmd = self._FW_UPDATE_CMD % (dest_bios_path,
+                                                '--wp=1' if rw_only else '')
+
+                # Send EC firmware image to DUT when EC image was found
+                if ec_image:
+                    logging.info('Sending EC firmware.')
+                    dest_ec_path = os.path.join(dest_folder,
+                                                os.path.basename(ec_image))
+                    self.send_file(ec_image, dest_ec_path)
+
+                    # Add EC image to firmware update command
+                    fw_cmd += ' -e %s' % dest_ec_path
+
+                # Update firmware on DUT
+                logging.info('Updating firmware.')
+                self.run(fw_cmd)
+            else:
+                # Host is not available, program firmware using servo
+                if ec_image:
+                    self.servo.program_ec(ec_image, rw_only)
+                self.servo.program_bios(bios_image, rw_only)
+                if utils.host_is_in_lab_zone(self.hostname):
+                    self._add_fw_version_label(build, rw_only)
+
+            # Reboot and wait for DUT after installing firmware
+            logging.info('Rebooting DUT.')
+            self.servo.get_power_state_controller().reset()
+            time.sleep(self.servo.BOOT_DELAY)
+            self.test_wait_for_boot()
+
+            # When enabled verify EC and BIOS firmware version after programming
+            if verify_version:
+                # Check programmed EC firmware when EC image was found
+                if ec_image:
+                    logging.info('Checking EC firmware version.')
+                    dest_ec_version = self.get_ec_version()
+                    ec_regex = self._EC_REGEX % model
+                    image_ec_version = self.get_version_from_image(ec_image,
+                                                                ec_regex)
+                    if dest_ec_version != image_ec_version:
+                        raise error.TestFail(
+                            'Failed to update EC RO, version %s (expected %s)' %
+                            (dest_ec_version, image_ec_version))
+
+                # Check programmed BIOS firmware against expected version
+                logging.info('Checking BIOS firmware version.')
+                dest_bios_version = self.get_firmware_version()
+                bios_version_prefix = dest_bios_version.split('.', 1)[0]
+                bios_regex = self._BIOS_REGEX % bios_version_prefix
+                image_bios_version = self.get_version_from_image(bios_image,
+                                                                 bios_regex)
+                if dest_bios_version != image_bios_version:
+                    raise error.TestFail(
+                        'Failed to update BIOS RO, version %s (expected %s)' %
+                        (dest_bios_version, image_bios_version))
         finally:
             if tmpd:
                 tmpd.clean()
