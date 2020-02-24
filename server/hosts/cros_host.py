@@ -662,6 +662,15 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
     @staticmethod
     def get_version_from_image(image, version_regex):
+        """Get version string from binary image using regular expression.
+
+        @param image: Binary image to search
+        @param version_regex: Regular expression to search for
+
+        @return Version string
+
+        @raises TestFail if no version string is found in image
+        """
         with open(image, 'rb') as f:
             image_data = f.read()
         match = re.findall(version_regex, image_data)
@@ -805,9 +814,10 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                 if ec_image:
                     logging.info('Checking EC firmware version.')
                     dest_ec_version = self.get_ec_version()
-                    ec_regex = self._EC_REGEX % model
+                    ec_version_prefix = dest_ec_version.split('_', 1)[0]
+                    ec_regex = self._EC_REGEX % ec_version_prefix
                     image_ec_version = self.get_version_from_image(ec_image,
-                                                                ec_regex)
+                                                                   ec_regex)
                     if dest_ec_version != image_ec_version:
                         raise error.TestFail(
                             'Failed to update EC RO, version %s (expected %s)' %
@@ -903,6 +913,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         self._servo_host = host
         if self._servo_host is not None:
             self.servo = self._servo_host.get_servo()
+            self._update_servo_labels()
         else:
             self.servo = None
 
@@ -922,8 +933,23 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         if not self._servo_host:
             raise error.AutoservError('No servo host for %s.' %
                                       self.hostname)
-        self._servo_host.repair()
-        self.servo = self._servo_host.get_servo()
+        try:
+            self._servo_host.repair()
+        except:
+            raise
+        finally:
+            self.set_servo_host(self._servo_host)
+
+
+    def _update_servo_labels(self):
+        """Set servo info labels to dut host_info"""
+        if self._servo_host:
+            host_info = self.host_info_store.get()
+
+            servo_state = self._servo_host.get_servo_state()
+            host_info.set_version_label(servo_host.SERVO_STATE_LABEL_PREFIX, servo_state)
+
+            self.host_info_store.commit(host_info)
 
 
     def repair(self):

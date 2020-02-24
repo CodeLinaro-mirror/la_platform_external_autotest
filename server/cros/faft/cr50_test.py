@@ -31,8 +31,7 @@ class Cr50Test(FirmwareTest):
     CR50_DEBUG_FILE =  '*/cr50.dbg.%s.bin.*%s'
     CR50_ERASEFLASHINFO_FILE = (
             '*/cr50_Unknown_NodeLocked-%s_cr50-accessory-mp.bin')
-    CR50_TOT_VER_FILE = 'tot/LATEST'
-    CR50_TOT_FILE = 'tot/cr50.bin.%s.%s'
+    CR50_QUAL_VERSION_FILE = 'chromeos-cr50-QUAL_VERSION'
     NONE = 0
     # Saved the original device state during init.
     INITIAL_IMAGE_STATE = 1 << 0
@@ -95,22 +94,8 @@ class Cr50Test(FirmwareTest):
         elif self.original_ccd_level != 'lock':
             raise error.TestNAError('Lock the console before running cr50 test')
 
-        self._save_original_state()
+        self._save_original_state(full_args.get('release_path', ''))
 
-        # Verify cr50 is still running the correct version
-        cr50_qual_version = full_args.get('cr50_qual_version', '').strip()
-        if cr50_qual_version:
-            _, running_rw, running_bid = self.get_saved_cr50_original_version()
-            expected_rw, expected_bid_sym = cr50_qual_version.split('/')
-            expected_bid = cr50_utils.GetBoardIdInfoString(expected_bid_sym,
-                                                           symbolic=False)
-            logging.debug('Running %s %s Expect %s %s', running_rw, running_bid,
-                          expected_rw, expected_bid)
-            if running_rw != expected_rw or expected_bid != running_bid:
-                raise error.TestError('Not running %s' % cr50_qual_version)
-
-        # We successfully saved the device state
-        self._saved_state |= self.INITIAL_IMAGE_STATE
         # Try and download all images necessary to restore cr50 state.
         try:
             self._save_dbg_image(full_args.get('cr50_dbg_image_path', ''))
@@ -119,12 +104,7 @@ class Cr50Test(FirmwareTest):
             logging.warning('Error saving DBG image: %s', str(e))
             if restore_cr50_image:
                 raise error.TestNAError('Need DBG image: %s' % str(e))
-        try:
-            self._save_original_images(full_args.get('release_path', ''))
-            self._saved_state |= self.DEVICE_IMAGES
-        except Exception as e:
-            logging.warning('Error saving ChromeOS image cr50 firmware: %s',
-                            str(e))
+
         try:
             self._save_eraseflashinfo_image(
                     full_args.get('cr50_eraseflashinfo_image_path', ''))
@@ -134,6 +114,106 @@ class Cr50Test(FirmwareTest):
             if restore_cr50_board_id:
                 raise error.TestNAError('Need eraseflashinfo image: %s' %
                                         str(e))
+
+        # TODO(b/143888583): remove qual update during init once new design to
+        # to provision cr50 updates is in place.
+        is_qual = full_args.get('is_qual', '').lower() == 'true'
+        if is_qual or self.running_qual_suite():
+            release_ver_arg = full_args.get('release_ver', '')
+            release_path_arg = full_args.get('release_path', '')
+            self.ensure_qual_image_is_running(release_ver_arg, release_path_arg)
+
+
+    def running_qual_suite(self):
+        """Return True if the qual image needs to be running."""
+        for pool in self.host.host_info_store.get().pools:
+            # TODO(b/149109740): remove once the pool values are verified.
+            # Change to run with faft-cr50 and faft-cr50-experimental suites.
+            logging.info('Checking pool: %s', pool)
+            if 'faft-cr50-experimental' in pool:
+                return True
+        return False
+
+
+    def ensure_qual_image_is_running(self, qual_ver_str, qual_path):
+        """Update to the qualification image if it's not running.
+
+        qual_ver_str and path are command line args that may be supplied to
+        specify a local version or path. If neither are supplied, the version
+        from gs will be used to determine what version cr50 should run.
+
+        qual_ver_str and qual_path should not be supplied together. If they are,
+        the path will be used. It's not a big deal as long as they agree with
+        each other.
+
+        @param qual_ver_str: qualification version string or None.
+        @param qual_path: local path to the qualification image or None.
+        """
+        # Get the local image information.
+        if qual_path:
+            dest, qual_ver = cr50_utils.InstallImage(self.host, qual_path,
+                                                           '/tmp/qual_cr50.bin')
+            self.host.run('rm ' + dest)
+            qual_bid_str = (cr50_utils.GetBoardIdInfoString(qual_ver[2], False)
+                            if qual_ver[2] else '')
+            qual_ver_str = '%s/%s' % (qual_ver[1], qual_bid_str)
+
+        # Determine the qualification version from.
+        if not qual_ver_str:
+            gsurl = os.path.join(self.GS_PRIVATE, self.CR50_QUAL_VERSION_FILE)
+            dut_path = self.download_cr50_gs_file(gsurl, False)[1]
+            qual_ver_str = self.host.run('cat ' + dut_path).stdout.strip()
+
+        # Download the qualification image based on the version.
+        if not qual_path:
+            rw, bid = qual_ver_str.split('/')
+            qual_path, qual_ver = self.download_cr50_release_image(rw, bid)
+
+        logging.info('Cr50 Qual Version: %s', qual_ver_str)
+        logging.info('Cr50 Qual Path: %s', qual_path)
+        qual_chip_bid = cr50_utils.GetChipBIDFromImageBID(
+                qual_ver[2], self.get_device_brand())
+        logging.info('Cr50 Qual Chip BID: %s', qual_chip_bid)
+
+        # Replace only the prod or prepvt image based on the major version.
+        if int(qual_ver[1].split('.')[1]) % 2:
+            prod_ver = self._original_image_state['prod_version']
+            prepvt_ver = qual_ver
+            prod_path = self._device_prod_image
+            prepvt_path = qual_path
+        else:
+            prod_ver = qual_ver
+            prepvt_ver = self._original_image_state['prepvt_version']
+            prod_path = qual_path
+            prepvt_path = self._device_prepvt_image
+
+        # Generate a dictionary with all of the expected state.
+        qual_state = {}
+        qual_state['prod_version'] = prod_ver
+        qual_state['prepvt_version'] = prepvt_ver
+        qual_state['chip_bid'] = qual_chip_bid
+        qual_state['running_image_bid'] = qual_ver[2]
+        # The test can't rollback RO. The newest RO should be running at the end
+        # of the test. max_ro will be none if the versions are the same. Use the
+        # running_ro in that case.
+        running_ro = self.get_saved_cr50_original_version()[0]
+        max_ro = cr50_utils.GetNewestVersion(running_ro, qual_ver[0])
+        qual_state['running_image_ver'] = (max_ro or running_ro, qual_ver[1],
+                                           None)
+        mismatch = self._check_running_image_and_board_id(qual_state)
+        if not mismatch:
+            logging.info('Running qual image. No update needed.')
+            return
+        logging.info('Cr50 qual update required.')
+        # TODO(b/149109740): remove once running_qual_suite logic has been
+        # verified.
+        logging.info('Skipping until logic has been verified')
+        return
+        filesystem_util.make_rootfs_writable(self.host)
+        self._update_device_images_and_running_cr50_firmware(qual_state,
+                qual_path, prod_path, prepvt_path)
+        logging.info("Recording qual device state as 'original' device state")
+        self._save_original_state(qual_path)
 
 
     def _saved_cr50_state(self, state):
@@ -237,14 +317,27 @@ class Cr50Test(FirmwareTest):
                     running_rw, running_bid)[0]
 
 
-    def _save_original_state(self):
+    def _save_original_state(self, release_path):
         """Save the cr50 related state.
 
-        Save the device's current cr50 version, cr50 board id, and image
-        at /opt/google/cr50/firmware/cr50.bin.prod. These will be used to
-        restore the state during cleanup.
+        Save the device's current cr50 version, cr50 board id, the running cr50
+        image, the prepvt, and prod cr50 images. These will be used to restore
+        the cr50 state during cleanup.
+
+        @param release_path: the optional command line arg of path for the local
+                             cr50 image.
         """
+        self._saved_state &= ~self.INITIAL_IMAGE_STATE
         self._original_image_state = self.get_image_and_bid_state()
+        # We successfully saved the device state
+        self._saved_state |= self.INITIAL_IMAGE_STATE
+        self._saved_state &= ~self.DEVICE_IMAGES
+        try:
+            self._save_original_images(release_path)
+            self._saved_state |= self.DEVICE_IMAGES
+        except Exception as e:
+            logging.warning('Error saving ChromeOS image cr50 firmware: %s',
+                            str(e))
 
 
     def get_saved_cr50_original_version(self):
@@ -384,20 +477,6 @@ class Cr50Test(FirmwareTest):
             raise error.TestError('Did not save images to restore %s' %
                                   (', '.join(restore)))
         return not not restore
-
-
-    def _restore_device_files(self):
-        """Copy the original .prod and .prepvt images onto the dut."""
-        if not filesystem_util.is_rootfs_writable(self.host):
-            return
-        # Copy the original .prod file onto the DUT.
-        if self._device_prod_image:
-            cr50_utils.InstallImage(self.host, self._device_prod_image,
-                    cr50_utils.CR50_PROD)
-        # Copy the original .prepvt file onto the DUT.
-        if self._device_prepvt_image:
-            cr50_utils.InstallImage(self.host, self._device_prepvt_image,
-                    cr50_utils.CR50_PREPVT)
 
 
     def _get_image_information(self, ext):
@@ -562,35 +641,58 @@ class Cr50Test(FirmwareTest):
             logging.info('DUT did not respond. Resetting it.')
 
 
-    def _restore_device_images_and_running_cr50_image(self):
-        """Restore the images on the device and the running cr50 image."""
-        state_mismatch = self._check_original_image_state()
-        if not state_mismatch:
-            logging.info('Cr50 and device are using the original images.')
-            return
-        if self._provision_update:
+    def _update_device_images_and_running_cr50_firmware(
+            self, state, release_path, prod_path, prepvt_path):
+        """Update cr50, set the board id, and copy firmware to the DUT.
+
+        @param state: A dictionary with the expected running version, board id,
+                      device cr50 firmware versions.
+        @param release_path: The image to update cr50 to
+        @param prod_path: The path to the .prod image
+        @param prepvt_path: The path to the .prepvt image
+        @raises TestError: if setting any state failed
+        """
+        mismatch = self._check_running_image_and_board_id(state)
+        if not mismatch:
+            logging.info('Nothing to do.')
             return
 
         # Use the DBG image to restore the original image.
-        if self._cleanup_required(state_mismatch, self.DBG_IMAGE):
-            self.update_cr50_image_and_board_id(
-                    self.get_saved_cr50_original_path(),
-                    self._original_image_state['chip_bid'])
+        if self._cleanup_required(mismatch, self.DBG_IMAGE):
+            self.update_cr50_image_and_board_id(release_path, state['chip_bid'])
 
-        new_mismatch = self._check_original_image_state()
+        new_mismatch = self._check_running_image_and_board_id(state)
         # Copy the original .prod and .prepvt images back onto the DUT.
-        if self._cleanup_required(new_mismatch, self.DEVICE_IMAGES):
-            self._restore_device_files()
+        if (self._cleanup_required(new_mismatch, self.DEVICE_IMAGES) and
+            filesystem_util.is_rootfs_writable(self.host)):
+            # Copy the .prod file onto the DUT.
+            if prod_path and 'prod_version' in new_mismatch:
+                cr50_utils.InstallImage(self.host, prod_path,
+                                        cr50_utils.CR50_PROD)
+            # Copy the .prepvt file onto the DUT.
+            if prepvt_path and 'prepvt_version' in new_mismatch:
+                cr50_utils.InstallImage(self.host, prepvt_path,
+                                        cr50_utils.CR50_PREPVT)
 
-        mismatch_last = self._check_original_image_state()
-        if mismatch_last:
-            raise error.TestError('Could not restore state: %s' %
-                                  mismatch_last)
+        final_mismatch = self._check_running_image_and_board_id(state)
+        if final_mismatch:
+            raise error.TestError('Could not update cr50 image state: %s' %
+                                  final_mismatch)
+        logging.info('Successfully updated all device cr50 firmware state.')
 
-        logging.info('Successfully restored the original cr50 state')
-        if self._raise_error_on_mismatch:
+
+    def _restore_device_images_and_running_cr50_firmware(self):
+        """Restore the images on the device and the running cr50 image."""
+        if self._provision_update:
+            return
+        mismatch = self._check_original_image_state()
+        self._update_device_images_and_running_cr50_firmware(
+                self._original_image_state, self.get_saved_cr50_original_path(),
+                self._device_prod_image, self._device_prepvt_image)
+
+        if self._raise_error_on_mismatch and mismatch:
             raise error.TestError('Unexpected state mismatch during '
-                                  'cleanup %s' % state_mismatch)
+                                  'cleanup %s' % mismatch)
 
 
     def _restore_ccd_settings(self):
@@ -628,7 +730,7 @@ class Cr50Test(FirmwareTest):
         dev signed images completely clears the CCD state.
         """
         try:
-            self._restore_device_images_and_running_cr50_image()
+            self._restore_device_images_and_running_cr50_firmware()
         except Exception as e:
             logging.warning('Issue restoring Cr50 image: %s', str(e))
             raise

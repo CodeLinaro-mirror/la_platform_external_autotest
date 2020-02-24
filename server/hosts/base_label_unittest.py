@@ -3,7 +3,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import mock
 import unittest
 
 import common
@@ -108,6 +107,9 @@ class BaseLabelUnittests(unittest.TestCase):
         self.assertEqual(prefix_tbl, set())
         self.assertEqual(prefix_tbls, set())
 
+    def test_update_for_task(self):
+        self.assertTrue(self.test_base_label.update_for_task(''))
+
 
 class StringPrefixLabelUnittests(unittest.TestCase):
     """Unittest for testing base_label.StringPrefixLabel."""
@@ -137,7 +139,7 @@ class LabelRetrieverUnittests(unittest.TestCase):
     def setUp(self):
         label_list = [TestStringPrefixLabel(), TestBaseLabel()]
         self.retriever = base_label.LabelRetriever(label_list)
-        self.retriever._populate_known_labels(label_list)
+        self.retriever._populate_known_labels(label_list, '')
 
 
     def test_populate_known_labels(self):

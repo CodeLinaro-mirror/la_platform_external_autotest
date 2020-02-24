@@ -17,6 +17,7 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import lsbrelease_utils
 from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros.servo import firmware_programmer
+from autotest_lib.server.cros.faft.utils.config import Config as FAFTConfig
 
 # Time to wait when probing for a usb device, it takes on avg 17 seconds
 # to do a full probe.
@@ -52,13 +53,19 @@ def _extract_image_from_tarball(tarball, dest_dir, image_candidates):
     if not os.path.exists(dest_dir):
         os.mkdir(dest_dir)
 
-    # Try to extract image candidates from tarball
+    # Generate a list of all tarball files
+    tarball_files = server_utils.system_output(
+        ('tar tf %s' % tarball), timeout=120, ignore_status=True).splitlines()
+
+    # Check if image candidates are in the list of tarball files
     for image in image_candidates:
-        status = server_utils.system(
+        if image in tarball_files:
+            # Extract and return the first image candidate found
+            status = server_utils.system(
                 ('tar xf %s -C %s %s' % (tarball, dest_dir, image)),
-                timeout=60, ignore_status=True)
-        if status == 0:
-            return image
+                timeout=120, ignore_status=True)
+            if status == 0:
+                return image
     return None
 
 
@@ -1203,6 +1210,13 @@ class Servo(object):
 
         @return: Path to extracted EC image.
         """
+
+        # Ignore extracting EC image and re-programming if not a Chrome EC
+        chrome_ec = FAFTConfig(board).chrome_ec
+        if not chrome_ec:
+            logging.info('Not a Chrome EC, ignore re-programming it')
+            return None
+
         # Best effort; try to retrieve the EC board from the version as
         # reported by the EC.
         ec_board = None
@@ -1224,12 +1238,12 @@ class Servo(object):
         ec_image = _extract_image_from_tarball(tarball_path, dest_dir,
                                                ec_image_candidates)
 
-        # Check if EC image was found and return path or None
+        # Check if EC image was found and return path or raise error
         if ec_image:
             return os.path.join(dest_dir, ec_image)
         else:
-            logging.info('Not a Chrome EC, ignore re-programming it')
-            return None
+            raise error.TestError('Failed to extract EC image from %s',
+                                  tarball_path)
 
 
     def extract_bios_image(self, board, model, tarball_path):

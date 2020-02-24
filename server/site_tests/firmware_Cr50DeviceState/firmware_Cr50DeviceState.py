@@ -103,6 +103,13 @@ class firmware_Cr50DeviceState(Cr50Test):
     INCREASE = '+'
     DS_RESUME = 'DS'
 
+    MEM_SLEEP_PATH = '/sys/power/mem_sleep'
+    MEM_SLEEP_S0IX = 'echo %s > %s ; sleep 1' % ('s2idle', MEM_SLEEP_PATH)
+    MEM_SLEEP_S3 = 'echo %s > %s ; sleep 1' % ('deep', MEM_SLEEP_PATH)
+    POWER_STATE_PATH = '/sys/power/state'
+    POWER_STATE_S0IX = 'echo %s > %s &' % ('freeze', POWER_STATE_PATH)
+    POWER_STATE_S3 = 'echo %s > %s &' % ('mem', POWER_STATE_PATH)
+
 
     def initialize(self, host, cmdline_args, full_args):
         super(firmware_Cr50DeviceState, self).initialize(host, cmdline_args,
@@ -110,6 +117,23 @@ class firmware_Cr50DeviceState(Cr50Test):
         # Don't bother if there is no Chrome EC or if EC hibernate doesn't work.
         if not self.check_ec_capability():
             raise error.TestNAError("Nothing needs to be tested on this device")
+
+        self.generate_suspend_commands()
+
+
+    def generate_suspend_commands(self):
+        """Generate the S3 and S0ix suspend commands"""
+        s0ix_cmds = []
+        s3_cmds = []
+        if self.host.path_exists(self.MEM_SLEEP_PATH):
+            s0ix_cmds.append(self.MEM_SLEEP_S0IX)
+            s3_cmds.append(self.MEM_SLEEP_S3)
+        s0ix_cmds.append(self.POWER_STATE_S0IX)
+        s3_cmds.append(self.POWER_STATE_S3)
+        self._s0ix_cmds = '; '.join(s0ix_cmds)
+        self._s3_cmds = '; '.join(s3_cmds)
+        logging.info('S0ix cmd: %r', self._s0ix_cmds)
+        logging.info('S3 cmd: %r', self._s3_cmds)
 
 
     def log_sleep_debug_information(self):
@@ -335,7 +359,9 @@ class firmware_Cr50DeviceState(Cr50Test):
 
     def ap_is_on_after_power_button_press(self):
         """Returns True if the AP is on after pressing the power button"""
-        self.servo.power_short_press()
+        # TODO (mruthven): use self.servo.power_short_press() once kukui power
+        # button issues are figured out.
+        self.servo.power_key(1)
         # Give the AP some time to turn on
         time.sleep(self.cr50.SHORT_WAIT)
         return self.cr50.ap_is_on()
@@ -358,9 +384,9 @@ class firmware_Cr50DeviceState(Cr50Test):
             self.trigger_s0()
         else:
             if state == 'S0ix':
-                full_command = 'echo freeze > /sys/power/state &'
+                full_command = self._s0ix_cmds
             elif state == 'S3':
-                full_command = 'echo mem > /sys/power/state &'
+                full_command = self._s3_cmds
             elif state == 'G3':
                 full_command = 'poweroff'
             self.faft_client.system.run_shell_command(full_command)

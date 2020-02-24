@@ -13,7 +13,7 @@ import time
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils
-
+from autotest_lib.client.cros.update_engine import update_engine_event
 
 _DEFAULT_RUN = utils.run
 _DEFAULT_COPY = shutil.copy
@@ -352,7 +352,7 @@ class UpdateEngineUtil(object):
                                        files[1])).stdout
 
 
-    def _create_custom_lsb_release(self, update_url, build='0.0.0.0'):
+    def _create_custom_lsb_release(self, update_url, build='0.0.0.0', **kwargs):
         """
         Create a custom lsb-release file.
 
@@ -363,8 +363,15 @@ class UpdateEngineUtil(object):
         @param update_url: String of url to use for update check.
         @param build: String of the build number to use. Represents the
                       Chrome OS build this device thinks it is on.
+        @param kwargs: A dictionary of key/values to be made into a query string
+                       and appended to the update_url
 
         """
+        # TODO(ahassani): This is quite fragile as the given URL can already
+        # have a search query. We need to unpack the URL and update the search
+        # query portion of it with kwargs.
+        update_url = (update_url + '?' + '&'.join('%s=%s' % (k, v)
+                                                  for k, v in kwargs.items()))
         self._run('mkdir %s' % os.path.dirname(self._CUSTOM_LSB_RELEASE),
                   ignore_status=True)
         self._run('touch %s' % self._CUSTOM_LSB_RELEASE)
@@ -459,3 +466,34 @@ class UpdateEngineUtil(object):
           return None
         else:
           return targets[-1].rpartition(err_str)[2]
+
+
+    def _get_latest_initial_request(self):
+        """
+        Return the most recent initial update request.
+
+        AU requests occur in a chain of messages back and forth, e.g. the
+        initial request for an update -> the reply with the update -> the
+        report that install has started -> report that install has finished,
+        etc.  This function finds the first request in the latest such chain.
+
+        This message has no eventtype listed, or is rebooted_after_update
+        type (as an artifact from a previous update since this one).
+        Subsequent messages in the chain have different eventtype values.
+
+        @returns: string of the entire update request or None.
+
+        """
+        requests = self._get_update_requests()
+        if not requests:
+            return None
+
+        MATCH_STR = r'eventtype="(.*?)"'
+        for i in xrange(len(requests) - 1, -1, -1):
+            search = re.search(MATCH_STR, requests[i])
+            if (not search or
+                (search.group(1) ==
+                 update_engine_event.EVENT_TYPE_REBOOTED_AFTER_UPDATE)):
+                return requests[i]
+
+        return None
