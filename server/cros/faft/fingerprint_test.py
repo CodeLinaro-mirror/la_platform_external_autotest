@@ -107,6 +107,12 @@ class FingerprintTest(test.test):
                 _FIRMWARE_VERSION_RW_VERSION: 'nocturne_fp_v2.2.191-1d529566e',
                 _FIRMWARE_VERSION_KEY_ID: '6f38c866182bd9bf7a4462c06ac04fa6a0074351',
             },
+            'nocturne_fp_v2.0.3266-99b5e2c98.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '73d822071518cf1b6e705d9c5903c2bcf37bae536784b275b96d916c44d3b6b7',
+                _FIRMWARE_VERSION_RO_VERSION: 'nocturne_fp_v2.2.64-58cf5974e',
+                _FIRMWARE_VERSION_RW_VERSION: 'nocturne_fp_v2.0.3266-99b5e2c98',
+                _FIRMWARE_VERSION_KEY_ID: '6f38c866182bd9bf7a4462c06ac04fa6a0074351',
+            },
         },
         _FP_BOARD_NAME_NAMI: {
             'nami_fp_v2.2.144-7a08e07eb.bin': {
@@ -121,12 +127,24 @@ class FingerprintTest(test.test):
                 _FIRMWARE_VERSION_RW_VERSION: 'nami_fp_v2.2.191-1d529566e',
                 _FIRMWARE_VERSION_KEY_ID: '35486c0090ca390408f1fbbf2a182966084fe2f8',
             },
+            'nami_fp_v2.0.3266-99b5e2c98.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '115bca7045428ce6639b41cc0fdc13d1ca414f6e76842e805a9fbb798a9cd7ad',
+                _FIRMWARE_VERSION_RO_VERSION: 'nami_fp_v2.2.144-7a08e07eb',
+                _FIRMWARE_VERSION_RW_VERSION: 'nami_fp_v2.0.3266-99b5e2c98',
+                _FIRMWARE_VERSION_KEY_ID: '35486c0090ca390408f1fbbf2a182966084fe2f8',
+            },
         },
         _FP_BOARD_NAME_DARTMONKEY: {
             'dartmonkey_v2.0.2887-311310808.bin': {
                 _FIRMWARE_VERSION_SHA256SUM: '90716b73d1db5a1b6108530be1d11addf3b13e643bc6f96d417cbce383f3cb18',
                 _FIRMWARE_VERSION_RO_VERSION: 'dartmonkey_v2.0.2887-311310808',
                 _FIRMWARE_VERSION_RW_VERSION: 'dartmonkey_v2.0.2887-311310808',
+                _FIRMWARE_VERSION_KEY_ID: '257a0aa3ac9e81aa4bc3aabdb6d3d079117c5799',
+            },
+            'dartmonkey_v2.0.3266-99b5e2c98.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: 'ac1c74b5d2676923f041ee1a27bf5b9892fab1d4f82fe924550a9b55917606ae',
+                _FIRMWARE_VERSION_RO_VERSION: 'dartmonkey_v2.0.2887-311310808',
+                _FIRMWARE_VERSION_RW_VERSION: 'dartmonkey_v2.0.3266-99b5e2c98',
                 _FIRMWARE_VERSION_KEY_ID: '257a0aa3ac9e81aa4bc3aabdb6d3d079117c5799',
             }
         }
