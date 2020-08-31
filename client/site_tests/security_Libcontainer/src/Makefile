@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 PKG_CONFIG ?= pkg-config
+BASE_VER = $(shell cat $(SYSROOT)/usr/share/libchrome/BASE_VER)
 DEP_LIBS = libchrome-$(BASE_VER) libcontainer libminijail
 CXXFLAGS += $(shell $(PKG_CONFIG) --cflags $(DEP_LIBS))
 CXXFLAGS += -std=gnu++14 -Werror -Wall

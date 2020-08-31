@@ -114,11 +114,16 @@ class firmware_Cr50CCDServoCap(Cr50Test):
 
         self.check_servo_monitor()
         # Make sure cr50 is open with testlab enabled.
-        self.fast_open(enable_testlab=True)
+        self.fast_ccd_open(enable_testlab=True)
         if not self.cr50.testlab_is_on():
             raise error.TestNAError('Cr50 testlab mode needs to be enabled')
         logging.info('Cr50 is %s', self.servo.get('cr50_ccd_level'))
         self.cr50.set_cap('UartGscTxECRx', 'Always')
+        self.ec_efs_support = (
+                self.cr50.uses_board_property('BOARD_EC_CR50_COMM_SUPPORT'))
+        # Check EC uart if servo has ccd controls and the board has an EC.
+        self.check_ec_uart = (self.servo.has_control('ccd_cr50.ec_board') and
+                              self.check_ec_capability(suppress_warning=True))
 
 
     def cleanup(self):
@@ -161,6 +166,17 @@ class firmware_Cr50CCDServoCap(Cr50Test):
         return self.state_matches(ccdstate, state_name, self.ON)
 
 
+    def ccd_ec_uart_works(self):
+        """Returns True if the CCD ec uart works."""
+        try:
+            self.servo.get('ccd_cr50.ec_board')
+            logging.info('ccd ec console is responsive')
+            return True
+        except:
+            logging.info('ccd ec console is unresponsive')
+            return False
+
+
     def check_state_flags(self, ccdstate):
         """Check the state flags against the reset of the device state
 
@@ -170,10 +186,20 @@ class firmware_Cr50CCDServoCap(Cr50Test):
         flags = ccdstate['State flags']
         ap_uart_enabled = 'UARTAP' in flags
         ec_uart_enabled = 'UARTEC' in flags
-        output_enabled = '+TX' in flags
-        ccd_enabled = ap_uart_enabled or ec_uart_enabled or output_enabled
+        ap_uart_tx_enabled = 'UARTAP+TX' in flags
+        ec_uart_tx_enabled = 'UARTEC+TX' in flags
+        ec_usb_tx_enabled = 'USBEC+TX' in flags
+
+        ccd_ec_uart_enabled = ec_uart_tx_enabled and ec_usb_tx_enabled
+        ccd_enabled = ap_uart_enabled or ec_usb_tx_enabled
+        output_enabled = ap_uart_tx_enabled
+        if not self.ec_efs_support:
+            output_enabled |= ec_uart_tx_enabled
+            ccd_enabled |= ec_uart_enabled
+
         ccd_ext_is_enabled = ccdstate['CCD EXT'] == 'enabled'
         mismatch = []
+        logging.info('checking state flags')
         if ccd_enabled and not ccd_ext_is_enabled:
             mismatch.append('CCD functionality enabled without CCD EXT')
         if ccd_ext_is_enabled:
@@ -183,6 +209,14 @@ class firmware_Cr50CCDServoCap(Cr50Test):
                 mismatch.append('AP UART enabled without AP UART on')
             if ec_uart_enabled != self.state_is_on(ccdstate, 'EC'):
                 mismatch.append('EC UART enabled without EC on')
+            if self.check_ec_uart:
+                ccd_ec_uart_works = self.ccd_ec_uart_works()
+                if (self.servo.get('ec_uart_en') == 'off'
+                    and ccd_ec_uart_enabled and not ccd_ec_uart_works):
+                    mismatch.append('ccd ec uart does not work with EC+TX '
+                                    'enabled.')
+                if not ccd_ec_uart_enabled and ccd_ec_uart_works:
+                    mismatch.append('ccd ec uart works with EC+TX disabled.')
         return mismatch
 
 
@@ -197,7 +231,7 @@ class firmware_Cr50CCDServoCap(Cr50Test):
             TestError if any of the states are not correct
         """
         if run not in self.EXPECTED_RESULTS:
-            raise error.TestError('Add results for %s to EXPECTED_RESULTS', run)
+            raise error.TestError('Add results for %s to EXPECTED_RESULTS' % run)
         expected_states = self.EXPECTED_RESULTS[run]
 
         # Wait a short time for the ccd state to settle

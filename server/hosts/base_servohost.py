@@ -12,7 +12,6 @@
 import httplib
 import logging
 import socket
-import traceback
 import xmlrpclib
 
 from autotest_lib.client.bin import utils
@@ -21,7 +20,6 @@ from autotest_lib.client.common_lib import hosts
 from autotest_lib.client.common_lib import lsbrelease_utils
 from autotest_lib.client.common_lib.cros import dev_server
 from autotest_lib.client.cros import constants as client_constants
-from autotest_lib.server import afe_utils
 from autotest_lib.server import site_utils as server_utils
 from autotest_lib.server.cros import autoupdater
 from autotest_lib.server.hosts import ssh_host
@@ -80,6 +78,7 @@ class BaseServoHost(ssh_host.SSHHost):
 
         self._is_labstation = None
         self._dut_host_info = None
+        self._dut_hostname = None
 
 
     def get_board(self):
@@ -92,9 +91,34 @@ class BaseServoHost(ssh_host.SSHHost):
         return lsbrelease_utils.get_current_board(lsb_release_content=output)
 
 
-    def set_dut_host_info(self, hi):
-        logging.info('setting dut_host_info field to (%s)', hi)
-        self._dut_host_info = hi
+    def set_dut_host_info(self, dut_host_info):
+        """
+        @param dut_host_info: A HostInfo object.
+        """
+        logging.info('setting dut_host_info field to (%s)', dut_host_info)
+        self._dut_host_info = dut_host_info
+
+
+    def get_dut_host_info(self):
+        """
+        @return A HostInfo object.
+        """
+        return self._dut_host_info
+
+
+    def set_dut_hostname(self, dut_hostname):
+        """
+        @param dut_hostname: hostname of the DUT that connected to this servo.
+        """
+        logging.info('setting dut_hostname as (%s)', dut_hostname)
+        self._dut_hostname = dut_hostname
+
+
+    def get_dut_hostname(self):
+        """
+        @returns hostname of the DUT that connected to this servo.
+        """
+        return self._dut_hostname
 
 
     def is_labstation(self):
@@ -109,16 +133,32 @@ class BaseServoHost(ssh_host.SSHHost):
         return self._is_labstation
 
 
-    def _get_release_version(self):
+    def _get_lsb_release_content(self):
+        """Return the content of lsb-release file of host."""
+        return self.run(
+            'cat "%s"' % client_constants.LSB_RELEASE).stdout.strip()
+
+
+    def get_release_version(self):
         """Get the value of attribute CHROMEOS_RELEASE_VERSION from lsb-release.
 
         @returns The version string in lsb-release, under attribute
-                 CHROMEOS_RELEASE_VERSION.
+                 CHROMEOS_RELEASE_VERSION(e.g. 12900.0.0). None on fail.
         """
-        lsb_release_content = self.run(
-            'cat "%s"' % client_constants.LSB_RELEASE).stdout.strip()
         return lsbrelease_utils.get_chromeos_release_version(
-            lsb_release_content=lsb_release_content)
+            lsb_release_content=self._get_lsb_release_content()
+        )
+
+
+    def get_full_release_path(self):
+        """Get full release path from servohost as string.
+
+        @returns full release path as a string
+                 (e.g. fizz-labstation-release/R82.12900.0.0). None on fail.
+        """
+        return lsbrelease_utils.get_chromeos_release_builder_path(
+            lsb_release_content=self._get_lsb_release_content()
+        )
 
 
     def _check_update_status(self):
@@ -164,7 +204,7 @@ class BaseServoHost(ssh_host.SSHHost):
                                           *args, **dargs)
 
 
-    def update_image(self, wait_for_update=False):
+    def update_image(self, wait_for_update=False, stable_version=None):
         """Update the image on the servo host, if needed.
 
         This method recognizes the following cases:
@@ -180,6 +220,8 @@ class BaseServoHost(ssh_host.SSHHost):
         @param wait_for_update If an update needs to be applied and
             this is true, then don't return until the update is
             downloaded and finalized, and the host rebooted.
+        @stable_version the target build number.(e.g. R82-12900.0.0)
+
         @raises dev_server.DevServerException: If all the devservers are down.
         @raises site_utils.ParseBuildNameException: If the devserver returns
             an invalid build name.
@@ -199,22 +241,20 @@ class BaseServoHost(ssh_host.SSHHost):
                          self.hostname)
             return
 
+        if not stable_version:
+            logging.debug("BaseServoHost::update_image attempting to get"
+                          " servo cros stable version")
+            try:
+                stable_version = (self.get_dut_host_info().
+                                  servo_cros_stable_version)
+            except AttributeError:
+                logging.error("BaseServoHost::update_image failed to get"
+                              " servo cros stable version.")
 
-        # NOTE: we can't just use getattr because servo_cros_stable_version is a property
-        servo_version_from_hi = None
-        logging.debug("BaseServoHost::update_image attempted to get servo cros stable version")
-        try:
-            servo_version_from_hi = self._dut_host_info.servo_cros_stable_version
-        except Exception:
-            logging.error("BaseServoHost::update_image failed to get servo cros stable version (%s)", traceback.format_exc())
-
-        target_build = afe_utils.get_stable_servo_cros_image_name_v2(
-            servo_version_from_hi=servo_version_from_hi,
-            board=self.get_board(),
-        )
+        target_build = "%s-release/%s" % (self.get_board(), stable_version)
         target_build_number = server_utils.ParseBuildName(
             target_build)[3]
-        current_build_number = self._get_release_version()
+        current_build_number = self.get_release_version()
 
         if current_build_number == target_build_number:
             logging.info('servo host %s does not require an update.',
@@ -301,7 +341,7 @@ class BaseServoHost(ssh_host.SSHHost):
     def _servo_host_reboot(self):
         """Reboot this servo host because a reboot is requested."""
         logging.info('Rebooting servo host %s from build %s', self.hostname,
-                     self._get_release_version())
+                     self.get_release_version())
         # Tell the reboot() call not to wait for completion.
         # Otherwise, the call will log reboot failure if servo does
         # not come back.  The logged reboot failure will lead to
@@ -327,7 +367,7 @@ class BaseServoHost(ssh_host.SSHHost):
                 self.hostname)
         if self.wait_up(timeout=self.REBOOT_TIMEOUT):
             logging.info('servo host %s back from reboot, with build %s',
-                         self.hostname, self._get_release_version())
+                         self.hostname, self.get_release_version())
         else:
             raise error.AutoservHostError(
                 'servo host %s failed to come back from reboot.' %
@@ -433,10 +473,19 @@ class BaseServoHost(ssh_host.SSHHost):
                 when servo host is not 'localhost'.
 
         """
-        run_args = {'command': command, 'timeout': timeout,
-                    'ignore_status': ignore_status, 'stdout_tee': stdout_tee,
-                    'stderr_tee': stderr_tee, 'stdin': stdin,
-                    'verbose': verbose, 'args': args}
+        run_args = {
+            'command'             : command,
+            'timeout'             : timeout,
+            'ignore_status'       : ignore_status,
+            'stdout_tee'          : stdout_tee,
+            'stderr_tee'          : stderr_tee,
+            # connect_timeout     n/a for localhost
+            # options             n/a for localhost
+            # ssh_failure_retry_ok n/a for localhost
+            'stdin'               : stdin,
+            'verbose'             : verbose,
+            'args'                : args,
+        }
         if self.is_localhost():
             if self._sudo_required:
                 run_args['command'] = 'sudo -n sh -c "%s"' % utils.sh_escape(
@@ -450,4 +499,5 @@ class BaseServoHost(ssh_host.SSHHost):
         else:
             run_args['connect_timeout'] = connect_timeout
             run_args['options'] = options
+            run_args['ssh_failure_retry_ok'] = ssh_failure_retry_ok
             return super(BaseServoHost, self).run(**run_args)

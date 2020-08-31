@@ -8,13 +8,17 @@ These will be exposed via an xmlrpc server running on the DUT.
 @note: When adding categories, please also update server/cros/faft/rpc_proxy.pyi
 """
 import httplib
+import logging
 import os
+import signal
 import sys
 import tempfile
 import traceback
 import xmlrpclib
 
+from autotest_lib.client.common_lib import lsbrelease_utils
 from autotest_lib.client.common_lib.cros import cros_config
+from autotest_lib.client.cros import xmlrpc_server
 from autotest_lib.client.cros.faft.utils import (
         cgpt_handler,
         os_interface,
@@ -27,14 +31,14 @@ from autotest_lib.client.cros.faft.utils import (
 )
 
 
-class RPCRouter(object):
+class FaftXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
     """
     A class which routes RPC methods to the proper servicers.
 
     Firmware tests are able to call an RPC method via:
-        FAFTClient.[category].[method_name](params)
+        <FAFTClient>.[category].[method_name](params)
     When XML-RPC is being used, the RPC server routes the called method to:
-        RPCHandler._dispatch('[category].[method]', params)
+        <XmlRpcDelegate>._dispatch('[category].[method_name]', params)
     The method is then dispatched to a Servicer class.
     """
 
@@ -43,6 +47,7 @@ class RPCRouter(object):
 
         @type os_if: os_interface.OSInterface
         """
+        self._ready = False
         self.bios = BiosServicer(os_if)
         self.cgpt = CgptServicer(os_if)
         self.ec = EcServicer(os_if)
@@ -67,7 +72,37 @@ class RPCRouter(object):
 
         self._os_if = os_if
 
-    def _report_error(self, fault_code, message, exc_info=None):
+    def __enter__(self):
+        """Enter the the delegate context (when XmlRpcServer.run() starts).
+
+        The server is marked ready here, rather than immediately when created.
+        """
+        logging.debug("%s: Serving FAFT functions", self.__class__.__name__)
+        self._ready = True
+
+    def __exit__(self, exception, value, traceback):
+        """Exit the delegate context (when XmlRpcServer.run() finishes).
+
+        The server is marked not ready, to prevent the client from using
+        the wrong server when quitting one instance and starting another.
+        """
+        self._ready = False
+        logging.debug("%s: Done.", self.__class__.__name__)
+
+    def quit(self):
+        """Exit the xmlrpc server."""
+        self._ready = False
+        os.kill(os.getpid(), signal.SIGINT)
+
+    def ready(self):
+        """Is the RPC server ready to serve calls in a useful manner?
+
+        The server is only marked ready during the XmlRpcServer.run() loop.
+        This method suppresses the extra logging of ready() from the superclass.
+        """
+        return self._ready
+
+    def _report_error(self, fault_code, message, exc_info=False):
         """Raise the given RPC error text, including information about last
         exception from sys.exc_info().  The log file gets the traceback in text;
         the raised exception keeps the old traceback (but not in text).
@@ -79,7 +114,7 @@ class RPCRouter(object):
 
         @param fault_code: the status code to use
         @param message: the string message to include before exception text
-        @param exc_info: the tuple from sys.exc_info()
+        @param exc_info: true to use the tuple from sys.exc_info()
         @return the exception to raise
 
         @type fault_code: int
@@ -96,10 +131,11 @@ class RPCRouter(object):
                         traceback.format_exception(exc_class, exc, tb))
                 self._os_if.log('Error: %s.\n%s' % (message, tb_str.rstrip()))
 
-                exc_str = ''.join(
-                        traceback.format_exception_only(exc_class, exc))
-                exc = xmlrpclib.Fault(
-                        fault_code, '%s. %s' % (message, exc_str.rstrip()))
+                if not isinstance(exc, xmlrpclib.Fault):
+                    exc_str = ''.join(
+                            traceback.format_exception_only(exc_class, exc))
+                    exc = xmlrpclib.Fault(
+                            fault_code, '%s. %s' % (message, exc_str.rstrip()))
                 raise exc, None, tb
             finally:
                 del exc_info
@@ -124,20 +160,12 @@ class RPCRouter(object):
         self._os_if.log('Called: %s%s' % (called_method, params))
 
         name_pieces = called_method.split('.')
-        num_pieces = len(name_pieces)
 
-        if num_pieces < 1:
+        if not name_pieces:
             raise self._report_error(
                     httplib.BAD_REQUEST,
                     'RPC request is invalid (completely empty): "%s"' %
                     called_method)
-
-        if num_pieces < 2:
-            # must be category.func (maybe with .__str__)
-            raise self._report_error(
-                    httplib.BAD_REQUEST,
-                    'RPC request is invalid (must have category.method format):'
-                    ' "%s"' % called_method)
 
         method_name = name_pieces.pop()
         category = '.'.join(name_pieces)
@@ -148,15 +176,15 @@ class RPCRouter(object):
             # Forbid early, to prevent seeing which methods exist.
             raise self._report_error(
                     httplib.FORBIDDEN,
-                    'RPC method name is private: %s.[%s]' %
-                    (category, method_name))
+                    'RPC method name is private: %s%s[%s]' %
+                    (category, '.' if category else '', method_name))
 
-        if not method_name:
+        elif not method_name:
             # anything.()
             raise self._report_error(
                     httplib.BAD_REQUEST,
-                    'RPC method name is empty: %s.[%s]' %
-                    (category, method_name))
+                    'RPC method name is empty: %s%s[%s]' %
+                    (category, '.' if category else '', method_name))
 
         if category in self._rpc_servicers:
             # system.func()
@@ -175,11 +203,12 @@ class RPCRouter(object):
                     (category, method_name))
 
         else:
-            # .invalid()
-            raise self._report_error(
-                    httplib.BAD_REQUEST,
-                    'RPC request is invalid (empty category name): [%s].%s' %
-                    (category, method_name))
+            # .func() or .invalid()
+            holder = self
+            if not hasattr(holder, method_name):
+                raise self._report_error(
+                        httplib.NOT_FOUND,
+                        'RPC method not found: [%s]' % method_name)
 
         try:
             method = getattr(holder, method_name)
@@ -362,7 +391,7 @@ class BiosServicer(object):
         self._bios_handler.write_whole()
 
     def strip_modified_fwids(self):
-        """Strip any trailing suffixes (from modify_fwids) out of the FWIDs.
+        """Strip trailing suffixes out of the FWIDs (see modify_image_fwids).
 
         @return: a dict of any fwids that were adjusted, by section (ro, a, b)
         @rtype: dict
@@ -401,6 +430,16 @@ class BiosServicer(object):
         # Use the real handler, to avoid .init() raising an exception
         return self._real_bios_handler.is_available()
 
+    def get_write_cmd(self, image=None):
+        """Get the command needed to write the whole image to the device.
+
+        @param image: the filename (empty to use current handler data)
+        """
+        if image:
+            # Don't bother loading the usual image, since it's overridden.
+            return self._real_bios_handler.get_write_cmd(image)
+        else:
+            return self._bios_handler.get_write_cmd()
 
 class CgptServicer(object):
     """Class to service all CGPT RPCs"""
@@ -530,6 +569,14 @@ class EcServicer(object):
         else:
             self._ec_handler.disable_write_protect()
 
+    def get_write_protect_status(self):
+        """Get a dict describing the status of the write protection
+
+        @return: {'enabled': True/False, 'start': '0x0', 'length': '0x0', ...}
+        @rtype: dict
+        """
+        return self._ec_handler.get_write_protect_status()
+
     def is_efs(self):
         """Return True if the EC supports EFS."""
         return self._ec_handler.has_section_body('rw_b')
@@ -544,8 +591,19 @@ class EcServicer(object):
                 'ectool reboot_ec cold switch-slot', modifies_device=True)
 
     def strip_modified_fwids(self):
-        """Strip any trailing suffixes (from modify_fwids) out of the FWIDs."""
+        """Strip trailing suffixes out of the FWIDs (see modify_image_fwids)."""
         return self._ec_handler.strip_modified_fwids()
+
+    def get_write_cmd(self, image=None):
+        """Get the command needed to write the whole image to the device.
+
+        @param image: the filename (empty to use current handler data)
+        """
+        if image:
+            # Don't bother loading the usual image, since it's overridden.
+            return self._real_ec_handler.get_write_cmd(image)
+        else:
+            return self._ec_handler.get_write_cmd()
 
 
 class KernelServicer(object):
@@ -754,12 +812,7 @@ class SystemServicer(object):
 
         @return: A string of the platform name.
         """
-        platform = cros_config.call_cros_config_get_output(
-                '/identity platform-name',
-                self._os_if.run_shell_command_get_result)
-        if not platform:
-            raise Exception('Failed getting platform name from cros_config')
-        return platform
+        return lsbrelease_utils.get_current_board()
 
     def get_model_name(self):
         """Get the model name of the current system.
@@ -843,6 +896,20 @@ class SystemServicer(object):
         @param value: True to enable, False to disable.
         """
         self._os_if.cs.dev_boot_usb = 1 if value else 0
+
+    def get_dev_default_boot(self):
+        """Get dev_default_boot value, which selects the default boot device.
+
+        @return: 'disk' or 'usb' or 'legacy'
+        """
+        return self._os_if.cs.dev_default_boot
+
+    def set_dev_default_boot(self, device='disk'):
+        """Set dev_default_boot value, which selects the default boot device.
+
+        @param device: 'disk' or 'usb' or 'legacy' (default: 'disk')
+        """
+        self._os_if.cs.dev_default_boot = device
 
     def is_removable_device_boot(self):
         """Check the current boot device is removable.
@@ -968,17 +1035,17 @@ class UpdaterServicer(object):
         """Retrieve shellball's RW or RO fwid."""
         return self._updater.get_section_fwid(target, section)
 
-    def get_all_fwids(self, target='bios'):
-        """Retrieve shellball's RW and/or RO fwids for all sections."""
-        return self._updater.get_all_fwids(target)
+    def get_device_fwids(self, target='bios'):
+        """Retrieve flash device's fwids for the target."""
+        return self._updater.get_device_fwids(target)
 
-    def get_all_installed_fwids(self, target='bios', filename=None):
-        """Retrieve installed (possibly emulated) fwids for the target."""
-        return self._updater.get_all_installed_fwids(target, filename)
+    def get_image_fwids(self, target='bios', filename=None):
+        """Retrieve image file's fwids for the target."""
+        return self._updater.get_image_fwids(target, filename)
 
-    def modify_fwids(self, target='bios', sections=None):
+    def modify_image_fwids(self, target='bios', sections=None):
         """Modify the fwid in the image, but don't flash it."""
-        return self._updater.modify_fwids(target, sections)
+        return self._updater.modify_image_fwids(target, sections)
 
     def modify_ecid_and_flash_to_bios(self):
         """Modify ecid, put it to AP firmware, and flash it to the system."""
@@ -1026,6 +1093,19 @@ class UpdaterServicer(object):
     def reload_images(self):
         """Reload handlers from the on-disk images, in case they've changed."""
         self._updater.reload_images()
+
+    def get_firmwareupdate_command(self, mode, append=None, options=()):
+        """Get the command needed to run updater with the given options.
+
+        The client should run it via ssh, in case the update resets USB network.
+
+        @param mode: mode for the updater
+        @param append: extra string appended to shellball filename to run
+        @param options: options for chromeos-firmwareupdate
+        @return: returncode of the updater
+        @rtype: str
+        """
+        return self._updater.get_firmwareupdate_command(mode, append, options)
 
     def run_firmwareupdate(self, mode, append=None, options=()):
         """Run updater with the given options

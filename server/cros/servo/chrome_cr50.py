@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import functools
 import logging
 import pprint
@@ -12,6 +14,7 @@ from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import cr50_utils
 from autotest_lib.server.cros.servo import chrome_ec
+from autotest_lib.server.cros.servo import servo
 
 
 def dts_control_command(func):
@@ -66,10 +69,10 @@ class ChromeCr50(chrome_ec.ChromeConsole):
     # Use the first group from ACTIVE_VERSION to match the active board id
     # partition.
     BID_ERROR = 'read_board_id: failed'
-    BID_FORMAT = ':\s+[a-f0-9:]+ '
+    BID_FORMAT = ':\s+[a-f0-9:]{26} '
     ACTIVE_BID = r'%s.*(\1%s|%s.*>)' % (ACTIVE_VERSION, BID_FORMAT,
             BID_ERROR)
-    WAKE_CHAR = '\n\n'
+    WAKE_CHAR = '\n\n\n\n'
     WAKE_RESPONSE = ['(>|Console is enabled)']
     START_UNLOCK_TIMEOUT = 20
     GETTIME = ['= (\S+)']
@@ -86,7 +89,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
     CAP_IS_ACCESSIBLE = 0
     CAP_SETTING = 1
     CAP_REQ = 2
-    GET_CAP_TRIES = 5
+    GET_CAP_TRIES = 10
     # Regex to match the valid capability settings.
     CAP_STATES = '(Always|Default|IfOpened|UnlessLocked)'
     # List of all cr50 ccd capabilities. Same order of 'ccd' output
@@ -134,6 +137,10 @@ class ChromeCr50(chrome_ec.ChromeConsole):
            'BOARD_CLOSED_LOOP_RESET'     : 1 << 18,
            'BOARD_NO_INA_SUPPORT'        : 1 << 19,
            'BOARD_ALLOW_CHANGE_TPM_MODE' : 1 << 20,
+           'BOARD_EC_CR50_COMM_SUPPORT'  : 1 << 21,
+           'BOARD_CCD_REC_LID_PIN_DIOA1' : 0x01 << 22,
+           'BOARD_CCD_REC_LID_PIN_DIOA9' : 0x02 << 22,
+           'BOARD_CCD_REC_LID_PIN_DIOA12': 0x03 << 22,
     }
 
     # CR50 reset flags as defined in platform ec_commands.h. These are only the
@@ -165,8 +172,16 @@ class ChromeCr50(chrome_ec.ChromeConsole):
 
     def wake_cr50(self):
         """Wake up cr50 by sending some linebreaks and wait for the response"""
-        logging.debug(super(ChromeCr50, self).send_command_get_output(
-                self.WAKE_CHAR, self.WAKE_RESPONSE))
+        for i in range(self.MAX_RETRY_COUNT):
+            try:
+                rv = super(ChromeCr50, self).send_command_get_output(
+                        self.WAKE_CHAR, self.WAKE_RESPONSE)
+                logging.debug('wake result %r', rv)
+                return
+            except servo.ResponsiveConsoleError as e:
+                logging.info("Console responsive, but couldn't match wake "
+                             "response %s", e)
+        raise servo.ResponsiveConsoleError('Unable to wake cr50')
 
 
     def send_command(self, commands):
@@ -307,7 +322,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
             if matched_output:
                 break
             logging.info('try %d: could not match ccd output %s', i, rv)
-          except Exception, e:
+          except Exception as e:
             logging.info('try %d got error %s', i, str(e))
 
         self._servo.set_nocheck('cr50_uart_timeout', original_timeout)
@@ -410,7 +425,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
 
 
     def send_command_retry_get_output(self, command, regexp_list, safe=False,
-                                      compare_output=False):
+                                      compare_output=False, retries=MAX_RETRY_COUNT):
         """Retry the command 5 times if you get a timeout or drop some output
 
 
@@ -424,7 +439,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
                         self.send_command_get_output)
         err = 'no consistent output' if compare_output else 'unknown'
         past_rv = []
-        for i in range(self.MAX_RETRY_COUNT):
+        for i in range(retries):
             try:
                 rv = send_command(command, regexp_list)
                 if not compare_output or rv in past_rv:
@@ -432,13 +447,14 @@ class ChromeCr50(chrome_ec.ChromeConsole):
                 if past_rv:
                     logging.debug('%d %s not in %s', i, rv, past_rv)
                 past_rv.append(rv)
-            except Exception, e:
-                err = str(e)
-                logging.info('attempt %d %r: %s', i, command, str(e))
+            except Exception as e:
+                err = e
+                logging.info('attempt %d %r: %s %s', i, command, type(e),
+                             str(e))
         if compare_output:
             logging.info('No consistent output for %r %s', command,
                          pprint.pformat(past_rv))
-        raise error.TestError('Issue sending %r command: %s' % (command, err))
+        raise error.TestError('Issue sending %r command: %r' % (command, err))
 
 
     def get_deep_sleep_count(self):
@@ -469,7 +485,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         """
         brdprop = self.get_board_properties()
         prop = self.BOARD_PROP[prop_name]
-        return bool(brdprop & prop)
+        return (brdprop & prop) == prop
 
 
     def has_command(self, cmd):
@@ -504,7 +520,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         try:
             self.send_command_get_output(cmd, self.START_STR)
             logging.debug('Detected cr50 reboot')
-        except error.TestFail, e:
+        except error.TestFail as e:
             logging.debug('Failed to detect cr50 reboot')
         # Reset the timeout.
         self._servo.set_nocheck('cr50_uart_timeout', original_timeout)
@@ -603,8 +619,9 @@ class ChromeCr50(chrome_ec.ChromeConsole):
 
     def get_version_info(self, regexp):
         """Get information from the version command"""
-        return self.send_command_retry_get_output('ver', [regexp],
-                                                  safe=True)[0][1::]
+        return self.send_command_retry_get_output('version', [regexp],
+                                                  safe=True,
+                                                  compare_output=True)[0][1::]
 
 
     def get_inactive_version_info(self):
@@ -639,7 +656,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         # still expected on all current non board id locked release images.
         try:
             version_info = self.get_version_info(self.ACTIVE_BID)
-        except error.TestFail, e:
+        except error.TestFail as e:
             logging.info(str(e))
             logging.info('Cannot use the version to get the board id')
             return None
@@ -653,6 +670,12 @@ class ChromeCr50(chrome_ec.ChromeConsole):
     def get_version(self):
         """Get the RW version"""
         return self.get_active_version_info()[1].strip()
+
+
+    def get_full_version(self):
+        """Get the complete RW version string."""
+        _, rw_ver, dbg, ver_str = self.get_active_version_info()
+        return  rw_ver + (dbg if dbg else '') + ver_str
 
 
     def ccd_is_enabled(self):
@@ -788,14 +811,16 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         else:
             self.set_ccd_level('open')
 
+        ap_is_on = self.ap_is_on()
         # Set testlab mode
         rv = self.send_command_get_output('ccd testlab %s' % request_str,
                 ['ccd.*>'])[0]
         if 'Access Denied' in rv:
             raise error.TestFail("'ccd %s' %s" % (request_str, rv))
 
-        # Press the power button once a second for 15 seconds.
-        self.run_pp(self.PP_SHORT)
+        # Press the power button once a second for 15 seconds. If the AP is
+        # currently on, make sure it's on at the end of the open process.
+        self.run_pp(self.PP_SHORT, ensure_ap_on=ap_is_on)
 
         self.set_ccd_level(original_level)
         if request_on != self.testlab_is_on():
@@ -831,7 +856,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         batt_is_disconnected = self.get_batt_pres_state()[1]
         req_pp = self._level_change_req_pp(level)
         has_pp = not self._servo.main_device_is_ccd()
-        dbg_en = 'DBG' in self._servo.get('cr50_version')
+        dbg_en = self.get_active_version_info()[2]
 
         if req_pp and not has_pp:
             raise error.TestError("Can't change privilege level to '%s' "
@@ -853,6 +878,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
                          self.CCD_PASSWORD_RATE_LIMIT)
             time.sleep(self.CCD_PASSWORD_RATE_LIMIT)
 
+        ap_is_on = self.ap_is_on()
         try:
             cmd = 'ccd %s%s' % (level, (' ' + password) if password else '')
             # ccd command outputs on the rbox, ccd, and console channels,
@@ -875,8 +901,10 @@ class ChromeCr50(chrome_ec.ChromeConsole):
 
         # Press the power button once a second, if we need physical presence.
         if req_pp and batt_is_disconnected:
-            # DBG images have shorter unlock processes
-            self.run_pp(self.PP_SHORT if dbg_en else self.PP_LONG)
+            # DBG images have shorter unlock processes. If the AP is currently
+            # on, make sure it's on at the end of the open process.
+            self.run_pp(self.PP_SHORT if dbg_en else self.PP_LONG,
+                        ensure_ap_on=ap_is_on)
 
         if level != self.get_ccd_level():
             raise error.TestFail('Could not set privilege level to %s' % level)
@@ -884,7 +912,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         logging.info('Successfully set CCD privelege level to %s', level)
 
 
-    def run_pp(self, unlock_timeout):
+    def run_pp(self, unlock_timeout, ensure_ap_on=False):
         """Press the power button a for unlock_timeout seconds.
 
         This will press the power button many more times than it needs to be
@@ -900,9 +928,10 @@ class ChromeCr50(chrome_ec.ChromeConsole):
 
         For testlab enable/disable you must press the power button 5 times
         spaced between 100msec and 5 seconds apart.
-        """
-        ap_on_before = self.ap_is_on()
 
+        @param unlock_timeout: time to press the power button in seconds.
+        @param ensure_ap_on: If true, press the power to turn on the AP.
+        """
         end_time = time.time() + unlock_timeout
 
         logging.info('Pressing power button for %ds to unlock the console.',
@@ -917,11 +946,8 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         # If the last power button press left the AP powered off, and it was on
         # before, turn it back on.
         time.sleep(self.faft_config.shutdown)
-        ap_on_after = self.ap_is_on()
-        logging.debug('During run_pp, AP %s -> %s',
-                'on' if ap_on_before else 'off',
-                'on' if ap_on_after else 'off')
-        if ap_on_before and not ap_on_after:
+        if ensure_ap_on and not self.ap_is_on():
+            logging.info('AP is off. Pressing the power button to turn it on')
             self._servo.power_short_press()
             logging.debug('Pressing PP to turn back on')
 
@@ -947,7 +973,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
             self.ccd_disable(raise_error=True)
             self.ccd_enable(raise_error=True)
             rv = True
-        except Exception, e:
+        except Exception as e:
             logging.info(e)
             rv = False
         self._servo.set_dts_mode(dts_start)
@@ -1019,7 +1045,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         """Return a dictionary of the ccdstate once it's done debouncing"""
         for i in range(self.CCDSTATE_MAX_RETRY_COUNT):
             rv = self.send_command_retry_get_output('ccdstate',
-                    ['ccdstate(.*)>'], safe=True)[0][0]
+                    ['ccdstate(.*)>'], safe=True, compare_output=True)[0][0]
 
             # Look for a line like 'AP: on' or 'AP: off'. 'debouncing' or
             # 'unknown' may appear transiently. 'debouncing' should transition
@@ -1049,7 +1075,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         elif ap_state == 'off':
             return False
         else:
-            raise error.TestFail('Read unusable AP state from ccdstate: "%s"',
+            raise error.TestFail('Read unusable AP state from ccdstate: %r' %
                                  ap_state)
 
 
@@ -1138,3 +1164,42 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         reset_cause = self.get_reset_cause()
         reset_flag = self.RESET_FLAGS[reset_type]
         return bool(reset_cause & reset_flag)
+
+
+    def get_devid(self):
+        """Returns the cr50 serial number."""
+        return self.send_command_retry_get_output('sysinfo',
+                ['DEV_ID:\s+(0x[0-9a-f]{8} 0x[0-9a-f]{8})'])[0][1]
+
+
+    def get_serial(self):
+        """Returns the cr50 serial number."""
+        serial = self.get_devid().replace('0x', '').replace(' ', '-').upper()
+        logging.info('CCD serial: %s', serial)
+        return serial
+
+    def check_boot_mode(self, mode_exp='NORMAL'):
+        """Query the boot mode to Cr50, and compare it against mode_exp.
+
+        Args:
+            mode_exp: expecting boot mode. It should be either 'NORMAL'
+                      or 'NO_BOOT'.
+        Returns:
+            True if the boot mode matches mode_exp.
+            False, otherwise.
+        Raises:
+            TestError: Input parameter is not valid.
+        """
+
+        if mode_exp not in ['NORMAL', 'NO_BOOT']:
+            raise error.TestError('parameter, mode_exp is not valid: %s' %
+                                  mode_exp)
+        rv = self.send_command_retry_get_output('ec_comm',
+                ['boot_mode\s*:\s*(NORMAL|NO_BOOT)'], safe=True)
+        return mode_exp == rv[0][1]
+
+    def get_reset_count(self):
+        """Returns the cr50 reset count"""
+        return self.send_command_retry_get_output('sysinfo',
+                                                  ['Reset count: (\d+)'],
+                                                  safe=True)[0][1]

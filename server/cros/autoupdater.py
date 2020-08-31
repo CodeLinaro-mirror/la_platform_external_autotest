@@ -2,10 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import glob
+from __future__ import print_function
+
 import logging
-import os
 import re
+import six
 import sys
 import urllib2
 import urlparse
@@ -13,6 +14,7 @@ import urlparse
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error, global_config
 from autotest_lib.client.common_lib.cros import dev_server
+from autotest_lib.client.common_lib.cros import kernel_utils
 from autotest_lib.server import autotest
 from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros.dynamic_suite import constants as ds_constants
@@ -47,14 +49,6 @@ _QUICK_PROVISION_SCRIPT = 'quick-provision'
 
 _UPDATER_BIN = '/usr/bin/update_engine_client'
 _UPDATER_LOGS = ['/var/log/messages', '/var/log/update_engine']
-
-_KERNEL_A = {'name': 'KERN-A', 'kernel': 2, 'root': 3}
-_KERNEL_B = {'name': 'KERN-B', 'kernel': 4, 'root': 5}
-
-# Time to wait for new kernel to be marked successful after
-# auto update.
-_KERNEL_UPDATE_TIMEOUT = 120
-
 
 # PROVISION_FAILED - A flag file to indicate provision failures.  The
 # file is created at the start of any AU procedure (see
@@ -335,10 +329,6 @@ def _get_metric_fields(update_url):
     }
 
 
-# TODO(garnold) This implements shared updater functionality needed for
-# supporting the autoupdate_EndToEnd server-side test. We should probably
-# migrate more of the existing ChromiumOSUpdater functionality to it as we
-# expand non-CrOS support in other tests.
 class ChromiumOSUpdater(object):
     """Chromium OS specific DUT update functionality."""
 
@@ -382,56 +372,6 @@ class ChromiumOSUpdater(object):
 
         """
         return self._run('rootdev %s' % options).stdout.strip()
-
-
-    def get_kernel_state(self):
-        """Returns the (<active>, <inactive>) kernel state as a pair.
-
-        @raise RootFSUpdateError if the DUT reports a root partition
-                number that isn't one of the known valid values.
-        """
-        active_root = int(re.findall('\d+\Z', self._rootdev('-s'))[0])
-        if active_root == _KERNEL_A['root']:
-            return _KERNEL_A, _KERNEL_B
-        elif active_root == _KERNEL_B['root']:
-            return _KERNEL_B, _KERNEL_A
-        else:
-            raise RootFSUpdateError(
-                    'Encountered unknown root partition: %s' % active_root)
-
-
-    def _cgpt(self, flag, kernel):
-        """Return numeric cgpt value for the specified flag, kernel, device."""
-        return int(self._run('cgpt show -n -i %d %s $(rootdev -s -d)' % (
-            kernel['kernel'], flag)).stdout.strip())
-
-
-    def _get_next_kernel(self):
-        """Return the kernel that has priority for the next boot."""
-        priority_a = self._cgpt('-P', _KERNEL_A)
-        priority_b = self._cgpt('-P', _KERNEL_B)
-        if priority_a > priority_b:
-            return _KERNEL_A
-        else:
-            return _KERNEL_B
-
-
-    def _get_kernel_success(self, kernel):
-        """Return boolean success flag for the specified kernel.
-
-        @param kernel: information of the given kernel, either _KERNEL_A
-            or _KERNEL_B.
-        """
-        return self._cgpt('-S', kernel) != 0
-
-
-    def _get_kernel_tries(self, kernel):
-        """Return tries count for the specified kernel.
-
-        @param kernel: information of the given kernel, either _KERNEL_A
-            or _KERNEL_B.
-        """
-        return self._cgpt('-T', kernel)
 
 
     def _get_last_update_error(self):
@@ -544,26 +484,6 @@ class ChromiumOSUpdater(object):
         return self._run('/postinst %s 2>&1' % part)
 
 
-    def _verify_kernel_state(self):
-        """Verify that the next kernel to boot is correct for update.
-
-        This tests that the kernel state is correct for a successfully
-        downloaded and installed update.  That is, the next kernel to
-        boot must be the currently inactive kernel.
-
-        @raise RootFSUpdateError if the DUT next kernel isn't the
-                expected next kernel.
-        """
-        inactive_kernel = self.get_kernel_state()[1]
-        next_kernel = self._get_next_kernel()
-        if next_kernel != inactive_kernel:
-            raise RootFSUpdateError(
-                    'Update failed.  The kernel for next boot is %s, '
-                    'but %s was expected.'
-                    % (next_kernel['name'], inactive_kernel['name']))
-        return inactive_kernel
-
-
     def _verify_update_completed(self):
         """Verifies that an update has completed.
 
@@ -578,7 +498,7 @@ class ChromiumOSUpdater(object):
             raise RootFSUpdateError(
                     'Update engine status is %s (%s was expected).  %s'
                     % (status, UPDATER_NEED_REBOOT, error_msg))
-        return self._verify_kernel_state()
+        return kernel_utils.verify_kernel_state_after_update(self.host)
 
 
     def trigger_update(self):
@@ -644,7 +564,8 @@ class ChromiumOSUpdater(object):
         remote_script = '/usr/local/bin/%s' % script_name
         if self.host.path_exists(remote_script):
             return remote_script
-        remote_tmp_script = '/tmp/%s' % script_name
+        self.host.run('mkdir -p -m 1777 /usr/local/tmp')
+        remote_tmp_script = '/usr/local/tmp/%s' % script_name
         server_name = urlparse.urlparse(self.update_url)[1]
         script_url = 'http://%s/static/%s' % (server_name, script_name)
         fetch_script = 'curl -Ss -o %s %s && head -1 %s' % (
@@ -676,45 +597,6 @@ class ChromiumOSUpdater(object):
         return script_command
 
 
-    def rollback_rootfs(self, powerwash):
-        """Triggers rollback and waits for it to complete.
-
-        @param powerwash: If true, powerwash as part of rollback.
-
-        @raise RootFSUpdateError if anything went wrong.
-        """
-        version = self.host.get_release_version()
-        # Introduced can_rollback in M36 (build 5772). # etc/lsb-release matches
-        # X.Y.Z. This version split just pulls the first part out.
-        try:
-            build_number = int(version.split('.')[0])
-        except ValueError:
-            logging.error('Could not parse build number.')
-            build_number = 0
-
-        if build_number >= 5772:
-            can_rollback_cmd = '%s --can_rollback' % _UPDATER_BIN
-            logging.info('Checking for rollback.')
-            try:
-                self._run(can_rollback_cmd)
-            except error.AutoservRunError as e:
-                raise RootFSUpdateError("Rollback isn't possible on %s: %s" %
-                                        (self.host.hostname, str(e)))
-
-        rollback_cmd = '%s --rollback --follow' % _UPDATER_BIN
-        if not powerwash:
-            rollback_cmd += ' --nopowerwash'
-
-        logging.info('Performing rollback.')
-        try:
-            self._run(rollback_cmd)
-        except error.AutoservRunError as e:
-            raise RootFSUpdateError('Rollback failed on %s: %s' %
-                                    (self.host.hostname, str(e)))
-
-        self._verify_update_completed()
-
-
     def update_stateful(self, clobber=True):
         """Updates the stateful partition.
 
@@ -739,69 +621,6 @@ class ChromiumOSUpdater(object):
             raise StatefulUpdateError(
                     'Failed to perform stateful update on %s' %
                     self.host.hostname)
-
-
-    def verify_boot_expectations(self, expected_kernel, rollback_message):
-        """Verifies that we fully booted given expected kernel state.
-
-        This method both verifies that we booted using the correct kernel
-        state and that the OS has marked the kernel as good.
-
-        @param expected_kernel: kernel that we are verifying with,
-            i.e. I expect to be booted onto partition 4 etc. See output of
-            get_kernel_state.
-        @param rollback_message: string include in except message text
-            if we booted with the wrong partition.
-
-        @raise NewBuildUpdateError if any of the various checks fail.
-        """
-        # Figure out the newly active kernel.
-        active_kernel = self.get_kernel_state()[0]
-
-        # Check for rollback due to a bad build.
-        if active_kernel != expected_kernel:
-
-            # Kernel crash reports should be wiped between test runs, but
-            # may persist from earlier parts of the test, or from problems
-            # with provisioning.
-            #
-            # Kernel crash reports will NOT be present if the crash happened
-            # before encrypted stateful is mounted.
-            #
-            # TODO(dgarrett): Integrate with server/crashcollect.py at some
-            # point.
-            kernel_crashes = glob.glob('/var/spool/crash/kernel.*.kcrash')
-            if kernel_crashes:
-                rollback_message += ': kernel_crash'
-                logging.debug('Found %d kernel crash reports:',
-                              len(kernel_crashes))
-                # The crash names contain timestamps that may be useful:
-                #   kernel.20131207.005945.0.kcrash
-                for crash in kernel_crashes:
-                    logging.debug('  %s', os.path.basename(crash))
-
-            # Print out some information to make it easier to debug
-            # the rollback.
-            logging.debug('Dumping partition table.')
-            self._run('cgpt show $(rootdev -s -d)')
-            logging.debug('Dumping crossystem for firmware debugging.')
-            self._run('crossystem --all')
-            raise NewBuildUpdateError(self.update_version, rollback_message)
-
-        # Make sure chromeos-setgoodkernel runs.
-        try:
-            utils.poll_for_condition(
-                lambda: (self._get_kernel_tries(active_kernel) == 0
-                         and self._get_kernel_success(active_kernel)),
-                exception=RootFSUpdateError(),
-                timeout=_KERNEL_UPDATE_TIMEOUT, sleep_interval=5)
-        except RootFSUpdateError:
-            services_status = self._run('status system-services').stdout
-            if services_status != 'system-services start/running\n':
-                event = NewBuildUpdateError.CHROME_FAILURE
-            else:
-                event = NewBuildUpdateError.UPDATE_ENGINE_FAILURE
-            raise NewBuildUpdateError(self.update_version, event)
 
 
     def _prepare_host(self):
@@ -888,7 +707,7 @@ class ChromiumOSUpdater(object):
         try:
             ds.stage_artifacts(image_name, ['quick_provision', 'stateful'])
         except dev_server.DevServerException as e:
-            raise error.TestFail, str(e), sys.exc_info()[2]
+            six.reraise(error.TestFail, str(e), sys.exc_info()[2])
 
         static_url = 'http://%s/static' % devserver_name
         command = '%s --noreboot %s %s' % (provision_command, image_name,
@@ -921,7 +740,7 @@ class ChromiumOSUpdater(object):
                                                      server_name, image_name)
 
             self._set_target_version()
-            return self._verify_kernel_state()
+            return kernel_utils.verify_kernel_state_after_update(self.host)
         except Exception:
             # N.B.  We handle only `Exception` here.  Non-Exception
             # classes (such as KeyboardInterrupt) are handled by our
@@ -996,8 +815,8 @@ class ChromiumOSUpdater(object):
         autoreboot_cmd = ('FILE="%s" ; [ -f "$FILE" ] || '
                           '( touch "$FILE" ; start autoreboot )')
         self._run(autoreboot_cmd % _LAB_MACHINE_FILE)
-        self.verify_boot_expectations(
-                expected_kernel, NewBuildUpdateError.ROLLBACK_FAILURE)
+        kernel_utils.verify_boot_expectations(
+            expected_kernel, NewBuildUpdateError.ROLLBACK_FAILURE, self.host)
 
         logging.debug('Cleaning up old autotest directories.')
         try:

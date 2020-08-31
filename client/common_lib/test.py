@@ -570,13 +570,13 @@ class base_test(object):
                 self._make_writable_to_others(self.resultsdir)
 
                 # Initialize:
-                _cherry_pick_call(self.initialize, *args, **dargs)
+                utils.cherry_pick_call(self.initialize, *args, **dargs)
 
                 lockfile = open(os.path.join(self.job.tmpdir, '.testlock'), 'w')
                 try:
                     fcntl.flock(lockfile, fcntl.LOCK_EX)
                     # Setup: (compile and install the test, if needed)
-                    p_args, p_dargs = _cherry_pick_args(self.setup, args, dargs)
+                    p_args, p_dargs = utils.cherry_pick_args(self.setup, args, dargs)
                     utils.update_version(self.srcdir, self.preserve_srcdir,
                                          self.version, self.setup,
                                          *p_args, **p_dargs)
@@ -589,18 +589,18 @@ class base_test(object):
 
                 # call self.warmup cherry picking the arguments it accepts and
                 # translate exceptions if needed
-                _call_test_function(_cherry_pick_call, self.warmup,
+                _call_test_function(utils.cherry_pick_call, self.warmup,
                                     *args, **dargs)
 
                 if hasattr(self, 'run_once'):
-                    p_args, p_dargs = _cherry_pick_args(self.run_once,
+                    p_args, p_dargs = utils.cherry_pick_args(self.run_once,
                                                         args, dargs)
                     # pull in any non-* and non-** args from self.execute
-                    for param in _get_nonstar_args(self.execute):
+                    for param in utils.get_nonstar_args(self.execute):
                         if param in dargs:
                             p_dargs[param] = dargs[param]
                 else:
-                    p_args, p_dargs = _cherry_pick_args(self.execute,
+                    p_args, p_dargs = utils.cherry_pick_args(self.execute,
                                                         args, dargs)
 
                 _call_test_function(self.execute, *p_args, **p_dargs)
@@ -615,7 +615,7 @@ class base_test(object):
                     try:
                         if run_cleanup:
                             logging.debug('Running cleanup for test.')
-                            _cherry_pick_call(self.cleanup, *args, **dargs)
+                            utils.cherry_pick_call(self.cleanup, *args, **dargs)
                     except Exception:
                         logging.error('Ignoring exception during cleanup() '
                                       'phase:')
@@ -637,7 +637,7 @@ class base_test(object):
             else:
                 try:
                     if run_cleanup:
-                        _cherry_pick_call(self.cleanup, *args, **dargs)
+                        utils.cherry_pick_call(self.cleanup, *args, **dargs)
                     self.crash_handler_report()
                 finally:
                     self.job.logging.restore()
@@ -664,61 +664,6 @@ class base_test(object):
         test_basepath = self.outputdir[len(self.job.resultdir + "/"):]
         return self.job.run_test(url, master_testpath=test_basepath,
                                  *args, **dargs)
-
-
-def _get_nonstar_args(func):
-    """Extract all the (normal) function parameter names.
-
-    Given a function, returns a tuple of parameter names, specifically
-    excluding the * and ** parameters, if the function accepts them.
-
-    @param func: A callable that we want to chose arguments for.
-
-    @return: A tuple of parameters accepted by the function.
-    """
-    return func.func_code.co_varnames[:func.func_code.co_argcount]
-
-
-def _cherry_pick_args(func, args, dargs):
-    """Sanitize positional and keyword arguments before calling a function.
-
-    Given a callable (func), an argument tuple and a dictionary of keyword
-    arguments, pick only those arguments which the function is prepared to
-    accept and return a new argument tuple and keyword argument dictionary.
-
-    Args:
-      func: A callable that we want to choose arguments for.
-      args: A tuple of positional arguments to consider passing to func.
-      dargs: A dictionary of keyword arguments to consider passing to func.
-    Returns:
-      A tuple of: (args tuple, keyword arguments dictionary)
-    """
-    # Cherry pick args:
-    if func.func_code.co_flags & 0x04:
-        # func accepts *args, so return the entire args.
-        p_args = args
-    else:
-        p_args = ()
-
-    # Cherry pick dargs:
-    if func.func_code.co_flags & 0x08:
-        # func accepts **dargs, so return the entire dargs.
-        p_dargs = dargs
-    else:
-        # Only return the keyword arguments that func accepts.
-        p_dargs = {}
-        for param in _get_nonstar_args(func):
-            if param in dargs:
-                p_dargs[param] = dargs[param]
-
-    return p_args, p_dargs
-
-
-def _cherry_pick_call(func, *args, **dargs):
-    """Cherry picks arguments from args/dargs based on what "func" accepts
-    and calls the function with the picked arguments."""
-    p_args, p_dargs = _cherry_pick_args(func, args, dargs)
-    return func(*p_args, **p_dargs)
 
 
 def _validate_args(args, dargs, *funcs):

@@ -117,4 +117,4 @@ class provision_Cr50Update(Cr50Test):
         # Verify everything updated correctly
         mismatch = self._check_running_image_and_board_id(update_state)
         if mismatch:
-            raise error.TestFail('Failed to update cr50: %s', mismatch)
+            raise error.TestFail('Failed to update cr50: %s' % mismatch)

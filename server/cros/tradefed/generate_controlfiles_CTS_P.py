@@ -57,7 +57,7 @@ CONFIG['CTS_JOB_RETRIES_IN_PUBLIC'] = 1
 CONFIG['CTS_QUAL_RETRIES'] = 9
 CONFIG['CTS_MAX_RETRIES'] = {
     'CtsDeqpTestCases':         15,  # TODO(b/126787654)
-    'CtsIncidentHostTestCases': 30,  # TODO(b/128695132)
+    'CtsGraphicsTestCases':      5,  # TODO(b/155056869)
     'CtsSensorTestCases':       30,  # TODO(b/124528412)
 }
 
@@ -66,7 +66,8 @@ CONFIG['CTS_TIMEOUT_DEFAULT'] = 1.0
 CONFIG['CTS_TIMEOUT'] = {
     'CtsActivityManagerDeviceTestCases': 2.0,
     'CtsAppSecurityHostTestCases':       2.0,
-    'CtsAutoFillServiceTestCases':       2.5,  # TODO(b/134662826)
+    'CtsAutoFillServiceTestCases':       6.0,  # TODO(b/145092442)
+    'CtsCameraTestCases':                2.0,  # TODO(b/150657700)
     'CtsDeqpTestCases':                 20.0,
     'CtsDeqpTestCases.dEQP-EGL'  :       2.0,
     'CtsDeqpTestCases.dEQP-GLES2':       2.0,
@@ -144,7 +145,6 @@ CONFIG['BVT_PERBUILD'] = [
     'CtsThemeDeviceTestCases',
     'CtsTransitionTestCases',
     'CtsTvTestCases',
-    'CtsUiAutomationTestCases',
     'CtsUsbTests',
     'CtsVoiceSettingsTestCases',
 ]
@@ -179,6 +179,13 @@ CONFIG['MEDIA_MODULES'] = [
 ]
 
 CONFIG['NEEDS_PUSH_MEDIA'] = CONFIG['MEDIA_MODULES']
+
+# See b/149889853. Non-media test basically does not require dynamic
+# config. To reduce the flakiness, let us suppress the config.
+CONFIG['NEEDS_DYNAMIC_CONFIG_ON_COLLECTION'] = False
+CONFIG['NEEDS_DYNAMIC_CONFIG'] = CONFIG['MEDIA_MODULES'] + [
+    'CtsIntentSignatureTestCases'
+]
 
 # Modules that are known to need the default apps of Chrome (eg. Files.app).
 CONFIG['ENABLE_DEFAULT_APPS'] = [

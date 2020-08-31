@@ -38,10 +38,9 @@ class network_WiFi_UpdateRouter(test.test):
     version = 1
 
     STABLE_VERSIONS = {
-        'stumpy': StableVersion('trybot-stumpy-test-ap/R47-7424.0.0-b10',
-                                '7424.0.2015_09_03_1514'),
-        'panther': StableVersion('trybot-panther-test-ap/R47-7424.0.0-b10',
-                                 '7424.0.2015_09_03_1532'),
+        ## crbug.com/1098024: these are left here as documentation of what the
+        # last stable version is, but the current updater code does not support
+        # them.
         'whirlwind': StableVersion('trybot-whirlwind-test-ap-tryjob/'
                                    'R65-10323.83.0-c40829',
                                    '10323.83.2018_04_30_1605'),

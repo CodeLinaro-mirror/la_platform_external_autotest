@@ -26,9 +26,7 @@ import common
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
-from autotest_lib.client.common_lib import logging_manager
 from autotest_lib.client.common_lib import utils
-from autotest_lib.utils import test_importer
 
 from chromite.lib import metrics
 from chromite.lib import ts_mon_config
@@ -324,8 +322,6 @@ def parse_options():
 def main():
     """Runs the program."""
     options = parse_options()
-    logging_manager.configure_logging(test_importer.TestImporterLoggingConfig(),
-                                      verbose=options.verbose)
     backup_succeeded = False
 
     with ts_mon_config.SetupTsMonGlobalState(service_name='mysql_db_backup',

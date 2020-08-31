@@ -1,4 +1,63 @@
-#!/usr/bin/python2 -u
+#!/usr/bin/env vpython
+
+# [VPYTHON:BEGIN]
+# # Third party dependencies.  These are only listed because pylint itself needs
+# # them.  Feel free to add/remove anything here.
+#
+# wheel: <
+#   name: "infra/python/wheels/configparser-py2_py3"
+#   version: "version:3.5.0"
+# >
+# wheel: <
+#   name: "infra/python/wheels/futures-py2_py3"
+#   version: "version:3.1.1"
+# >
+# wheel: <
+#   name: "infra/python/wheels/isort-py2_py3"
+#   version: "version:4.3.4"
+# >
+# wheel: <
+#   name: "infra/python/wheels/wrapt/${vpython_platform}"
+#   version: "version:1.10.11"
+# >
+# wheel: <
+#   name: "infra/python/wheels/backports_functools_lru_cache-py2_py3"
+#   version: "version:1.5"
+# >
+# wheel: <
+#   name: "infra/python/wheels/lazy-object-proxy/${vpython_platform}"
+#   version: "version:1.3.1"
+# >
+# wheel: <
+#   name: "infra/python/wheels/singledispatch-py2_py3"
+#   version: "version:3.4.0.3"
+# >
+# wheel: <
+#   name: "infra/python/wheels/enum34-py2"
+#   version: "version:1.1.6"
+# >
+# wheel: <
+#   name: "infra/python/wheels/mccabe-py2_py3"
+#   version: "version:0.6.1"
+# >
+# wheel: <
+#   name: "infra/python/wheels/six-py2_py3"
+#   version: "version:1.10.0"
+# >
+#
+# # Pylint dependencies.
+#
+# wheel: <
+#   name: "infra/python/wheels/astroid-py2_py3"
+#   version: "version:1.6.6"
+# >
+#
+# wheel: <
+#   name: "infra/python/wheels/pylint-py2_py3"
+#   version: "version:1.9.5-45a720817e4de1df2f173c7e4029e176"
+# >
+# [VPYTHON:END]
+
 """
 Wrapper to patch pylint library functions to suit autotest.
 

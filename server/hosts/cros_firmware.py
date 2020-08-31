@@ -12,12 +12,15 @@ fix problems by updating or re-installing the firmware.
 The operations in the module support two distinct use cases:
   * DUTs used for FAFT tests can in some cases have problems with
     corrupted firmware.  The module supplies `FirmwareStatusVerifier`
-    to check for corruption, and supplies `FirmwareRepair` to re-install
-    firmware via servo when needed.
+    to check for corruption, and supplies `FaftFirmwareRepair` to
+    re-install firmware of current faft stable_version via servo
+    when needed.
   * DUTs used for general testing normally should be running a
     designated "stable" firmware version.  This module supplies
     `FirmwareVersionVerifier` to detect and automatically update
-    firmware that is out-of-date from the designated version.
+    firmware that is out-of-date from the designated version. This model
+    also supplys `GeneralFirmwareRepair` to re-install firmware that
+    tied with current stable_version image via servo when needed.
 
 For purposes of the operations in the module, we distinguish three kinds
 of DUT, based on pool assignments:
@@ -36,7 +39,6 @@ of DUT, based on pool assignments:
 
 import json
 import logging
-import re
 
 import common
 from autotest_lib.client.common_lib import global_config
@@ -55,17 +57,16 @@ _FIRMWARE_REPAIR_POOLS = set(
             type=str).split(','))
 
 
-def _is_firmware_repair_supported(host):
+def _is_firmware_testing_device(host):
     """
-    Check if a host supports firmware repair.
+    check if a host is dedicated for firmware testing.
 
     When this function returns true, the DUT should be managed by
-    `FirmwareStatusVerifier` and `FirmwareRepair`, but not
-    `FirmwareVersionVerifier`.  In general, this applies to DUTs
-    used for firmware testing.
+    `FirmwareStatusVerifier` and `FaftFirmwareRepair`, but not
+    `FirmwareVersionVerifier` and `GeneralFirmwareRepair.
 
     @return A true value if the host should use `FirmwareStatusVerifier`
-            and `FirmwareRepair`; a false value otherwise.
+            and `FaftFirmwareRepair`; a false value otherwise.
     """
     info = host.host_info_store.get()
     return bool(info.pools & _FIRMWARE_REPAIR_POOLS)
@@ -86,7 +87,7 @@ def _is_firmware_update_supported(host):
     @return A true value if the host should use
             `FirmwareVersionVerifier`; a false value otherwise.
     """
-    return not _is_firmware_repair_supported(host)
+    return not _is_firmware_testing_device(host)
 
 
 def _get_available_firmware(host, model):
@@ -120,7 +121,7 @@ class FirmwareStatusVerifier(hosts.Verifier):
     """
 
     def verify(self, host):
-        if not _is_firmware_repair_supported(host):
+        if not _is_firmware_testing_device(host):
             return
         try:
             # Read the AP firmware and dump the sections that we're
@@ -159,18 +160,54 @@ class FirmwareRepair(hosts.RepairAction):
 
     This repair method only applies to DUTs used for FAFT.
     """
+    def _get_stable_build(self, host):
+        raise NotImplementedError('Class %s does not implement '
+                                  '_get_stable_build()'
+                                   % type(self).__name__)
 
     def repair(self, host):
-        if not _is_firmware_repair_supported(host):
+        repair_utils.require_servo(host, ignore_state=True)
+        build = self._get_stable_build(host)
+        if not build:
             raise hosts.AutoservRepairError(
-                    'Firmware repair is not applicable to host %s.' %
-                    host.hostname, 'not_applicable')
-        repair_utils.require_servo(host)
-        host.firmware_install()
+                  'Failed to find stable firmware build for %s, if the DUT is'
+                  ' in faft-*pool, faft stable_version needs to be set.'
+                   % host.hostname, 'cannot find firmware stable_version')
+        host.firmware_install(build)
+
+
+class FaftFirmwareRepair(FirmwareRepair):
+    """
+    Reinstall the firmware for DUTs in faft related pool.
+    """
+    def _get_stable_build(self, host):
+        info = host.host_info_store.get()
+        return afe_utils.get_stable_faft_version_v2(info)
+
+    def _is_applicable(self, host):
+        return _is_firmware_testing_device(host)
 
     @property
     def description(self):
-        return 'Re-install the stable firmware via servo'
+        return 'Re-install the stable firmware(faft) via servo'
+
+
+class GeneralFirmwareRepair(FirmwareRepair):
+    """Reinstall the firmware for non-faft DUTs.
+    We need different RepairAction for non firmware testing DUT because
+    we want only try re-install firmware if all other RepairAction could
+    not restore ssh capability to the DUT.
+    """
+    def _get_stable_build(self, host):
+        # Use firmware in current stable os build.
+        return host.get_cros_repair_image_name()
+
+    def _is_applicable(self, host):
+        return not _is_firmware_testing_device(host)
+
+    @property
+    def description(self):
+        return 'Re-install the stable firmware(non-faft) via servo'
 
 
 class FirmwareVersionVerifier(hosts.Verifier):

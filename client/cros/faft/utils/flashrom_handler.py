@@ -15,6 +15,8 @@ import os
 import struct
 import tempfile
 
+import six
+
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import chip_utils
 from autotest_lib.client.cros.faft.utils import saft_flashrom_util
@@ -99,6 +101,45 @@ class FvSection(object):
 class FlashromHandlerError(Exception):
     """An object to represent Flashrom errors"""
     pass
+
+
+class _FlashromErrorWrapper(object):
+    """Wrap calls to flashrom, giving cleaner error messages.
+
+    @param description: The start of the failure message ("Failed to <verb>...")
+    """
+    def __init__(self, description):
+        self.description = description
+
+    def __enter__(self):
+        """Enter the context"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit the context, converting CmdError into summarized errors.
+
+        @raise FlashromHandlerError: if the wrapped code raises CmdError.
+        """
+        if not isinstance(exc_val, error.CmdError):
+            del exc_tb
+            return
+        result = exc_val.result_obj
+        lines = [result.command]
+        for line in result.stdout.splitlines():
+            # grab anything mentioning 'status', but avoid very long lines
+            if len(line) < 80 and 'status' in line.lower():
+                lines.append(line)
+        lines.extend(result.stderr.splitlines())
+
+        err_msg = '%s.' % self.description.rstrip('.')
+        err_msg += '  [summarized output, check rpc server log for full]:'
+        err_msg += '  [rc=%s] ' % result.exit_status
+        err_msg += ' || '.join(lines)
+        err = FlashromHandlerError(err_msg)
+        try:
+            six.reraise(type(err), err, exc_tb)
+        finally:
+            del exc_tb
 
 
 class FlashromHandler(object):
@@ -585,11 +626,15 @@ class FlashromHandler(object):
 
     def enable_write_protect(self):
         """Enable write protect of the flash chip"""
-        self.fum.enable_write_protect()
+        description = 'Failed to enable %s write-protect' % self.target
+        with _FlashromErrorWrapper(description):
+            self.fum.enable_write_protect()
 
     def disable_write_protect(self):
         """Disable write protect of the flash chip"""
-        self.fum.disable_write_protect()
+        description = 'Failed to disable %s write-protect' % self.target
+        with _FlashromErrorWrapper(description):
+            self.fum.disable_write_protect()
 
     def set_write_protect_region(self, region, enabled=None):
         """
@@ -607,7 +652,16 @@ class FlashromHandler(object):
         image_file = self.os_if.create_temp_file('wp_')
         self.os_if.write_file(image_file, self.image)
 
-        self.fum.set_write_protect_region(image_file, region, enabled)
+        if enabled is None:
+            verb = 'set'
+        else:
+            verb = 'enable' if enabled else 'disable'
+        msg = 'Failed to %s %s write-protect region (%s)' % (
+            verb, self.target, region)
+
+        with _FlashromErrorWrapper(msg):
+            self.fum.set_write_protect_region(image_file, region, enabled)
+
         self.os_if.remove_file(image_file)
 
     def set_write_protect_range(self, start, length, enabled=None):
@@ -619,7 +673,15 @@ class FlashromHandler(object):
         @param enabled: If True, run --wp-enable; if False, run --wp-disable.
                         If None (default), don't specify either one.
         """
-        self.fum.set_write_protect_range(start, length, enabled)
+        if enabled is None:
+            verb = 'set'
+        else:
+            verb = 'enable' if enabled else 'disable'
+        msg = 'Failed to %s %s write-protect range (start=%s, length=%s)' % (
+            verb, self.target, start, length)
+
+        with _FlashromErrorWrapper(msg):
+            self.fum.set_write_protect_range(start, length, enabled)
 
     def get_write_protect_status(self):
         """Get a dict describing the status of the write protection
@@ -864,3 +926,16 @@ class FlashromHandler(object):
                 suffixes[section] = suffix
 
         return suffixes
+
+    def get_write_cmd(self, image=None):
+        """Get the command needed to write the whole image to the device.
+
+        @param image: the filename (empty to use current handler data)
+        """
+        if image:
+            return self.fum.get_write_cmd(image)
+        else:
+            tmp_image = self.os_if.create_temp_file('tmp_%s.bin.' % self.target)
+            self.os_if.write_file(tmp_image, self.image)
+            cmd = self.fum.get_write_cmd(tmp_image)
+            return '%s; rm %s' % (cmd, tmp_image)

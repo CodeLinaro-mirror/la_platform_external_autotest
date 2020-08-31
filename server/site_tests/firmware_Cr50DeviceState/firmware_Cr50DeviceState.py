@@ -68,7 +68,7 @@ class firmware_Cr50DeviceState(Cr50Test):
     # catch extra wakeups.
     SLEEP_TIME = 60
     SHORT_WAIT = 5
-    CONSERVATIVE_WAIT_TIME = SLEEP_TIME + SHORT_WAIT + 10
+    CONSERVATIVE_WAIT_TIME = SLEEP_TIME * 2
     # Cr50 should wake up twice per second while in regular sleep
     SLEEP_RATE = 2
 
@@ -139,17 +139,19 @@ class firmware_Cr50DeviceState(Cr50Test):
     def log_sleep_debug_information(self):
         """Log some information used for debugging sleep issues"""
         logging.debug(
-            self.cr50.send_safe_command_get_output('sleepmask',
-                                                   ['sleepmask.*>'])[0])
+            self.cr50.send_command_retry_get_output('sleepmask',
+                                                    ['sleepmask.*>'],
+                                                    safe=True)[0])
         logging.debug(
-            self.cr50.send_safe_command_get_output('sysinfo',
-                                                   ['sysinfo.*>'])[0])
+            self.cr50.send_command_retry_get_output('sysinfo',
+                                                    ['sysinfo.*>'],
+                                                    safe=True)[0])
 
 
     def get_taskinfo_output(self):
         """Return a dict with the irq numbers as keys and counts as values"""
         output = self.cr50.send_command_retry_get_output('taskinfo',
-            self.GET_TASKINFO, safe=True)[0][1].strip()
+            self.GET_TASKINFO, safe=True, retries=10)[0][1].strip()
         logging.debug(output)
         return output
 
@@ -172,7 +174,7 @@ class firmware_Cr50DeviceState(Cr50Test):
             logging.debug(irq_info)
             num, count = irq_info.split()
             irq_counts[int(num)] = int(count)
-        irq_counts[self.KEY_RESET] = int(self.servo.get('cr50_reset_count'))
+        irq_counts[self.KEY_RESET] = int(self.cr50.get_reset_count())
         irq_counts[self.KEY_DEEP_SLEEP] = int(self.cr50.get_deep_sleep_count())
         # Log some information, so we can debug issues with sleep.
         self.log_sleep_debug_information()
@@ -313,13 +315,20 @@ class firmware_Cr50DeviceState(Cr50Test):
 
                 # Check that the count increase is within the expected value.
                 if event != self.START:
+                    step_name = self.step_names[step].strip()
+                    # TODO(b/153891388): raise actual error once the servo
+                    # character loss issue is fixed.
+                    if count < 0:
+                        raise error.TestNAError('%s test found negative %s '
+                                                'count %r (likely due to servo '
+                                                'dropping characters)' %
+                                                (step, step_name, count))
                     expected_range = self.get_expected_count(irq_key,
                             cr50_diffs[step], cmd_offset)
 
                     rv = self.check_increase(irq_key, name, count,
                             expected_range)
                     if rv:
-                        step_name = self.step_names[step].strip()
                         logging.info('Unexpected count in %s test: %s %s',
                                      state, step_name, rv)
                         # Running commands can take a while and cr50 may not be

@@ -18,5 +18,4 @@ DOC = """
 Calls cros-disks to mount supported archive files
 """
 
-job.run_test('platform_CrosDisksArchive', timeout_s=10,
-             archive_types=['rar'], tag='rar')
+job.run_test('platform_CrosDisksArchive', timeout_s=10)

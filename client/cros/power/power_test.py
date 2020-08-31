@@ -2,21 +2,26 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import logging
+import re
 import time
 
 from autotest_lib.client.bin import test
 from autotest_lib.client.common_lib import error
+from autotest_lib.client.cros import ec
 from autotest_lib.client.cros import service_stopper
 from autotest_lib.client.cros.power import power_dashboard
-from autotest_lib.client.cros.power import power_rapl
 from autotest_lib.client.cros.power import power_status
 from autotest_lib.client.cros.power import power_telemetry_utils
 from autotest_lib.client.cros.power import power_utils
-
+from autotest_lib.client.cros.video import histogram_verifier
 
 class power_Test(test.test):
     """Optional base class power related tests."""
     version = 1
+
+    keypress_histogram = 'Event.Latency.EndToEnd.KeyPress'
+    histogram_re = 'Histogram: %s recorded (\d+) samples, mean = (\d+\.\d+)'
+    hist_percentile_re = '^(\d+).+\{(\d+)\.\d+\%\}'
 
     def initialize(self, seconds_period=20., pdash_note='',
                    force_discharge=False):
@@ -32,14 +37,10 @@ class power_Test(test.test):
 
         @var _checkpoint_logger: power_status.CheckpointLogger to track
                                  checkpoint data.
-        @var _plog: power_status.PowerLogger object to monitor power.
         @var _psr: power_utils.DisplayPanelSelfRefresh object to monitor PSR.
         @var _services: service_stopper.ServiceStopper object.
         @var _start_time: float of time in seconds since Epoch test started.
         @var _stats: power_status.StatoMatic object.
-        @var _tlog: power_status.TempLogger object to monitor temperatures.
-        @var _clog: power_status.CPUStatsLogger object to monitor CPU(s)
-                    frequencies and c-states.
         @var _meas_logs: list of power_status.MeasurementLoggers
         """
         super(power_Test, self).initialize()
@@ -51,39 +52,25 @@ class power_Test(test.test):
         self._checkpoint_logger = power_status.CheckpointLogger()
         self._seconds_period = seconds_period
 
-        measurements = []
-
         self._force_discharge = force_discharge
         if force_discharge:
             if not self.status.battery:
                 raise error.TestNAError('DUT does not have battery. '
                                         'Could not force discharge.')
+            if not ec.has_cros_ec():
+                raise error.TestNAError('DUT does not have CrOS EC. '
+                                        'Could not force discharge.')
             if not power_utils.charge_control_by_ectool(False):
                 raise error.TestError('Could not run battery force discharge.')
 
-        if force_discharge or not self.status.on_ac():
-            measurements.append(
-                power_status.SystemPower(self.status.battery_path))
-        if power_utils.has_powercap_support():
-            measurements += power_rapl.create_powercap()
-        elif power_utils.has_rapl_support():
-            measurements += power_rapl.create_rapl()
-        self._plog = power_status.PowerLogger(measurements,
-                seconds_period=seconds_period,
-                checkpoint_logger=self._checkpoint_logger)
         self._psr = power_utils.DisplayPanelSelfRefresh()
         self._services = service_stopper.ServiceStopper(
                 service_stopper.ServiceStopper.POWER_DRAW_SERVICES)
         self._services.stop_services()
         self._stats = power_status.StatoMatic()
 
-        self._tlog = power_status.TempLogger([],
-                seconds_period=seconds_period,
-                checkpoint_logger=self._checkpoint_logger)
-        self._clog = power_status.CPUStatsLogger(seconds_period=seconds_period,
-                checkpoint_logger=self._checkpoint_logger)
-
-        self._meas_logs = [self._plog, self._tlog, self._clog]
+        self._meas_logs = power_status.create_measurement_loggers(
+                seconds_period, self._checkpoint_logger)
 
         self._pdash_note = pdash_note
 
@@ -126,6 +113,56 @@ class power_Test(test.test):
         self.status.refresh()
         self._checkpoint_logger.checkpoint(name, start_time)
         self._psr.refresh()
+
+    def collect_keypress_latency(self, cr):
+        """Collect keypress latency information from Histograms.
+
+        @param cr: object, the Chrome instance
+        """
+
+        keypress_histogram_end = histogram_verifier.get_histogram(
+            cr, self.keypress_histogram)
+        logger = power_dashboard.KeyvalLogger(self._start_time, time.time())
+        matches = re.search((self.histogram_re % self.keypress_histogram),
+                            keypress_histogram_end)
+
+        if matches:
+            count = int(matches.group(1))
+            mean_latency = float(matches.group(2))
+            logging.info('latency count %d mean %f', count, mean_latency)
+            self.keyvals['keypress_cnt'] = count
+            self.keyvals['keypress_latency_us_avg'] = mean_latency
+            self.output_perf_value(description='keypress_cnt', value=count,
+                                   higher_is_better=True)
+            self.output_perf_value(description='keypress_latency_us_avg',
+                                   value=mean_latency,
+                                   higher_is_better=False)
+            logger.add_item('keypress_cnt', count, 'point', 'keypress')
+            logger.add_item('keypress_latency_us_avg', mean_latency, 'point',
+                            'keypress')
+
+        # Capture the first bucket >= 90th percentile
+        for s in keypress_histogram_end.splitlines():
+            matches = re.search((self.hist_percentile_re), s)
+            if matches:
+                lat = int(matches.group(1))
+                perc = int(matches.group(2))
+                if perc >= 90:
+                    self.keyvals['keypress_latency_us_high'] = lat
+                    self.keyvals['keypress_high_percentile'] = perc
+                    self.output_perf_value(
+                        description='keypress_latency_us_high', value=lat,
+                        higher_is_better=False)
+                    self.output_perf_value(
+                        description='keypress_high_percentile', value=perc,
+                        higher_is_better=False)
+                    logger.add_item('keypress_latency_us_high', lat, 'point',
+                                    'keypress')
+                    logger.add_item('keypress_high_percentile', perc, 'point',
+                                    'keypress')
+                    break
+
+        self._meas_logs.append(logger)
 
     def publish_keyvals(self):
         """Publish power result keyvals."""
@@ -174,27 +211,26 @@ class power_Test(test.test):
         for key, values in self.keyvals.iteritems():
             if key.endswith('pwr_avg'):
                 self.output_perf_value(description=key, value=values, units='W',
-                                   higher_is_better=False, graph='power')
+                        higher_is_better=False, graph='power')
 
         # publish temperature values
         for key, values in self.keyvals.iteritems():
             if key.endswith('temp_avg'):
                 self.output_perf_value(description=key, value=values, units='C',
-                                   higher_is_better=False, graph='temperature')
+                        higher_is_better=False, graph='temperature')
+
+        # publish fps values
+        for key, values in self.keyvals.iteritems():
+            if key.endswith('fps_avg'):
+                self.output_perf_value(description=key, value=values,
+                        units='fps', higher_is_better=True, graph='fps')
 
         # publish to power dashboard
-        pdash = power_dashboard.PowerLoggerDashboard(
-            self._plog, self.tagged_testname, self.resultsdir,
-            note=self._pdash_note)
-        pdash.upload()
-        cdash = power_dashboard.CPUStatsLoggerDashboard(
-            self._clog, self.tagged_testname, self.resultsdir,
-            note=self._pdash_note)
-        cdash.upload()
-        tdash = power_dashboard.TempLoggerDashboard(
-            self._tlog, self.tagged_testname, self.resultsdir,
-            note=self._pdash_note)
-        tdash.upload()
+        dashboard_factory = power_dashboard.get_dashboard_factory()
+        for log in self._meas_logs:
+            dashboard = dashboard_factory.createDashboard(log,
+                self.tagged_testname, self.resultsdir, note=self._pdash_note)
+            dashboard.upload()
 
     def _save_results(self):
         """Save results of each logger in resultsdir."""

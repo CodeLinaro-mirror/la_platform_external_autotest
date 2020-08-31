@@ -44,6 +44,8 @@ def get_x86_cpu_arch():
 
     if re.search(r'AMD.*[AE][269]-9[0-9][0-9][0-9].*RADEON.*R[245]', cpuinfo):
         return 'Stoney'
+    if re.search(r'AMD.*Ryzen.*Radeon.*', cpuinfo):
+        return 'Ryzen'
     if re.search(r'Intel.*Atom.*[NZ][2-6]', cpuinfo):
         return 'Atom'
     if re.search(r'Intel.*Celeron.*N2[89][0-9][0-9]', cpuinfo):
@@ -76,7 +78,8 @@ def has_rapl_support():
         Boolean, True if RAPL supported, False otherwise.
     """
     rapl_set = set(["Haswell", "Haswell-E", "Broadwell", "Skylake", "Goldmont",
-                    "Kaby Lake", "Comet Lake", "Ice Lake", "Tiger Lake"])
+                    "Kaby Lake", "Comet Lake", "Ice Lake", "Tiger Lake",
+                    "Tremont"])
     cpu_uarch = utils.get_intel_cpu_uarch()
     if (cpu_uarch in rapl_set):
         return True
@@ -93,6 +96,18 @@ def has_powercap_support():
         Boolean, True if powercap supported, False otherwise.
     """
     return os.path.isdir('/sys/devices/virtual/powercap/intel-rapl/')
+
+
+def has_amd_rapl_support():
+    """Return True if CPU support AMD RAPL.
+
+    https://www.amd.com/system/files/TechDocs/56255_OSRR.pdf
+    """
+    cpuinfo = utils.get_cpuinfo()[0]
+    logging.info(repr(cpuinfo))
+    return (cpuinfo.get('vendor_id', '') == 'AuthenticAMD' and
+            int(cpuinfo.get('cpu family', 0)) == 0x17 and
+            0 <= int(cpuinfo.get('model', -1)) <= 0x2f)
 
 
 def has_lid():
@@ -237,10 +252,10 @@ def _charge_control_by_ectool(is_charge, ignore_status):
     ec_cmd_discharge = 'ectool chargecontrol discharge'
     ec_cmd_normal = 'ectool chargecontrol normal'
     try:
-       if is_charge:
-           utils.run(ec_cmd_normal)
-       else:
-           utils.run(ec_cmd_discharge)
+        if is_charge:
+            utils.run(ec_cmd_normal)
+        else:
+            utils.run(ec_cmd_discharge)
     except error.CmdError as e:
         logging.warning('Unable to use ectool: %s', e)
         if ignore_status:
@@ -998,6 +1013,7 @@ class BaseActivitySimulator(object):
     # TODO(coconutruben): check when next wave of detachables come out if this
     # structure still holds, or if we need to replace it by querying input
     # devices.
+    _BASE_INIT_CMD = 'cros_config /detachable-base usb-path'
     _BASE_INIT_FILE = '/etc/init/hammerd.override'
     _BASE_WAKE_TIME_MS = 10000
 
@@ -1010,30 +1026,39 @@ class BaseActivitySimulator(object):
         at most _BASE_WAKE_TIME_MS.
 
         """
-        self._should_run = os.path.exists(self._BASE_INIT_FILE)
-        base_power_path = ''
+        self._should_run = False
+
+        if os.path.exists(self._BASE_INIT_FILE):
+            # Try hammerd.override first.
+            init_file_content = utils.read_file(self._BASE_INIT_FILE)
+            try:
+                # The string can be like: env USB_PATH="1-1.1"
+                path = re.search(r'env USB_PATH=\"?([0-9.-]+)\"?',
+                                 init_file_content).group(1)
+            except AttributeError:
+                logging.warning('Failed to read USB path from hammerd file.')
+            else:
+                self._should_run = self._set_base_power_path(path)
+                if not self._should_run:
+                    logging.warning('Device has hammerd file, but base USB'
+                                    ' device not found.')
+
+        if not self._should_run:
+            # Try cros_config.
+            result = utils.run(self._BASE_INIT_CMD, ignore_status=True)
+            if result.exit_status:
+                logging.warning('Command failed: %s', self._BASE_INIT_CMD)
+            else:
+                self._should_run = self._set_base_power_path(result.stdout)
+                if not self._should_run:
+                    logging.warning('cros_config has base info, but base USB'
+                                    ' device not found.')
+
         if self._should_run:
-            with open(self._BASE_INIT_FILE, 'r') as init_file:
-                init_file_content = init_file.read()
-                try:
-                    bus = re.search('env USB_BUS=([0-9]+)',
-                                    init_file_content).group(1)
-                    port = re.search('env USB_PORT=([0-9]+)',
-                                    init_file_content).group(1)
-                except AttributeError:
-                    raise BaseActivityException("Failed to read usb bus "
-                                                "or port from hammerd file.")
-                base_power_path = ('/sys/bus/usb/devices/%s-%s/power/'
-                                   % (bus, port))
-                if not os.path.exists(base_power_path):
-                    logging.warn("Device has hammerd file, but base usb device"
-                                 " not found.")
-                    self._should_run = False
-        if self._should_run:
-            self._base_control_path =  os.path.join(base_power_path,
-                                                    'control')
-            self._autosuspend_delay_path = os.path.join(base_power_path,
-                                                       'autosuspend_delay_ms')
+            self._base_control_path = os.path.join(self._base_power_path,
+                                                   'control')
+            self._autosuspend_delay_path = os.path.join(self._base_power_path,
+                                                        'autosuspend_delay_ms')
             logging.debug("base activity simulator will be running.")
             with open(self._base_control_path, 'r+') as f:
                 self._default_control = f.read()
@@ -1044,6 +1069,23 @@ class BaseActivitySimulator(object):
             with open(self._autosuspend_delay_path, 'r+') as f:
                 self._default_autosuspend_delay_ms = f.read().rstrip('\n')
                 f.write(str(self._BASE_WAKE_TIME_MS))
+        else:
+            logging.info('No base USB device found, base activity simulator'
+                         ' will NOT be running.')
+
+    def _set_base_power_path(self, usb_path):
+        """Set base power path and check if it exists.
+
+        Args:
+          usb_path: the USB device path under /sys/bus/usb/devices/.
+
+        Returns:
+          True if the base power path exists, or False otherwise.
+        """
+        self._base_power_path = '/sys/bus/usb/devices/%s/power/' % usb_path
+        if not os.path.exists(self._base_power_path):
+            logging.warning('Path not found: %s', self._base_power_path)
+        return os.path.exists(self._base_power_path)
 
     def wake_base(self, wake_time_ms=_BASE_WAKE_TIME_MS):
         """Wake up the base to simulate user activity.

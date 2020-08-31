@@ -85,10 +85,26 @@ def has_echo_reference(board_name):
 BoardInfo = collections.namedtuple('BoardInfo', ['board', 'model', 'sku'])
 
 BORADS_WITH_TWO_INTERNAL_MICS = [
+        BoardInfo('coral', 'babytiger', ''),
         BoardInfo('coral', 'nasher360', ''),
+        BoardInfo('coral', 'rabbid', ''),
+        BoardInfo('coral', 'robo360', ''),
+        BoardInfo('grunt', 'treeya360', '175'),
+        BoardInfo('hatch', 'kohaku', ''),
+        BoardInfo('octopus', 'ampton', ''),
         BoardInfo('octopus', 'bobba360', '9'),
         BoardInfo('octopus', 'bobba360', '10'),
+        BoardInfo('octopus', 'dood', ''),
+        BoardInfo('octopus', 'foob360', ''),
+        BoardInfo('octopus', 'grabbiter', ''),
+        BoardInfo('octopus', 'phaser360', '3'),
+        BoardInfo('octopus', 'sparky', ''),
+        BoardInfo('octopus', 'sparky360', ''),
+        BoardInfo('octopus', 'vortininja', ''),
         BoardInfo('snappy', 'snappy', '8'),
+        BoardInfo('zork', 'dalboz', ''),
+        BoardInfo('zork', 'ezkinil', ''),
+        BoardInfo('zork', 'morphius', ''),
 ]
 
 

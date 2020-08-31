@@ -3,8 +3,6 @@
 # found in the LICENSE file.
 
 from autotest_lib.client.common_lib import error
-from autotest_lib.client.bin import utils
-from autotest_lib.client.common_lib.cros.network import iw_runner
 from autotest_lib.client.common_lib.cros.network import xmlrpc_datatypes
 from autotest_lib.server.cros.network import hostap_config
 from autotest_lib.server.cros.network import wifi_cell_test_base
@@ -22,19 +20,6 @@ class network_WiFi_BSSTMReq(wifi_cell_test_base.WiFiCellTestBase):
 
     version = 1
     TIMEOUT_SECONDS = 15
-
-    def dut_sees_bss(self, bssid):
-        """
-        Check if a DUT can see a BSS in scan results.
-
-        @param bssid: string bssid of AP we expect to see in scan results.
-        @return True iff scan results from DUT include the specified BSS.
-
-        """
-        runner = iw_runner.IwRunner(remote_host=self.context.client.host)
-        is_requested_bss = lambda iw_bss: iw_bss.bss == bssid
-        scan_results = runner.scan(self.context.client.wifi_if)
-        return scan_results and filter(is_requested_bss, scan_results)
 
     def run_once(self):
         """Test body."""
@@ -60,12 +45,7 @@ class network_WiFi_BSSTMReq(wifi_cell_test_base.WiFiCellTestBase):
         bssid1 = self.context.router.get_hostapd_mac(1)
 
         # Wait for DUT to see the second AP
-        utils.poll_for_condition(
-            condition=lambda: self.dut_sees_bss(bssid1),
-            exception=error.TestFail('Timed out waiting for DUT'
-                                     'to see second AP'),
-            timeout=self.TIMEOUT_SECONDS,
-            sleep_interval=1)
+        self.context.client.wait_for_bss(bssid1)
 
         # Check which AP we are currently connected.
         # This is to include the case that wpa_supplicant

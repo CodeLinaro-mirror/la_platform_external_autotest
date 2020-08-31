@@ -362,9 +362,9 @@ class ChameleonBoard(object):
         self._chameleond_proxy.Reboot()
 
 
-    def get_bt_pkg_version(self):
-        """ Read the current version of chameleond."""
-        return self._chameleond_proxy.get_bt_pkg_version()
+    def get_bt_commit_hash(self):
+        """ Read the current git commit hash of chameleond."""
+        return self._chameleond_proxy.get_bt_commit_hash()
 
 
     def _get_log(self):
@@ -447,6 +447,22 @@ class ChameleonBoard(object):
         return self._chameleond_proxy.bluetooth_base
 
 
+    def get_bluetooth_tester(self):
+        """Gets the Bluetooth tester object on Chameleon.
+
+        @return: A BluetoothTester object.
+        """
+        return self._chameleond_proxy.bluetooth_tester
+
+
+    def get_bluetooth_audio(self):
+        """Gets the Bluetooth audio object on Chameleon.
+
+        @return: A RaspiBluetoothAudioFlow object.
+        """
+        return self._chameleond_proxy.bluetooth_audio
+
+
     def get_bluetooth_hid_mouse(self):
         """Gets the emulated Bluetooth (BR/EDR) HID mouse on Chameleon.
 
@@ -523,6 +539,13 @@ class ChameleonBoard(object):
         @return: A BluetoothHIDFlow object.
         """
         return self._chameleond_proxy.ble_keyboard
+
+    def get_ble_phone(self):
+        """Gets the emulated Bluetooth phone on Chameleon.
+
+        @return: A RaspiPhone object.
+        """
+        return self._chameleond_proxy.ble_phone
 
     def get_platform(self):
         """ Get the Hardware Platform of the chameleon host
@@ -1089,8 +1112,25 @@ def make_chameleon_hostname(dut_hostname):
     return '.'.join(host_parts)
 
 
+def make_btpeer_hostnames(dut_hostname):
+    """Given a DUT's hostname, returns the hostname of its bluetooth peers.
+
+    A DUT can have up to 4 Bluetooth peers named  hostname-btpeer[1-4]
+    @param dut_hostname: Hostname of a DUT.
+
+    @return List of hostname of the DUT's Bluetooth peer devices
+    """
+    hostnames = []
+    host_parts = dut_hostname.split('.')
+    for i in range(1,5):
+        hostname_prefix = host_parts[0] + '-btpeer' +str(i)
+        hostname = [hostname_prefix]
+        hostname.extend(host_parts[1:])
+        hostnames.append('.'.join(hostname))
+    return hostnames
+
 def create_chameleon_board(dut_hostname, args):
-    """Given either DUT's hostname or argments, creates a ChameleonBoard object.
+    """Creates a ChameleonBoard object with either DUT's hostname or arguments.
 
     If the DUT's hostname is in the lab zone, it connects to the Chameleon by
     append the hostname with '-chameleon' suffix. If not, checks if the args

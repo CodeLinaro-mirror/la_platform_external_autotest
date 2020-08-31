@@ -7,7 +7,7 @@ NAME = 'tast.informational-android'
 TIME = 'MEDIUM'
 TEST_TYPE = 'Server'
 ATTRIBUTES = 'suite:bvt-tast-informational, suite:chrome-informational'
-MAX_RESULT_SIZE_KB = 50 * 1024
+MAX_RESULT_SIZE_KB = 1024 * 1024
 
 # tast.py uses binaries installed from autotest_server_package.tar.bz2.
 REQUIRE_SSP = True
@@ -31,8 +31,7 @@ def run(machine):
     job.run_test('tast',
                  host=hosts.create_host(machine),
                  test_exprs=['('
-                             '!disabled && '
-                             '("group:mainline" || !"group:*") && '
+                             '"group:mainline" && '
                              'informational && '
                              '"dep:android*"'
                              ')'],

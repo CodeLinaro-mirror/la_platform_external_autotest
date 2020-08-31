@@ -1,9 +1,5 @@
 [
   {
-    "autotest_name": "audio_LoopbackLatency",
-    "master_name": "ChromeOS_Audio"
-  },
-  {
     "autotest_name": "audio_PlaybackPower",
     "master_name": "ChromeOS_Audio"
   },
@@ -544,17 +540,8 @@
     "master_name": "ChromeOSPower"
   },
   {
-    "autotest_regex": "tast\\.(?!graphics\\.).*",
+    "autotest_regex": "tast\\..*",
     "master_name": "ChromeOSTast"
-  },
-  {
-    "autotest_regex": "tast\\.graphics\\.CrostiniTrace.*",
-    "dashboard_test_name": "tast.graphics.CrostiniTrace",
-    "master_name": "ChromeOS_Graphics"
-  },
-  {
-    "autotest_name": "tast.graphics.WebRTCVideoPlaybackDelay",
-    "master_name": "ChromeOS_Graphics"
   },
   {
     "autotest_name": "telemetry_Benchmarks.backdrop_filter.rendering.desktop",

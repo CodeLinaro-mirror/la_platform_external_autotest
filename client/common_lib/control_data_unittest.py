@@ -101,8 +101,7 @@ class ParseControlTest(unittest.TestCase):
         self.assertEquals(cd.test_category, "stress")
         self.assertEquals(cd.test_type, "client")
         self.assertEquals(cd.require_ssp, False)
-        self.assertEquals(cd.attributes,
-                          set(["suite:smoke","suite:bvt","subsystem:default"]))
+        self.assertEquals(cd.attributes, set(["suite:smoke","suite:bvt"]))
         self.assertEquals(cd.suite,
                           "bvt,smoke,suite-listed-only-in-suite-line")
 
@@ -133,8 +132,7 @@ class ParseWrappedControlTest(unittest.TestCase):
         self.assertEquals(cd.test_category, "stress")
         self.assertEquals(cd.test_type, "client")
         self.assertEquals(cd.require_ssp, False)
-        self.assertEquals(cd.attributes,
-                          set(["suite:smoke","suite:bvt","subsystem:default"]))
+        self.assertEquals(cd.attributes, set(["suite:smoke","suite:bvt"]))
         self.assertEquals(cd.suite,
                           "bvt,smoke,suite-listed-only-in-suite-line")
         self.assertEquals(cd.max_result_size_KB, 20000)
@@ -298,11 +296,7 @@ class SetMethodTests(unittest.TestCase):
     def test_set_attributes(self):
         cd = ControlData({}, 'filename')
         cd.set_attributes('suite:bvt')
-        self.assertEquals(cd.attributes, set(['suite:bvt',
-                                              'subsystem:default']))
-        cd.set_attributes('suite:bvt, subsystem:network')
-        self.assertEquals(cd.attributes, set(['suite:bvt',
-                                              'subsystem:network']))
+        self.assertEquals(cd.attributes, set(['suite:bvt']))
 
 
     def test_get_test_time_index(self):

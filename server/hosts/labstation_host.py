@@ -7,16 +7,15 @@
 import logging
 
 from autotest_lib.client.common_lib import error
+from autotest_lib.server import afe_utils
 from autotest_lib.server.hosts import base_label
 from autotest_lib.server.hosts import cros_label
 from autotest_lib.server.cros import autoupdater
 from autotest_lib.server.hosts import labstation_repair
 from autotest_lib.server.cros import provision
 from autotest_lib.server.hosts import base_servohost
-from autotest_lib.client.cros import constants as client_constants
 from autotest_lib.server.cros.dynamic_suite import constants as ds_constants
 from autotest_lib.server.cros.dynamic_suite import tools
-from autotest_lib.client.common_lib import lsbrelease_utils
 from autotest_lib.client.common_lib.cros import dev_server
 from autotest_lib.server import utils as server_utils
 
@@ -25,11 +24,11 @@ class LabstationHost(base_servohost.BaseServoHost):
     """Labstation specific host class"""
 
     # Threshold we decide to ignore a in_use file lock. In minutes
-    IN_USE_FILE_EXPIRE_MINS = 120
+    IN_USE_FILE_EXPIRE_MINS = 90
 
     # Uptime threshold to perform a labstation reboot, this is to prevent a
     # broken DUT keep trying to reboot a labstation. In hours
-    UP_TIME_THRESH_HOLD_HOURS = 24
+    UP_TIME_THRESH_HOLD_HOURS = 6
 
     VERSION_PREFIX = provision.CROS_VERSION_PREFIX
 
@@ -62,13 +61,6 @@ class LabstationHost(base_servohost.BaseServoHost):
         self._repair_strategy = (
             labstation_repair.create_labstation_repair_strategy())
         self.labels = base_label.LabelRetriever(cros_label.LABSTATION_LABELS)
-        logging.info('adding fake host_info_store to LabstationHost')
-        try:
-            host_info = self.host_info_store.get()
-            host_info.stable_versions['servo-cros'] = host_info.stable_versions['cros']
-            self.set_dut_host_info(host_info)
-        except Exception as e:
-            logging.exception(e)
 
 
     def is_reboot_requested(self):
@@ -86,7 +78,8 @@ class LabstationHost(base_servohost.BaseServoHost):
 
         if not self._validate_uptime():
             logging.info('Ignoring DUTs reboot request because %s was'
-                         ' rebooted in last 24 hours.', self.hostname)
+                         ' rebooted in last %d hours.',
+                         self.hostname, self.UP_TIME_THRESH_HOLD_HOURS)
             return False
 
         cmd = 'find %s*%s' % (self.TEMP_FILE_DIR, self.REBOOT_FILE_POSTFIX)
@@ -111,6 +104,7 @@ class LabstationHost(base_servohost.BaseServoHost):
                          ' labstation update is in processing.')
             return
         self._servo_host_reboot()
+        self.update_cros_version_label()
         logging.info('Cleaning up reboot control files.')
         self._cleanup_post_reboot()
 
@@ -131,21 +125,6 @@ class LabstationHost(base_servohost.BaseServoHost):
         """
         pass
 
-
-    def _get_lsb_release_content(self):
-        """Return the content of lsb-release file of host."""
-        return self.run(
-            'cat "%s"' % client_constants.LSB_RELEASE).stdout.strip()
-
-
-    def get_release_version(self):
-        """Get the value of attribute CHROMEOS_RELEASE_VERSION from lsb-release.
-
-        @returns The version string in lsb-release, under attribute
-                 CHROMEOS_RELEASE_VERSION.
-        """
-        return lsbrelease_utils.get_chromeos_release_version(
-            lsb_release_content=self._get_lsb_release_content())
 
     def verify_job_repo_url(self, tag=''):
         """
@@ -250,13 +229,18 @@ class LabstationHost(base_servohost.BaseServoHost):
 
 
     def repair(self):
-        """Attempt to repair a labstation.
-        """
+        """Attempt to repair a labstation."""
         message = 'Beginning repair for host %s board %s model %s'
         info = self.host_info_store.get()
         message %= (self.hostname, info.board, info.model)
         self.record('INFO', None, None, message)
         self._repair_strategy.repair(self)
+
+
+    def update_cros_version_label(self):
+        """Update cros-version label on labstation"""
+        afe_utils.add_provision_labels(self, self.VERSION_PREFIX,
+                                       self.get_full_release_path())
 
 
     def _validate_uptime(self):

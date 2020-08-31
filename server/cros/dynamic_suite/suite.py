@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import abc
 import datetime
 import difflib
@@ -37,11 +39,11 @@ from autotest_lib.server.cros.dynamic_suite.job_status import Status
 try:
     from autotest_lib.server.cros.dynamic_suite import boolparse_lib
 except ImportError as e:
-    print 'Unable to import boolparse_lib: %s' % (e,)
-    print 'This script must be either:'
-    print '  - Be run in the chroot.'
-    print '  - (not yet supported) be run after running '
-    print '    ../utils/build_externals.py'
+    print('Unable to import boolparse_lib: %s' % (e,))
+    print('This script must be either:')
+    print('  - Be run in the chroot.')
+    print('  - (not yet supported) be run after running ')
+    print('    ../utils/build_externals.py')
 
 _FILE_BUG_SUITES = ['au', 'bvt', 'bvt-cq', 'bvt-inline', 'paygen_au_beta',
                     'paygen_au_canary', 'paygen_au_dev', 'paygen_au_stable',

@@ -84,12 +84,27 @@ class BluetoothDevice(object):
                 self._proxy.log_message(msg)
 
             if peer:
-                for chameleon in self.host.chameleon_list:
-                    chameleon.log_message(msg)
+                for btpeer in self.host.peer_list:
+                    btpeer.log_message(msg)
         except Exception as e:
             logging.error("Exception '%s' in log_message '%s'", str(e), msg)
 
+    def is_wrt_supported(self):
+        """ Check if Bluetooth adapter support WRT logs.
 
+        Intel adapter support WRT (except of WP2 and StP2)
+
+        @returns: True if adapter support WRT logs
+        """
+        return self._proxy.is_wrt_supported()
+
+    def enable_wrt_logs(self):
+        """Enable wrt logs on Intel adapters."""
+        return self._proxy.enable_wrt_logs()
+
+    def collect_wrt_logs(self):
+        """Collect wrt logs on Intel adapters."""
+        return self._proxy.collect_wrt_logs()
 
     def start_bluetoothd(self):
         """start bluetoothd.
@@ -119,6 +134,15 @@ class BluetoothDevice(object):
         """
         return self._proxy.is_bluetoothd_running()
 
+    def is_bluetoothd_valid(self):
+        """Checks whether the current bluetoothd session is ok.
+
+        Returns:
+            True if the current bluetoothd session is ok. False if bluetoothd is
+            not running or it is a new session.
+        """
+        return self._proxy.is_bluetoothd_proxy_valid()
+
 
     def reset_on(self):
         """Reset the adapter and settings and power up the adapter.
@@ -142,6 +166,18 @@ class BluetoothDevice(object):
         """@return True if an adapter is present, False if not."""
         return self._proxy.has_adapter()
 
+    def is_wake_enabled(self):
+        """@return True if adapter is wake enabled, False if not."""
+        return self._proxy.is_wake_enabled()
+
+    def set_wake_enabled(self, value):
+        """ Sets the power/wakeup value for the adapter.
+
+        Args:
+            value: Whether the adapter can wake from suspend
+
+        @return True if able to set it to value, False if not."""
+        return self._proxy.set_wake_enabled(value)
 
     def set_powered(self, powered):
         """Set the adapter power state.
@@ -562,11 +598,14 @@ class BluetoothDevice(object):
         """
         return json.loads(self._proxy.get_dev_info())
 
+
     def get_supported_capabilities(self):
         """ Get the supported_capabilities of the adapter
         @returns (capabilities,None) on success (None, <error>) on failure
         """
-        return self._proxy.get_supported_capabilities()
+        capabilities, error = self._proxy.get_supported_capabilities()
+        return (json.loads(capabilities), error)
+
 
     def register_profile(self, path, uuid, options):
         """Register new profile (service).
@@ -783,6 +822,146 @@ class BluetoothDevice(object):
         return self._proxy.reset_advertising()
 
 
+    def start_capturing_audio_subprocess(self, audio_data, recording_device):
+        """Start capturing audio in a subprocess.
+
+        @param audio_data: the audio test data
+        @param recording_device: which device recorded the audio,
+                possible values are 'recorded_by_dut' or 'recorded_by_peer'
+
+        @returns: True on success. False otherwise.
+        """
+        return self._proxy.start_capturing_audio_subprocess(
+                json.dumps(audio_data), recording_device)
+
+
+    def stop_capturing_audio_subprocess(self):
+        """Stop capturing audio.
+
+        @returns: True on success. False otherwise.
+        """
+        return self._proxy.stop_capturing_audio_subprocess()
+
+
+    def start_playing_audio_subprocess(self, audio_data):
+        """Start playing audio in a subprocess.
+
+        @param audio_data: the audio test data
+
+        @returns: True on success. False otherwise.
+        """
+        audio_data = json.dumps(audio_data)
+        return self._proxy.start_playing_audio_subprocess(audio_data)
+
+
+    def stop_playing_audio_subprocess(self):
+        """Stop playing audio in the subprocess.
+
+        @returns: True on success. False otherwise.
+        """
+        return self._proxy.stop_playing_audio_subprocess()
+
+
+    def play_audio(self, audio_data):
+        """Play audio.
+
+        It blocks until it has completed playing back the audio.
+
+        @param audio_data: the audio test data
+
+        @returns: True on success. False otherwise.
+        """
+        return self._proxy.play_audio(json.dumps(audio_data))
+
+
+    def check_audio_frames_legitimacy(self, audio_test_data, recording_device):
+        """Get the number of frames in the recorded audio file.
+        @param audio_test_data: the audio test data
+        @param recording_device: which device recorded the audio,
+                possible values are 'recorded_by_dut' or 'recorded_by_peer'
+
+        @returns: True if audio frames are legitimate.
+        """
+        return self._proxy.check_audio_frames_legitimacy(
+                json.dumps(audio_test_data), recording_device)
+
+
+    def get_primary_frequencies(self, audio_test_data, recording_device):
+        """Get primary frequencies of the audio test file.
+
+        @param audio_test_data: the audio test data
+        @param recording_device: which device recorded the audio,
+                possible values are 'recorded_by_dut' or 'recorded_by_peer'
+
+        @returns: a list of primary frequencies of channels in the audio file
+        """
+        return self._proxy.get_primary_frequencies(
+                json.dumps(audio_test_data), recording_device)
+
+
+    def enable_wbs(self, value):
+        """Enable or disable wideband speech (wbs) per the value.
+
+        @param value: True to enable wbs.
+
+        @returns: True if the operation succeeds.
+        """
+        logging.debug('%s wbs', 'enable' if value else 'disable')
+        return self._proxy.enable_wbs(value)
+
+
+    def set_player_playback_status(self, status):
+        """Set playback status for the registered media player.
+
+        @param status: playback status in string.
+
+        """
+        logging.debug('Set media player playback status to %s', status)
+        return self._proxy.set_player_playback_status(status)
+
+
+    def set_player_position(self, position):
+        """Set media position for the registered media player.
+
+        @param position: position in micro seconds.
+
+        """
+        logging.debug('Set media player position to %d', position)
+        return self._proxy.set_player_position(position)
+
+
+    def set_player_metadata(self, metadata):
+        """Set metadata for the registered media player.
+
+        @param metadata: dictionary of media metadata.
+
+        """
+        logging.debug('Set media player album:%s artist:%s title:%s',
+                      metadata.get("album"), metadata.get("artist"),
+                      metadata.get("title"))
+        return self._proxy.set_player_metadata(metadata)
+
+
+    def set_player_length(self, length):
+        """Set media length for the registered media player.
+
+        @param length: length in micro seconds.
+
+        """
+        logging.debug('Set media player length to %d', length)
+        return self._proxy.set_player_length(length)
+
+
+    def select_input_device(self, device_name):
+        """Select the audio input device.
+
+        @param device_name: the name of the Bluetooth peer device
+
+        @returns: True if the operation succeeds.
+        """
+        return self._proxy.select_input_device(device_name)
+
+
     def read_characteristic(self, uuid, address):
         """Reads the value of a gatt characteristic.
 
@@ -821,11 +1000,28 @@ class BluetoothDevice(object):
             uuid, address, base64.standard_b64encode(bytes_to_write))
 
 
-    def start_notify(self, address, uuid, cccd_value):
+    def exchange_messages(self, tx_object_path, rx_object_path, bytes_to_write):
+        """Performs a write operation on a gatt characteristic and wait for
+        the response on another characteristic.
+
+        @param tx_object_path: the object path of the characteristic to write.
+        @param rx_object_path: the object path of the characteristic to read.
+        @param value: A byte array containing the data to write.
+
+        @returns: The value of the characteristic to read from.
+                  None if the uuid/address was not found in the object tree, or
+                      if a DBus exception was raised by the write operation.
+
+        """
+        return self._proxy.exchange_messages(
+            tx_object_path, rx_object_path,
+            base64.standard_b64encode(bytes_to_write))
+
+
+    def start_notify(self, object_path, cccd_value):
         """Starts the notification session on the gatt characteristic.
 
-        @param address: The MAC address of the remote device.
-        @param uuid: The uuid of the characteristic.
+        @param object_path: the object path of the characteristic.
         @param cccd_value: Possible CCCD values include
                0x00 - inferred from the remote characteristic's properties
                0x01 - notification
@@ -836,33 +1032,31 @@ class BluetoothDevice(object):
                       if a DBus exception was raised by the operation.
 
         """
-        return self._proxy.start_notify(address, uuid, cccd_value)
+        return self._proxy.start_notify(object_path, cccd_value)
 
 
-    def stop_notify(self, address, uuid):
+    def stop_notify(self, object_path):
         """Stops the notification session on the gatt characteristic.
 
-        @param address: The MAC address of the remote device.
-        @param uuid: The uuid of the characteristic.
+        @param object_path: the object path of the characteristic.
 
         @returns: True if the operation succeeds.
                   False if the characteristic is not found, or
                       if a DBus exception was raised by the operation.
 
         """
-        return self._proxy.stop_notify(address, uuid)
+        return self._proxy.stop_notify(object_path)
 
 
-    def is_notifying(self, address, uuid):
+    def is_notifying(self, object_path):
         """Is the GATT characteristic in a notifying session?
 
-        @param address: The MAC address of the remote device.
-        @param uuid: The uuid of the characteristic.
+        @param object_path: the object path of the characteristic.
 
         @return True if it is in a notification session. False otherwise.
 
         """
-        return self._proxy.is_notifying(address, uuid)
+        return self._proxy.is_notifying(object_path)
 
 
     def is_characteristic_path_resolved(self, uuid, address):
@@ -947,6 +1141,19 @@ class BluetoothDevice(object):
         return self._proxy.gatt_descriptor_read_value(uuid, object_path)
 
 
+    def get_gatt_object_path(self, address, uuid):
+        """Get property from a characteristic attribute
+
+        @param address: The MAC address of the remote device.
+        @param uuid: The uuid of the attribute.
+
+        @return: the object path of the attribute if success,
+                 none otherwise
+
+        """
+        return self._proxy.get_gatt_object_path(address, uuid)
+
+
     def copy_logs(self, destination):
         """Copy the logs generated by this device to a given location.
 
@@ -990,6 +1197,36 @@ class BluetoothDevice(object):
 
         """
         return self._proxy.set_le_connection_parameters(address, parameters)
+
+    def wait_for_uhid_device(self, device_address):
+        """Wait for uhid device with given device address.
+
+        Args:
+            device_address: Peripheral Address
+
+        Returns:
+            True if uhid device is found.
+        """
+        return self._proxy.wait_for_uhid_device(device_address)
+
+    def bt_caused_last_resume(self):
+        """Checks if last resume from suspend was caused by bluetooth
+
+        @return: True if BT wake path was cause of resume, False otherwise
+        """
+
+        return self._proxy.bt_caused_last_resume()
+
+
+    def do_suspend(self, seconds, expect_bt_wake):
+        """Suspend DUT using the power manager.
+
+        @param seconds: The number of seconds to suspend the device.
+        @param expect_bt_wake: Whether we expect bluetooth to wake us from
+            suspend. If true, we expect this resume will occur early
+        """
+
+        return self._proxy.do_suspend(seconds, expect_bt_wake)
 
 
     def close(self, close_host=True):

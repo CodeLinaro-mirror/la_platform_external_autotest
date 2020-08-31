@@ -23,6 +23,7 @@ from autotest_lib.server import hosts
 from autotest_lib.server import site_utils as server_utils
 from autotest_lib.server.hosts import host_info
 from autotest_lib.server.hosts import servo_host
+from autotest_lib.server.hosts import servo_constants
 
 
 _FIRMWARE_UPDATE_TIMEOUT = 600
@@ -54,11 +55,11 @@ def create_cros_host(hostname, board, model, servo_hostname, servo_port,
             'model:%s' % model,
     ]
     attributes = {
-            servo_host.SERVO_HOST_ATTR: servo_hostname,
-            servo_host.SERVO_PORT_ATTR: servo_port,
+            servo_constants.SERVO_HOST_ATTR: servo_hostname,
+            servo_constants.SERVO_PORT_ATTR: servo_port,
     }
     if servo_serial is not None:
-        attributes[servo_host.SERVO_SERIAL_ATTR] = servo_serial
+        attributes[servo_constants.SERVO_SERIAL_ATTR] = servo_serial
 
     store = host_info.InMemoryHostInfoStore(info=host_info.HostInfo(
             labels=labels,
@@ -71,39 +72,6 @@ def create_cros_host(hostname, board, model, servo_hostname, servo_port,
     _prepare_servo(servohost)
     host.set_servo_host(servohost)
     host.servo.uart_logs_dir = logs_dir
-    try:
-        yield host
-    finally:
-        host.close()
-
-
-@contextlib.contextmanager
-def create_labstation_host(hostname, board, model):
-    """Yield a server.hosts.LabstationHost object to use for labstation
-    preparation.
-
-    This object contains just enough inventory data to be able to prepare the
-    labstation for lab deployment. It does not contain any reference to
-    AFE / Skylab so that DUT preparation is guaranteed to be isolated from
-    the scheduling infrastructure.
-
-    @param hostname:        FQDN of the host to prepare.
-    @param board:           The autotest board label for the DUT.
-    @param model:           The autotest model label for the DUT.
-
-    @yield a server.hosts.Host object.
-    """
-    labels = [
-        'board:%s' % board,
-        'model:%s' % model,
-        'os:labstation'
-        ]
-
-    store = host_info.InMemoryHostInfoStore(info=host_info.HostInfo(
-        labels=labels,
-    ))
-    machine_dict = _get_machine_dict(hostname, store)
-    host = hosts.create_host(machine_dict)
     try:
         yield host
     finally:
@@ -163,6 +131,37 @@ def power_cycle_via_servo(host):
                                   host.BOOT_TIMEOUT)
 
 
+def verify_ccd_testlab_enable(host):
+    """Verify that ccd testlab enable when DUT support cr50.
+
+    The new deploy process required to deploy DUTs with testlab enable when
+    connection to the servo by type-c, so we will be sure that communication
+    by servo is permanent, it's critical for auto-repair capability.
+
+    @param host server.hosts.CrosHost object.
+    """
+
+    host_info = host.host_info_store.get()
+    if host_info.os == 'labstation':
+        # skip labstation because they do not has servo
+        return
+
+    # Only verify for ccd servo connection
+    if host.servo and host.servo.get_main_servo_device() == 'ccd_cr50':
+        if not host.servo.has_control('cr50_testlab'):
+            raise Exception(
+                'CCD connection required support of cr50 on the DUT. Please '
+                'verify which servo need to be used for DUT setup.')
+
+        status = host.servo.get('cr50_testlab')
+        if status == 'on':
+            logging.info("CCD testlab mode is enabled on the DUT.")
+        else:
+            raise Exception(
+                'CCD testlab mode is not enabled on the DUT, enable '
+                'testlab mode is required for all DUTs that support CR50.')
+
+
 def verify_boot_into_rec_mode(host):
     """Verify that we can boot into USB when in recover mode, and reset tpm.
 
@@ -212,12 +211,14 @@ def install_test_image(host):
     servo.switch_usbkey('dut')
     servo.get_power_state_controller().power_on()
 
-    # Dev mode screen should be up now:  type ctrl+U and wait for
-    # boot from USB to finish.
-    time.sleep(10)
-    servo.ctrl_u()
-
-    if not host.wait_up(timeout=host.USB_BOOT_TIMEOUT):
+    # Type ctrl+U repeatedly for up to BOOT_TIMEOUT or until DUT boots.
+    boot_deadline = time.time() + host.BOOT_TIMEOUT
+    while time.time() < boot_deadline:
+        logging.info("Pressing ctrl+u")
+        servo.ctrl_u()
+        if host.ping_wait_up(timeout=5):
+            break
+    else:
         raise Exception('DUT failed to boot from USB for install test image.')
 
     host.run('chromeos-install --yes', timeout=host.INSTALL_TIMEOUT)
@@ -363,10 +364,7 @@ def _prepare_servo(servohost):
                   ignore_status=True)
     servohost.repair()
 
-    # Don't timeout probing for the host usb device, there could be a bunch
-    # of servos probing at the same time on the same servo host.  And
-    # since we can't pass None through the xml rpcs, use 0 to indicate None.
-    if not servohost.get_servo().probe_host_usb_dev(timeout=0):
+    if not servohost.get_servo().probe_host_usb_dev():
         raise Exception('No USB stick detected on Servo host')
 
 

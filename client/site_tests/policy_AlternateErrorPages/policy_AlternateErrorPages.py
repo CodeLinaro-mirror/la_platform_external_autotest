@@ -19,7 +19,7 @@ class policy_AlternateErrorPages(
     version = 1
 
     POLICY_NAME = 'AlternateErrorPagesEnabled'
-    SUGGESTED = 'Did you mean http://localhost-8080.com/?'
+    SUGGESTED = 'Try running Connectivity Diagnostics.'
     RESULTS_DICT = {
         True: SUGGESTED,
         False: 'Checking the connection',
@@ -34,7 +34,7 @@ class policy_AlternateErrorPages(
 
         """
         search_box = '#suggestions-list li'
-        tab = self.navigate_to_url('http://localhost:8080/')
+        tab = self.navigate_to_url('http://localhost-8080/')
 
         get_text = "document.querySelector('{}').innerText".format(search_box)
 

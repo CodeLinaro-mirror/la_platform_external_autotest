@@ -847,8 +847,7 @@ class ArcTest(test.test):
         raise error.TestError('Format error with variable %s' % var_name)
 
     def arc_setup(self, dep_packages=None, apks=None, full_pkg_names=None,
-                  uiautomator=False, block_outbound=False,
-                  disable_play_store=False):
+                  uiautomator=False, disable_play_store=False):
         """ARC test setup: Setup dependencies and install apks.
 
         This function disables package verification and enables non-market
@@ -861,7 +860,6 @@ class ArcTest(test.test):
         @param full_pkg_names: Array of full package name arrays to be removed
                                in teardown.
         @param uiautomator: uiautomator python package is required or not.
-        @param block_outbound: block outbound network traffic during a test.
         @param disable_play_store: Set this to True if you want to prevent
                                    GMS Core from updating.
         """
@@ -926,8 +924,6 @@ class ArcTest(test.test):
             if not is_package_disabled(_PLAY_STORE_PKG):
                 raise error.TestFail('Failed to disable Google Play Store.')
             self._should_reenable_play_store = True
-        if block_outbound:
-            self.block_outbound()
 
     def arc_teardown(self):
         """ARC test teardown.
@@ -961,42 +957,6 @@ class ArcTest(test.test):
                                 get_android_data_root(),
                                 os.path.relpath(_ANDROID_ADB_KEYS_PATH, '/'))))
         utils.system_output('adb kill-server')
-
-    def block_outbound(self):
-        """ Blocks the connection from the container to outer network.
-
-            The iptables settings accept only 100.115.92.2 port 5555 (adb) and
-            all local connections, e.g. uiautomator.
-        """
-        logging.info('Blocking outbound connection')
-        # Disable ipv6 temporarily since tests become flaky if ipv6
-        # outbound traffic is blocked with iptables.
-        _android_shell('sysctl -w net.ipv6.conf.all.disable_ipv6=1')
-        _android_shell('sysctl -w net.ipv6.conf.default.disable_ipv6=1')
-        # ipv4
-        _android_shell('iptables -I OUTPUT -j REJECT')
-        _android_shell('iptables -I OUTPUT -p tcp -s 100.115.92.2 '
-                       '--sport 5555 '
-                       '-j ACCEPT')
-        _android_shell('iptables -I OUTPUT -d localhost -j ACCEPT')
-
-    def unblock_outbound(self):
-        """ Unblocks the connection from the container to outer network.
-
-            The iptables settings are not permanent which means they reset on
-            each instance invocation. But we can still use this function to
-            unblock the outbound connections during the test if needed.
-        """
-        logging.info('Unblocking outbound connection')
-        # ipv4
-        _android_shell('iptables -D OUTPUT -d localhost -j ACCEPT')
-        _android_shell('iptables -D OUTPUT -p tcp -s 100.115.92.2 '
-                       '--sport 5555 '
-                       '-j ACCEPT')
-        _android_shell('iptables -D OUTPUT -j REJECT')
-        # Re-enable ipv6.
-        _android_shell('sysctl -w net.ipv6.conf.all.disable_ipv6=0')
-        _android_shell('sysctl -w net.ipv6.conf.default.disable_ipv6=0')
 
     def _add_ui_object_not_found_handler(self):
         """Logs the device dump upon uiautomator.UiObjectNotFoundException."""

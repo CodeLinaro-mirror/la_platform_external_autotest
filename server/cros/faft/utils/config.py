@@ -7,14 +7,29 @@ import logging
 import os
 
 import common
+from autotest_lib.client.common_lib import error
 
-CONFIG_DIR = os.path.join(
-        os.path.dirname(os.path.realpath(__file__)), os.pardir, 'configs')
 
+# Path to the local checkout of the fw-testing-configs repo
+_CONFIG_DIR = os.path.abspath(os.path.join(
+        os.path.dirname(os.path.realpath(__file__)), os.pardir,
+        'fw-testing-configs'))
+
+def _get_config_dir():
+    """
+    Return the path to the directory containing platform config files.
+
+    We prefer to use _CONFIG_DIR itself, i.e. the Autotest checkout of
+    the fw-testing-configs repository. However, if that directory cannot
+    be found, then instead use the old configs/ directory.
+
+    """
+    assert os.path.isdir(_CONFIG_DIR)
+    return _CONFIG_DIR
 
 def _get_config_filepath(platform):
     """Find the JSON file containing the platform's config"""
-    return os.path.join(CONFIG_DIR, '%s.json' % platform)
+    return os.path.join(_get_config_dir(), '%s.json' % platform)
 
 
 def _has_config_file(platform):
@@ -35,7 +50,7 @@ class Config(object):
     This object is meant to be the interface to all configuration required
     by FAFT tests, including device specific overrides.
 
-    It gets the values from the JSON files in CONFIG_DIR.
+    It gets the values from the JSON files in _CONFIG_DIR.
     Default values are declared in the DEFAULTS.json.
     Platform-specific overrides come from <platform>.json.
     If the platform has model-specific overrides, then those take precedence
@@ -43,24 +58,33 @@ class Config(object):
     If the platform inherits overrides from a parent platform, then the child
     platform's overrides take precedence over the parent's.
 
-    TODO(gredelston): Move the JSON out of this Autotest, as per
-    go/cros-fw-testing-configs
-
     @ivar platform: string containing the board name being tested.
     @ivar model: string containing the model name being tested
     """
 
     def __init__(self, platform, model=None):
         """Initialize an object with FAFT settings.
+        Load JSON in order of importance (model, platform, parent/s, DEFAULTS).
 
         @param platform: The name of the platform being tested.
         """
-        # Load JSON in order of importance (model, platform, parent/s, DEFAULTS)
-        self.platform = platform.rsplit('_', 1)[-1].lower().replace("-", "_")
         self._precedence_list = []
         self._precedence_names = []
+        # Loadthe most specific JSON config possible by splitting
+        # `platform` at its '_'/'-' and reversing ([::-1]).
+        # For example, veyron_minnie should load minnie.json.
+        # octopus_fleex should look for fleex.json. It doesn't exist, so
+        # instead it loads octopus.json.
+        platform = platform.lower().replace('-', '_')
+        for p in platform.rsplit('_', 1)[::-1]:
+            if _has_config_file(p):
+                self.platform = p
+                break
+        else:
+            self.platform = platform.replace('-','_')
         if _has_config_file(self.platform):
             platform_config = _load_config(self.platform)
+            seen_platforms = [self.platform]
             self._add_cfg_to_precedence(self.platform, platform_config)
             model_configs = platform_config.get('models', {})
             model_config = model_configs.get(model, None)
@@ -70,7 +94,13 @@ class Config(object):
                 logging.debug('Using model override for %s', model)
             parent_platform = self._precedence_list[-1].get('parent', None)
             while parent_platform is not None:
+                if parent_platform in seen_platforms:
+                    loop = ' -> '.join(seen_platforms + [parent_platform])
+                    raise error.TestError('fw-testing-configs for platform %s '
+                                          'contains an inheritance loop: %s' % (
+                                          self.platform, loop))
                 parent_config = _load_config(parent_platform)
+                seen_platforms.append(parent_platform)
                 self._add_cfg_to_precedence(parent_platform, parent_config)
                 parent_platform = self._precedence_list[-1].get('parent', None)
         else:

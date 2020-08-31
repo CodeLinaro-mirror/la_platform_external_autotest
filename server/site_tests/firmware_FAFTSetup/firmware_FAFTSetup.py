@@ -88,7 +88,9 @@ class firmware_FAFTSetup(FirmwareTest):
         logging.info("Check cold boot")
         self.switcher.mode_aware_reboot(reboot_type='cold')
 
-        if self.faft_config.mode_switcher_type == 'keyboard_dev_switcher':
+        if self.faft_config.mode_switcher_type in (
+                'menu_switcher',
+                'keyboard_dev_switcher'):
             logging.info("Check keyboard simulation")
             self.check_state(self.keyboard_checker)
         else:

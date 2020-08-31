@@ -25,6 +25,7 @@ import pipes
 import re
 import shutil
 import stat
+import subprocess
 import tempfile
 import urlparse
 
@@ -38,6 +39,7 @@ from autotest_lib.server.cros.tradefed import tradefed_chromelogin as login
 from autotest_lib.server.cros.tradefed import tradefed_constants as constants
 from autotest_lib.server.cros.tradefed import tradefed_utils
 from autotest_lib.server.cros.tradefed import tradefed_prerequisite
+from autotest_lib.server.autotest import OFFLOAD_ENVVAR
 
 # TODO(kinaba): Move to tradefed_utils together with the setup/cleanup methods.
 MediaAsset = namedtuple('MediaAssetInfo', ['uri', 'localpath'])
@@ -54,7 +56,7 @@ class TradefedTest(test.test):
     # parameter in control files can override the count, within the
     # _BRANCH_MAX_RETRY limit below.
     _BRANCH_DEFAULT_RETRY = [(0, 5), (1, 10)]  # dev=5, beta=stable=10
-    _BRANCH_MAX_RETRY = [(0, 5), (1, 30),      # dev=5, beta=30, stable=99
+    _BRANCH_MAX_RETRY = [(0, 12), (1, 30),      # dev=12, beta=30, stable=99
         (constants.APPROXIMATE_STABLE_BRANCH_NUMBER, 99)]
     # TODO(kinaba): betty-arcnext
     _BOARD_MAX_RETRY = {'betty': 0}
@@ -86,7 +88,8 @@ class TradefedTest(test.test):
                    load_waivers=True,
                    retry_manual_tests=False,
                    warn_on_test_retry=True,
-                   hard_reboot_on_failure=False):
+                   hard_reboot_on_failure=False,
+                   use_jdk9=False):
         """Sets up the tools and binary bundles for the test."""
         self._install_paths = []
         # TODO(pwang): Remove host if we enable multiple hosts everywhere.
@@ -102,13 +105,6 @@ class TradefedTest(test.test):
             cache_root = constants.TRADEFED_CACHE_CONTAINER
         else:
             cache_root = constants.TRADEFED_CACHE_LOCAL
-
-        # TODO(ihf): reevaluate this again when we run out of memory. We could
-        # for example use 32 bit java on the first run but not during retries.
-        # b/62895114. If select_32bit_java gets deleted for good also remove it
-        # from the base image.
-        # Try to save server memory (crbug.com/717413).
-        # select_32bit_java()
 
         # The content of the cache survives across jobs.
         self._safe_makedirs(cache_root)
@@ -136,6 +132,17 @@ class TradefedTest(test.test):
         self._install_files(constants.SDK_TOOLS_DIR,
                             constants.SDK_TOOLS_FILES, permission)
 
+        # If use_jdk9 is set true, use jdk9 than default jdk8.
+        if use_jdk9:
+            logging.info('Using JDK9')
+            try:
+                os.environ['JAVA_HOME'] = '/usr/lib/jvm/jdk-9.0.4'
+                os.environ['PATH'] = os.environ['JAVA_HOME']\
+                                  + '/bin:' + os.environ['PATH']
+                logging.info(subprocess.check_output(['java', '-version'], stderr=subprocess.STDOUT))
+            except OSError:
+                logging.error('Can\'t change current PATH directory')
+
         # Install the tradefed bundle.
         bundle_install_path = self._install_bundle(
             uri or self._get_default_bundle_url(bundle))
@@ -157,23 +164,59 @@ class TradefedTest(test.test):
         self._hard_reboot_on_failure = hard_reboot_on_failure
 
     def postprocess(self):
-        """Postprocess: output performance values."""
-        path = tradefed_utils.get_test_result_xml_path(
-            os.path.join(self.resultsdir,
-                         self._get_tradefed_base_dir()))
+        """Postprocess: synchronous offloads and performance data"""
+        self._output_perf()
+        self._prepare_synchronous_offloads()
+
+    def _output_perf(self):
+        """Output performance values."""
+        base = self._default_tradefed_base_dir()
+        path = tradefed_utils.get_test_result_xml_path(base)
         if path:
             for metric in tradefed_utils.get_perf_metrics_from_test_result_xml(
                 path, self.resultsdir):
                 self.output_perf_value(**metric)
 
+    def _prepare_synchronous_offloads(self):
+        """
+        Copy files needed for APFE to synchronous offload dir,  with some
+        structure to make the post-job postprocessing simpler.
+        """
+        testname = os.path.basename(self.outputdir)
+        # This is yyyy.mm.dd_hh.mm.ss  (start time)
+        timestamp_pattern = ("[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]" +
+                             "_[0-9][0-9].[0-9][0-9].[0-9][0-9]")
+        time_glob = os.path.join(
+            self._default_tradefed_base_dir(), timestamp_pattern
+        )
+        for dirpath in glob.glob(time_glob):
+            timestamp = os.path.basename(dirpath)
+            locs = [os.path.join(dirpath, f) for f in ["test_result.xml",
+                                                       "testResult.xml"]]
+            for f in locs:
+                if os.path.exists(f):
+                    subdirs = self._subdirs(f, testname, timestamp)
+                    self._copy_to_offload_dir(f, subdirs)
+        for z in glob.glob(time_glob+".zip"):
+            self._copy_to_offload_dir(z, self._subdirs(z, testname))
+
+    def _copy_to_offload_dir(self, src_path, subdirs, recursive=True):
+        target = os.path.join(os.getenv(OFFLOAD_ENVVAR), *subdirs)
+        self._safe_makedirs(target)
+        if not recursive or os.path.isfile(src_path):
+            return shutil.copy2(src_path, str(target))
+        return shutil.copytree(src_path, str(target))
+
+    def _subdirs(self, path, testname, timestamp=""):
+        # CTS results from bvt-arc suites need to be sent to the
+        # specially-designated bucket for early EDI entries in APFE,
+        # but only there.
+        dest = "BVT" if 'bvt-arc' in path else "CTS"
+        return ["APFE", dest, testname, timestamp]
+
     def cleanup(self):
         """Cleans up any dirtied state."""
-        # Kill any lingering adb servers.
-        for host in self._hosts:
-            try:
-                self._run_adb_cmd(host, verbose=True, args=('kill-server',))
-            except (error.CmdError, AttributeError):
-                pass
+        self._kill_adb_server()
 
         if hasattr(self, '_tradefed_install'):
             logging.info('Cleaning up %s.', self._tradefed_install)
@@ -181,6 +224,27 @@ class TradefedTest(test.test):
                 shutil.rmtree(self._tradefed_install)
             except IOError:
                 pass
+
+    def _kill_adb_server(self):
+        # Kill any lingering adb servers.
+        try:
+            self._run_adb_cmd(verbose=True, args=('kill-server',),
+                timeout=constants.ADB_KILL_SERVER_TIMEOUT_SECONDS)
+        except error.CmdTimeoutError as e:
+            logging.warn(e)
+            # `adb kill-server` sometimes hangs up. Kill it more brutally.
+            try:
+                client_utils.system(
+                    'killall adb',
+                    ignore_status=True,
+                    timeout=constants.ADB_KILL_SERVER_TIMEOUT_SECONDS)
+            except error.CmdTimeoutError as e:
+                # The timeout is ignored, since the only known failure pattern
+                # b/142828365 is due to a zombie process that does not prevent
+                # starting a new server with a new adb key.
+                logging.warn(e)
+        except (error.CmdError, AttributeError):
+            pass
 
     def _verify_hosts(self):
         """Verify all hosts' ChromeOS consistency."""
@@ -311,33 +375,12 @@ class TradefedTest(test.test):
         """
         host.run('android-sh -c ' + pipes.quote(command))
 
-    def _write_android_file(self, host, filename, data):
-        """Writes a file to a location relative to the android container.
-
-        This is an internal function used to bootstrap adb.
-        Tests should use adb push to write files.
-        """
-        android_cmd = 'echo %s > %s' % (pipes.quote(data),
-                                        pipes.quote(filename))
-        self._android_shell(host, android_cmd)
-
-    def _connect_adb(self, host, pubkey):
+    def _connect_adb(self, host):
         """Sets up ADB connection to the ARC container.
 
         @param host: DUT that should be connected to.
-        @param pubkey: public key that adb keygen && adb pubkey generated.
         """
         logging.info('Setting up adb connection.')
-        # Push keys for adb.
-        self._write_android_file(host, constants.ANDROID_ADB_KEYS_PATH, pubkey)
-        self._android_shell(
-            host, 'restorecon ' + pipes.quote(constants.ANDROID_ADB_KEYS_PATH))
-
-        # This starts adbd.
-        self._android_shell(host, 'setprop sys.usb.config adb')
-
-        # Also let it be automatically started upon reboot.
-        self._android_shell(host, 'setprop persist.sys.usb.config adb')
 
         # adbd may take some time to come up. Repeatedly try to connect to adb.
         utils.poll_for_condition(
@@ -387,27 +430,27 @@ class TradefedTest(test.test):
 
         # Android "RescueParty" feature can reset the above settings when the
         # device crashes often. Disable the rescue during testing.
-        self._android_shell(host, 'setprop persist.sys.disable_rescue true')
+        # Keeping only for P and below since R has SELinux restrictions.
+        if self._get_android_version() < 29:
+            self._android_shell(host, 'setprop persist.sys.disable_rescue true')
 
     def _ready_arc(self):
         """Ready ARC and adb in parallel for running tests via tradefed."""
-        # Generate the adb keys on server.
         key_path = os.path.join(self.tmpdir, 'test_key')
-        self._run_adb_cmd(verbose=True, args=('keygen', pipes.quote(key_path)))
+        with open(key_path, 'w') as f:
+            f.write(constants.PRIVATE_KEY)
         os.environ['ADB_VENDOR_KEYS'] = key_path
-        pubkey = self._run_adb_cmd(verbose=True,
-                args=('pubkey', pipes.quote(key_path))).stdout
 
         for _ in range(2):
             try:
                 # Kill existing adb server to ensure that the env var is picked
                 # up, and reset any previous bad state.
-                self._run_adb_cmd(verbose=True, args=('kill-server',))
+                self._kill_adb_server()
 
                 # TODO(pwang): connect_adb takes 10+ seconds on a single DUT.
                 #              Parallelize it if it becomes a bottleneck.
                 for host in self._hosts:
-                    self._connect_adb(host, pubkey)
+                    self._connect_adb(host)
                     self._disable_adb_install_dialog(host)
                     self._wait_for_arc_boot(host)
                 self._verify_arc_hosts()
@@ -524,7 +567,7 @@ class TradefedTest(test.test):
 
         The caller of this function is responsible for holding the cache lock.
 
-        @param uri: The Google Storage or dl.google.com uri.
+        @param uri: The Google Storage, dl.google.com or local uri.
         @return Path to the downloaded object, name.
         """
         # We are hashing the uri instead of the binary. This is acceptable, as
@@ -549,9 +592,9 @@ class TradefedTest(test.test):
         return self._download_to_dir(uri, output_dir)
 
     def _download_to_dir(self, uri, output_dir):
-        """Downloads the gs|http|https uri from the storage server.
+        """Downloads the gs|http|https|file uri from the storage server.
 
-        @param uri: The Google Storage or dl.google.com uri.
+        @param uri: The Google Storage, dl.google.com or local uri.
         @output_dir: The directory where the downloaded file should be placed.
         @return Path to the downloaded object, name.
         """
@@ -561,7 +604,7 @@ class TradefedTest(test.test):
         output = os.path.join(output_dir, filename)
 
         self._safe_makedirs(output_dir)
-        if parsed.scheme not in ['gs', 'http', 'https']:
+        if parsed.scheme not in ['gs', 'http', 'https', 'file']:
             raise error.TestFail(
                 'Error: Unknown download scheme %s' % parsed.scheme)
         if parsed.scheme in ['http', 'https']:
@@ -570,6 +613,15 @@ class TradefedTest(test.test):
             utils.run(
                 'wget',
                 args=('--report-speed=bits', '-O', output, uri),
+                verbose=True)
+            return output
+
+        if parsed.scheme in ['file']:
+            logging.info('Copy the local file from %s to %s.', parsed.path,
+                         output_dir)
+            utils.run(
+                'cp',
+                args=('-f', parsed.path, output),
                 verbose=True)
             return output
 
@@ -822,7 +874,7 @@ class TradefedTest(test.test):
             self._android_version = self._hosts[0].run(
                 'grep ANDROID_SDK /etc/lsb-release',
                 ignore_status=True).stdout.rstrip().split('=')[1]
-        return self._android_version
+        return int(self._android_version)
 
     def _get_max_retry(self, max_retry):
         """Return the maximum number of retries.
@@ -904,6 +956,12 @@ class TradefedTest(test.test):
             logging.warning('Failed to restore powerd policy, overrided policy '
                             'will persist until device reboot.')
 
+    def _clean_crash_logs(self):
+        try:
+            self._run_commands(['rm -f /home/chronos/crash/*'])
+        except (error.AutoservRunError, error.AutoservSSHTimeout):
+            logging.warning('Failed to clean up crash logs.')
+
     def _run_and_parse_tradefed(self, command):
         """Kick off the tradefed command.
 
@@ -934,8 +992,7 @@ class TradefedTest(test.test):
                 self._clean_download_cache_if_needed(force=True)
             raise
 
-        result_destination = os.path.join(self.resultsdir,
-                                          self._get_tradefed_base_dir())
+        result_destination = self._default_tradefed_base_dir()
         # Gather the global log first. Datetime parsing below can abort the test
         # if tradefed startup had failed. Even then the global log is useful.
         self._collect_tradefed_global_log(output, result_destination)
@@ -960,8 +1017,7 @@ class TradefedTest(test.test):
         """
         logging.info('Setting up tradefed results and logs directories.')
 
-        results_destination = os.path.join(self.resultsdir,
-                                           self._get_tradefed_base_dir())
+        results_destination = self._default_tradefed_base_dir()
         logs_destination = os.path.join(results_destination, 'logs')
         directory_mapping = [
             (os.path.join(self._repository, 'results'), results_destination),
@@ -973,6 +1029,9 @@ class TradefedTest(test.test):
                 shutil.rmtree(tradefed_path)
             self._safe_makedirs(final_path)
             os.symlink(final_path, tradefed_path)
+
+    def _default_tradefed_base_dir(self):
+        return os.path.join(self.resultsdir, self._get_tradefed_base_dir())
 
     def _install_plan(self, subplan):
         """Copy test subplan to CTS-TF.
@@ -1140,9 +1199,12 @@ class TradefedTest(test.test):
         accurate = []
         board = self._get_board_name()
         session_id = None
+        toggle_ndk = board == 'rammus-arc-r' # Toggle to ndk translation for this board
+        nativebridge64_experiment = (self._get_release_branch_number() == 0)
 
         self._setup_result_directories()
-        self._prepare_media(media_asset)
+        if media_asset:
+            self._prepare_media(media_asset)
 
         # This loop retries failures. For this reason please do not raise
         # TestFail in this loop if you suspect the failure might be fixed
@@ -1155,7 +1217,9 @@ class TradefedTest(test.test):
                     hosts=self._hosts,
                     board=board,
                     dont_override_profile=keep_media,
-                    enable_default_apps=enable_default_apps) as current_logins:
+                    enable_default_apps=enable_default_apps,
+                    toggle_ndk=toggle_ndk,
+                    nativebridge64=nativebridge64_experiment) as current_logins:
                 if self._should_reboot(steps):
                     # TODO(rohitbm): Evaluate if power cycle really helps with
                     # Bluetooth test failures, and then make the implementation
@@ -1190,9 +1254,13 @@ class TradefedTest(test.test):
                 #              not-excecuted, for instance, by collecting all
                 #              tests on startup (very expensive, may take 30
                 #              minutes).
-                # TODO(b/137917339): Only prevent screen from turning off for
-                # media tests. Remove this check once the GPU issue is fixed.
                 if media_asset and media_asset.uri:
+                    # Clean-up crash logs from previous sessions to ensure
+                    # enough disk space for 16GB storage devices: b/156075084.
+                    if not keep_media:
+                        self._clean_crash_logs()
+                    # TODO(b/137917339): Only prevent screen from turning off for
+                    # media tests. Remove this check once the GPU issue is fixed.
                     self._override_powerd_prefs()
                 try:
                     waived_tests, acc = self._run_and_parse_tradefed(command)
@@ -1200,7 +1268,8 @@ class TradefedTest(test.test):
                     # TODO(b/137917339): ditto
                     if media_asset and media_asset.uri:
                         self._restore_powerd_prefs()
-                self._fail_on_unexpected_media_download(media_asset)
+                if media_asset:
+                    self._fail_on_unexpected_media_download(media_asset)
                 result = self._run_tradefed_list_results()
                 if not result:
                     logging.error('Did not find any test results. Retry.')
@@ -1208,10 +1277,11 @@ class TradefedTest(test.test):
                         current_login.need_reboot()
                     continue
 
-                waived = len(waived_tests)
-                last_session_id, passed, failed, all_done = result
+                last_waived = len(waived_tests)
+                last_session_id, last_passed, last_failed, last_all_done =\
+                    result
 
-                if failed > waived or not utils.is_in_container():
+                if last_failed > last_waived or not utils.is_in_container():
                     for host in self._hosts:
                         dir_name = "%s-step%02d" % (host.hostname, steps)
                         output_dir = os.path.join(
@@ -1221,23 +1291,25 @@ class TradefedTest(test.test):
                         self._copy_extra_artifacts_host(
                             extra_artifacts_host, host, output_dir)
 
-                if passed + failed > 0:
+                if last_passed + last_failed > 0:
                     # At least one test had run, which means the media push step
                     # of tradefed didn't fail. To free up the storage earlier,
                     # delete the copy on the server side. See crbug.com/970881
-                    self._cleanup_media(media_asset)
+                    if media_asset:
+                        self._cleanup_media(media_asset)
 
                 # If the result is |acc|urate according to the log, or the
                 # inaccuracy is recognized by tradefed (not all_done), then
                 # it is fine.
-                accurate.append(acc or not all_done)
-                if failed < waived:
+                accurate.append(acc or not last_all_done)
+                if last_failed < last_waived:
                     logging.error(
                         'Error: Internal waiver bookkeeping has become '
-                        'inconsistent (f=%d, w=%d)', failed, waived)
+                        'inconsistent (f=%d, w=%d)', last_failed, last_waived)
 
                 msg = 'run' if session_id == None else ' retry'
-                msg += '(p=%s, f=%s, w=%s)' % (passed, failed, waived)
+                msg += '(p=%s, f=%s, w=%s)' % (last_passed, last_failed,
+                                               last_waived)
                 self.summary += msg
                 logging.info('RESULT: %s %s', msg, result)
 
@@ -1245,7 +1317,7 @@ class TradefedTest(test.test):
                 # provided by list_results to decide if there are outstanding
                 # modules to iterate over (similar to missing tests just on a
                 # per-module basis).
-                notest = (passed + failed == 0 and all_done)
+                notest = (last_passed + last_failed == 0 and last_all_done)
                 if target_module in self._notest_modules:
                     if notest:
                         logging.info('Package has no tests as expected.')
@@ -1263,7 +1335,8 @@ class TradefedTest(test.test):
                         current_login.need_reboot()
                     continue
 
-                session_id = last_session_id
+                waived = last_waived
+                session_id, passed, failed, all_done  = result
                 if (not all_done and executable_test_count != None and
                         (passed + failed ==
                          executable_test_count * self._test_count_factor)):

@@ -78,9 +78,9 @@ class platform_S0ixCycle(FirmwareTest):
         """
         Check this device is a SKL based ChromeBook.
         """
-        skl_boards = ('Kunimitsu', 'Lars', 'Glados', 'Chell', 'Sentry')
+        skl_boards = ('kunimitsu', 'lars', 'glados', 'chell', 'sentry')
         output = self.faft_client.system.get_platform_name()
-        return output in skl_boards
+        return output.lower() in skl_boards
 
     def is_s0ix_supported(self):
         """

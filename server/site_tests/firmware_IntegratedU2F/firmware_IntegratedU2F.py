@@ -9,6 +9,7 @@ import subprocess
 
 from autotest_lib.client.common_lib import error, utils
 from autotest_lib.client.common_lib.cros import tpm_utils
+from autotest_lib.client.cros import constants
 from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
 
 
@@ -50,9 +51,9 @@ class firmware_IntegratedU2F(FirmwareTest):
 
 
     def owner_key_exists(self):
-        """Return True if /var/lib/whitelist/owner.key exists."""
+        """Return True if constants.OWNER_KEY_FILE exists."""
         logging.info('checking for owner key')
-        return self.host.path_exists('/var/lib/whitelist/owner.key')
+        return self.host.path_exists(constants.OWNER_KEY_FILE)
 
 
     def wait_for_policy(self):
@@ -67,6 +68,28 @@ class firmware_IntegratedU2F(FirmwareTest):
         if not utils.wait_for_value(self.owner_key_exists, True,
                                     timeout_sec=120):
             raise error.TestError('Device did not create owner key')
+
+
+    def attestation_init_complete(self):
+        """Return True if prepare_for_enrollment has completed"""
+        return 'prepared_for_enrollment: true' in self.host.run(
+            'attestation_client status').stdout
+
+    def chaps_init_complete(self):
+        """Return True if chaps token initialization has completed"""
+        return 'available with 2 token' in self.host.run(
+            'chaps_client --ping').stderr
+
+    def wait_for_cr50(self):
+      """Wait for cr50 to complete any OOBE initialization"""
+
+      if not utils.wait_for_value(self.attestation_init_complete,
+                                  True, timeout_sec=120):
+            raise error.TestError('Attestation initialization did not complete')
+
+      if not utils.wait_for_value(self.chaps_init_complete,
+                                  True, timeout_sec=120):
+            raise error.TestError('Chaps initialization did not complete')
 
 
     def set_u2fd_flags(self, u2f, g2f, user_keys):
@@ -196,6 +219,10 @@ class firmware_IntegratedU2F(FirmwareTest):
 
         # u2fd needs the policy file to exist.
         self.wait_for_policy()
+
+        # Wait for OOBE initialiation to complete, as long-running operations
+        # (eg RSA key generation) could cause U2F operations to timeout.
+        self.wait_for_cr50()
 
         logging.info("testing u2fd --u2f")
         self.set_u2fd_flags(True, False, False)

@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import logging
 import unittest
 import re
@@ -64,7 +66,7 @@ class HostMock(abstract_ssh.AbstractSSHHost):
         try:
             self.redirect_index = cmd_args.index(">")
             self.top_output_file_path = cmd_args[self.redirect_index + 1]
-        except ValueError, IndexError:
+        except (ValueError, IndexError):
             self.called_unsupported_command(cmd_line)
 
         self.top_is_running = True

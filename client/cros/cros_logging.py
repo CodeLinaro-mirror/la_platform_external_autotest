@@ -255,6 +255,21 @@ class LogReader(AbstractLogReader):
             f.close()
 
 
+class SystemLogReader(AbstractLogReader):
+    """A class to read logs stored in plaintexts using croslog command
+    """
+
+    def read_all_logs(self):
+      proc = subprocess.Popen(['croslog'], stdout=subprocess.PIPE)
+      line_number = 0
+      for line in proc.stdout:
+          line_number += 1
+          if line_number < self._start_line:
+              continue
+          yield line
+      proc.terminate()
+
+
 class JournalLogReader(AbstractLogReader):
     """A class to read logs stored by systemd-journald.
     """
@@ -297,10 +312,12 @@ class ContinuousLogReader(AbstractLogReader):
 def make_system_log_reader():
     """Create a system log reader.
 
-    This will create JournalLogReader() or LogReader() depending on
+    This will create SystemLogReader(). JournalLogReader() or LogReader() depending on
     whether the system is configured with systemd.
     """
-    if os.path.exists("/var/log/journal"):
+    if os.path.exists("/usr/sbin/croslog"):
+        return SystemLogReader()
+    elif os.path.exists("/var/log/journal"):
         return JournalLogReader()
     else:
         return LogReader()

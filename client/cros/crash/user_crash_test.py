@@ -31,7 +31,7 @@ class UserCrashTest(crash_test.CrashTest):
     # Every crash report needs one of these to be valid.
     REPORT_REQUIRED_FILETYPES = {'meta'}
     # Reports might have these and that's OK!
-    REPORT_OPTIONAL_FILETYPES = {'dmp', 'log', 'proclog'}
+    REPORT_OPTIONAL_FILETYPES = {'dmp', 'log', 'proclog', 'pslog'}
 
 
     def setup(self):
@@ -223,7 +223,9 @@ class UserCrashTest(crash_test.CrashTest):
 
             utils.system('cp -a "%s" "%s"' % (self._crasher_path, dest))
 
-        self.enable_crash_filtering(os.path.basename(crasher_path))
+        # Limit to the first 15 characters of the crasher binary name because
+        # that's what the kernel invokes crash_reporter with.
+        self.enable_crash_filtering(os.path.basename(crasher_path)[:15])
 
         crasher_command = []
 
@@ -388,7 +390,8 @@ class UserCrashTest(crash_test.CrashTest):
                                          cause_crash=True, consent=True,
                                          crasher_path=None, run_crasher=None,
                                          expected_uid=None, expected_gid=None,
-                                         expected_exit_code=None):
+                                         expected_exit_code=None,
+                                         expect_crash_reporter_fail=False):
         self._log_reader.set_start_by_current()
 
         result = self._run_crasher_process(
@@ -404,8 +407,10 @@ class UserCrashTest(crash_test.CrashTest):
         crash_dir = self._canonicalize_crash_dir(crash_dir)
 
         if not consent:
-            if os.path.exists(crash_dir):
-                raise error.TestFail('Crash directory should not exist')
+            contents = os.listdir(crash_dir)
+            if contents:
+                raise error.TestFail(
+                    'Crash directory should be empty but had %s', contents)
             return result
 
         if not os.path.exists(crash_dir):
@@ -413,6 +418,9 @@ class UserCrashTest(crash_test.CrashTest):
 
         crash_contents = os.listdir(crash_dir)
         basename = os.path.basename(crasher_path or self._crasher_path)
+        if expect_crash_reporter_fail:
+          old_basename = basename
+          basename = "crash_reporter_failure"
 
         # A dict tracking files for each crash report.
         crash_report_files = {}
@@ -428,6 +436,12 @@ class UserCrashTest(crash_test.CrashTest):
         for filename in crash_contents:
             if filename.endswith('.core'):
                 # Ignore core files.  We'll test them later.
+                pass
+            elif (expect_crash_reporter_fail
+                  and filename.startswith(old_basename + '.')):
+                # In the case where crash reporter fails, we might generate
+                # some files with the basename of the crashing
+                # executable. That's okay -- just ignore them.
                 pass
             elif filename.startswith(basename + '.'):
                 ext = filename.rsplit('.', 1)[1]
@@ -467,6 +481,7 @@ class UserCrashTest(crash_test.CrashTest):
         result['basename'] = basename
         result['meta'] = crash_report_files['meta']
         result['log'] = crash_report_files['log']
+        result['pslog'] = crash_report_files['pslog']
         return result
 
 

@@ -9,6 +9,7 @@ import os
 import time
 
 from autotest_lib.client.bin import utils
+from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros.chameleon import audio_test_utils
 from autotest_lib.client.cros.chameleon import audio_widget_link
 from autotest_lib.client.cros.chameleon import chameleon_audio_helper
@@ -160,6 +161,16 @@ class audio_AudioAfterReboot(audio_test.AudioTest):
             external USB speaker on CFM (ChromeBox For Meetings) devices.
 
         """
+        if ((bind_from == chameleon_audio_ids.CrosIds.HEADPHONE or
+            bind_to == chameleon_audio_ids.CrosIds.EXTERNAL_MIC) and
+            not audio_test_utils.has_audio_jack(self.host)):
+            raise error.TestNAError(
+                    'No audio jack for the DUT.'
+                    ' Confirm swarming bot dimension and control file'
+                    ' dependency for audio jack is matching.'
+                    ' For new boards, has_audio_jack might need to be updated.'
+            )
+
         if (recorder == chameleon_audio_ids.CrosIds.INTERNAL_MIC and
             (not cfm_speaker and
             not audio_test_utils.has_internal_microphone(host))):
@@ -189,7 +200,8 @@ class audio_AudioAfterReboot(audio_test.AudioTest):
                 recorder_id=recorder)
 
         self.ignore_frequencies = None
-        if source == chameleon_audio_ids.CrosIds.SPEAKER:
+        if (source == chameleon_audio_ids.CrosIds.SPEAKER
+                    or bind_to == chameleon_audio_ids.CrosIds.EXTERNAL_MIC):
             self.ignore_frequencies = [50, 60]
 
         # Two widgets are binded in the factory if necessary

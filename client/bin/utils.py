@@ -365,6 +365,9 @@ INTEL_UARCH_TABLE = {
     '06_55': 'Skylake',
     '06_8C': 'Tiger Lake',
     '06_8D': 'Tiger Lake',
+    '06_86': 'Tremont',
+    '06_96': 'Tremont',
+    '06_9C': 'Tremont',
     '06_25': 'Westmere',
     '06_2C': 'Westmere',
     '06_2F': 'Westmere',
@@ -1046,6 +1049,7 @@ def unload_module(module_name):
 
     @param module_name: Name of the module we want to remove.
     """
+    module_name = module_name.replace('-', '_')
     l_raw = utils.system_output("/bin/lsmod").splitlines()
     lsmod = [x for x in l_raw if x.split()[0] == module_name]
     if len(lsmod) > 0:
@@ -1956,14 +1960,12 @@ def get_ec_temperatures():
             matched = pattern.match(line)
             temperature = int(matched.group(1)) - 273
             temperatures.append(temperature)
-    except Exception:
-        logging.warning('Unable to read temperature sensors using ectool.')
-    for temperature in temperatures:
-        # Sanity check for real world values.
-        assert ((temperature > 10.0) and
-                (temperature < 150.0)), ('Unreasonable temperature %.1fC.' %
-                                         temperature)
-
+    except Exception as e:
+        logging.warning('Unable to read temperature sensors using ectool %s.',
+                        e)
+    # Sanity check for real world values.
+    if not all(10.0 <= temperature <= 150.0 for temperature in temperatures):
+        logging.warning('Unreasonable EC temperatures: %s.', temperatures)
     return temperatures
 
 
@@ -2313,10 +2315,9 @@ def get_gpu_family():
         wflinfo = utils.system_output(cmd,
                                       retain_output=True,
                                       ignore_status=False)
-        version = re.findall(r'OpenGL renderer string: '
-                             r'Mali-T([0-9]+)', wflinfo)
-        if version:
-            return 'mali-t%s' % version[0]
+        m = re.findall(r'OpenGL renderer string: (Mali-\w+)', wflinfo)
+        if m:
+            return m[0].lower()
         return 'mali-unrecognized'
     if socfamily == 'tegra':
         return 'tegra'
@@ -2394,7 +2395,7 @@ def get_other_device():
     Will return a list of other block devices, that are not the root device.
     """
 
-    cmd = 'lsblk -dpn -o NAME | grep -v loop | grep -v zram'
+    cmd = 'lsblk -dpn -o NAME | grep -v -E "(loop|zram|boot|rpmb)"'
     devs = utils.system_output(cmd).splitlines()
 
     for dev in devs[:]:

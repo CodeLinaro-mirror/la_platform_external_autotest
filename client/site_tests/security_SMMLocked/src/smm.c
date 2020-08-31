@@ -103,6 +103,13 @@ int guess_offset(struct pci_dev *northbridge)
         printf("Detected Coffee lake\n");
         offset = 0x88;
         break;
+    case 0x4e12:
+    case 0x4e14:
+    case 0x4e22:
+    case 0x4e26:
+	printf("Detected Jasper lake.. skipping test\n");
+	exit(EXIT_SUCCESS); 
+	break;
     case 0x5904:
     case 0x590c:
     case 0x590f:

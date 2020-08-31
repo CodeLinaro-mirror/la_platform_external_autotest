@@ -60,8 +60,9 @@ a pipeline used by CUPS can are extracted from CUPS logs after the job is
 completed. To do that, CUPS configuration must be modified: the LogLevel
 option in /etc/cups/cupsd.conf must be set to "debug". This modification is
 done when the autotest is initialized; the original setting is restored in
-the cleaup stage. 
-
+the cleaup stage. To make these modifications, 'debug' tests remount the root
+partition in read-write mode. The partition is NOT remounted back to read-only
+mode.
 
 Save outputs and logs ('dump')
 ------------------------------

@@ -19,7 +19,9 @@ import threading
 import time
 
 from autotest_lib.client.bin import utils
-from autotest_lib.client.common_lib import error, enum
+from autotest_lib.client.common_lib import enum
+from autotest_lib.client.common_lib import error
+from autotest_lib.client.common_lib.cros import retry
 from autotest_lib.client.common_lib.utils import poll_for_condition_ex
 from autotest_lib.client.cros import kernel_trace
 from autotest_lib.client.cros.power import power_utils
@@ -1016,6 +1018,7 @@ class CPUPackageStats(CPUCStateStats):
                 'Silvermont':   self.SILVERMONT,
                 'Skylake':      self.BROADWELL,
                 'Tiger Lake':   self.BROADWELL,
+                'Tremont':      self.GOLDMONT,
                 'Westmere':     self.NEHALEM,
                 }.get(cpu_uarch, None)
 
@@ -2042,13 +2045,36 @@ class CPUStatsLogger(MeasurementLogger):
 
 
 class PowerLogger(MeasurementLogger):
-    """Class to measure power consumption.
-    """
+    """Class to measure power consumption."""
+
+    def __init__(self, measurements, seconds_period=1.0,
+                 checkpoint_logger=None):
+        if not measurements:
+            measurements = self.create_measurements()
+        super(PowerLogger, self).__init__(measurements, seconds_period,
+                                          checkpoint_logger)
+
+    def create_measurements(self):
+        """Create power measurements based on device config."""
+        # Import here to avoid import loop.
+        from autotest_lib.client.cros.power import power_rapl
+
+        measurements = []
+        status = get_status()
+        if status.battery_discharging():
+            measurements.append(SystemPower(status.battery_path))
+        if power_utils.has_powercap_support():
+            measurements += power_rapl.create_powercap()
+        elif power_utils.has_rapl_support():
+            measurements += power_rapl.create_rapl()
+        elif power_utils.has_amd_rapl_support():
+            measurements += power_rapl.create_amd_rapl()
+        return measurements
+
     def save_results(self, resultsdir, fname_prefix=None):
         if not fname_prefix:
             fname_prefix = 'power_results_%.0f' % time.time()
         super(PowerLogger, self).save_results(resultsdir, fname_prefix)
-
 
     def calc(self, mtype='pwr'):
         return super(PowerLogger, self).calc(mtype)
@@ -2119,42 +2145,48 @@ def has_battery_temp():
 
 class TempLogger(MeasurementLogger):
     """A thread that logs temperature readings in millidegrees Celsius."""
-    def __init__(self, measurements, seconds_period=30.0, checkpoint_logger=None):
+
+    def __init__(self, measurements, seconds_period=30.0,
+                 checkpoint_logger=None):
         if not measurements:
-            domains = set()
-            measurements = []
-            tstats = ThermalStatHwmon()
-            for kname in tstats.fields:
-                match = re.match(r'(\S+)_temp(\d+)_input', kname)
-                if not match:
-                    continue
-                domain = match.group(1) + '-t' + match.group(2)
-                fpath = tstats.fields[kname][0]
-                new_meas = TempMeasurement(domain, fpath)
-                measurements.append(new_meas)
-                domains.add(domain)
+            measurements = self.create_measurements()
+        super(TempLogger, self).__init__(measurements, seconds_period,
+                                         checkpoint_logger)
 
-            if has_battery_temp():
-                measurements.append(BatteryTempMeasurement())
+    def create_measurements(self):
+        """Create measurements for TempLogger."""
+        domains = set()
+        measurements = []
+        tstats = ThermalStatHwmon()
+        for kname in tstats.fields:
+            match = re.match(r'(\S+)_temp(\d+)_input', kname)
+            if not match:
+                continue
+            domain = match.group(1) + '-t' + match.group(2)
+            fpath = tstats.fields[kname][0]
+            new_meas = TempMeasurement(domain, fpath)
+            measurements.append(new_meas)
+            domains.add(domain)
 
-            sysfs_paths = '/sys/class/thermal/thermal_zone*'
-            paths = glob.glob(sysfs_paths)
-            for path in paths:
-                domain_path = os.path.join(path, 'type')
-                temp_path = os.path.join(path, 'temp')
+        if has_battery_temp():
+            measurements.append(BatteryTempMeasurement())
 
-                domain = utils.read_one_line(domain_path)
+        sysfs_paths = '/sys/class/thermal/thermal_zone*'
+        paths = glob.glob(sysfs_paths)
+        for path in paths:
+            domain_path = os.path.join(path, 'type')
+            temp_path = os.path.join(path, 'temp')
 
-                # Skip when thermal_zone and hwmon have same domain.
-                if domain in domains:
-                    continue
+            domain = utils.read_one_line(domain_path)
 
-                domain = domain.replace(' ', '_')
-                new_meas = TempMeasurement(domain, temp_path)
-                measurements.append(new_meas)
+            # Skip when thermal_zone and hwmon have same domain.
+            if domain in domains:
+                continue
 
-        super(TempLogger, self).__init__(measurements, seconds_period, checkpoint_logger)
-
+            domain = domain.replace(' ', '_')
+            new_meas = TempMeasurement(domain, temp_path)
+            measurements.append(new_meas)
+        return measurements
 
     def save_results(self, resultsdir, fname_prefix=None):
         if not fname_prefix:
@@ -2168,6 +2200,38 @@ class TempLogger(MeasurementLogger):
 
 class VideoFpsLogger(MeasurementLogger):
     """Class to measure Video FPS."""
+
+    @classmethod
+    def time_until_ready(cls, tab, num_video=1, timeout=120):
+        """Wait until tab is ready for VideoFpsLogger and return time used.
+
+        Keep polling Chrome tab until these 2 conditions are met one by one.
+        - Number of <video> elements detected is equal to |num_video|.
+        - All videos are played for at least 1 ms.
+
+        Args:
+            tab: Chrome tab object
+            num_video: number of expected <video> elements, default 1.
+            timeout: timeout in seconds, default 120.
+
+        Returns:
+            float, number of seconds elasped until condition met.
+
+        Raises:
+            py_utils.TimeoutException if condition are not met by timeout.
+        """
+        start_time = time.time()
+
+        # Number of <video> elements detected is equal to |num_video|.
+        c = 'document.getElementsByTagName("video").length == %d' % num_video
+        tab.WaitForJavaScriptCondition(c, timeout=timeout)
+
+        # All videos are played for at least 1 ms.
+        c = ('Math.min(...Array.from(document.getElementsByTagName("video"))'
+             '.map(v => v.currentTime)) >= 0.001')
+        timeout_left = timeout - (time.time() - start_time)
+        tab.WaitForJavaScriptCondition(c, timeout=timeout_left)
+        return time.time() - start_time
 
     def __init__(self, tab, seconds_period=1.0, checkpoint_logger=None):
         """Initialize a VideoFpsLogger.
@@ -2185,10 +2249,13 @@ class VideoFpsLogger(MeasurementLogger):
         self.refresh()
 
     def refresh(self):
-        current = self._tab.EvaluateJavaScript(
-            'Array.from(document.getElementsByTagName("video")).map('
-            'v => v.webkitDecodedFrameCount)')
-        fps = [(b - a) / self.seconds_period
+        @retry.retry(Exception, timeout_min=0.5, delay_sec=0.1)
+        def get_fps():
+            return self._tab.EvaluateJavaScript(
+                'Array.from(document.getElementsByTagName("video")).map('
+                'v => v.webkitDecodedFrameCount)')
+        current = get_fps()
+        fps = [(b - a if b >= a else b) / self.seconds_period
                for a, b in zip(self._last , current)]
         self._last = current
         return fps
@@ -2200,6 +2267,77 @@ class VideoFpsLogger(MeasurementLogger):
 
     def calc(self, mtype='fps'):
         return super(VideoFpsLogger, self).calc(mtype)
+
+
+def get_num_fans():
+    """Count how many fan DUT has.
+
+    Returns:
+        Integer, number of fans that DUT has.
+    """
+    res = utils.run('ectool pwmgetnumfans | grep -o [0-9]', ignore_status=True)
+    if not res or res.exit_status != 0:
+        return 0
+    return int(res.stdout)
+
+
+def has_fan():
+    """Determine if DUT has fan.
+
+    Returns:
+        Boolean, True if dut has fan.  False otherwise.
+    """
+    return get_num_fans() > 0
+
+
+class FanRpmLogger(MeasurementLogger):
+    """Class to measure Fan RPM."""
+
+    def __init__(self, seconds_period=1.0, checkpoint_logger=None):
+        """Initialize a FanRpmLogger."""
+        super(FanRpmLogger, self).__init__([], seconds_period,
+                                             checkpoint_logger)
+        self.domains =  ['fan_' + str(i) for i in range(get_num_fans())]
+        self.refresh()
+
+    def refresh(self):
+        @retry.retry(Exception, timeout_min=0.1, delay_sec=2)
+        def get_fan_rpm_all():
+            cmd = 'ectool pwmgetfanrpm all | cut -f 2 -d: | xargs'
+            res = utils.run(cmd, ignore_status=True,
+                            stdout_tee=utils.TEE_TO_LOGS,
+                            stderr_tee=utils.TEE_TO_LOGS)
+            return [int(rpm) for rpm in res.stdout.split(' ')]
+        return get_fan_rpm_all()
+
+    def save_results(self, resultsdir, fname_prefix=None):
+        if not fname_prefix:
+            fname_prefix = 'fan_rpm_results_%.0f' % time.time()
+        super(FanRpmLogger, self).save_results(resultsdir, fname_prefix)
+
+    def calc(self, mtype='rpm'):
+        return super(FanRpmLogger, self).calc(mtype)
+
+
+def create_measurement_loggers(seconds_period=20.0, checkpoint_logger=None):
+    """Create loggers for power test that is not test-specific.
+
+    Args:
+       seconds_period: float, probing interval in seconds. Default 20.0
+       checkpoint_logger: CheckpointLogger class for the loggers
+
+    Returns:
+        list of loggers created.
+    """
+    loggers = [
+        PowerLogger(None, seconds_period, checkpoint_logger),
+        TempLogger(None, seconds_period, checkpoint_logger),
+        CPUStatsLogger(seconds_period, checkpoint_logger),
+    ]
+    if has_fan():
+        loggers.append(FanRpmLogger(seconds_period, checkpoint_logger))
+
+    return loggers
 
 
 class DiskStateLogger(threading.Thread):
@@ -2575,7 +2713,7 @@ class PCHPowergatingStats(object):
                  power consumption S0ix, empty list if none.
         """
         # PCH IP block that is on for S0ix. Ignore these IP block.
-        S0IX_WHITELIST = set([
+        S0IX_ALLOWLIST = set([
                 'PMC', 'OPI-DMI', 'SPI / eSPI', 'XHCI', 'xHCI', 'FUSE', 'Fuse',
                 'PCIE0', 'NPKVRC', 'NPKVNN', 'NPK_VNN', 'PSF1', 'PSF2', 'PSF3',
                 'PSF4', 'SBR0', 'SBR1', 'SBR2', 'SBR4', 'SBR5', 'SBR6', 'SBR7'])
@@ -2588,14 +2726,15 @@ class PCHPowergatingStats(object):
 
         # CNV device has 0x31dc as devid .
         if len(utils.system_output('lspci -d :31dc')) > 0:
-            S0IX_WHITELIST.add('CNV')
+            S0IX_ALLOWLIST.add('CNV')
 
-        # HrP2 device has 0x02f0 as devid.
-        if len(utils.system_output('lspci -d :02f0')) > 0:
-            S0IX_WHITELIST.update(['CNVI', 'NPK_AON'])
+        # HrP2 device has 0x02f0(CML) or 0x4df0(JSL) as devid.
+        if (len(utils.system_output('lspci -d :02f0')) > 0 or
+            len(utils.system_output('lspci -d :4df0')) > 0):
+            S0IX_ALLOWLIST.update(['CNVI', 'NPK_AON'])
 
         on_ip = set(ip['name'] for ip in self._stat if ip['state'])
-        on_ip -= S0IX_WHITELIST
+        on_ip -= S0IX_ALLOWLIST
 
         if on_ip:
             on_ip_in_warn_list = on_ip & S0IX_WARNLIST
@@ -2607,8 +2746,8 @@ class PCHPowergatingStats(object):
         if on_ip:
             logging.error('Found PCH IP that need to powergate: %s',
                           ', '.join(on_ip))
-            return False
-        return True
+            return on_ip
+        return []
 
     def read_pch_powergating_info(self, sleep_seconds=1):
         """

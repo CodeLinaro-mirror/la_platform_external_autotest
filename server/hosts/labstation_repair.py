@@ -3,8 +3,13 @@
 # found in the LICENSE file.
 
 import common
+import logging
 from autotest_lib.client.common_lib import hosts
 from autotest_lib.server.hosts import repair_utils
+
+# There are some labstations we don't want they receive auto-update,
+# e.g. labstations that used for image qualification purpose
+UPDATE_EXEMPTED_POOL = {'servo_verification', 'labstation_tryjob'}
 
 
 class _LabstationUpdateVerifier(hosts.Verifier):
@@ -22,7 +27,24 @@ class _LabstationUpdateVerifier(hosts.Verifier):
         restrictions can cause the update to fail.
         """
         if host.is_in_lab() and host.job and host.job.in_lab:
-            host.update_image(wait_for_update=False)
+            host.update_cros_version_label()
+            info = host.host_info_store.get()
+            if bool(UPDATE_EXEMPTED_POOL & info.pools):
+                logging.info("Skip update because the labstation is in"
+                             " one of following exempted pool: %s", info.pools)
+                return
+
+            stable_version = info.stable_versions.get('cros')
+            if stable_version:
+                host.update_image(
+                    wait_for_update=False,
+                    stable_version=stable_version
+                )
+            else:
+                raise hosts.AutoservVerifyError('Failed to check/update'
+                                                ' labstation due to no stable'
+                                                '_version found in host_info'
+                                                '_store.')
 
     @property
     def description(self):
@@ -53,6 +75,6 @@ def create_labstation_repair_strategy():
     ]
 
     repair_actions = [
-        (repair_utils.RPMCycleRepair, 'rpm', [], ['ssh']),
+        (repair_utils.RPMCycleRepair, 'rpm', [], ['ssh', 'reboot']),
     ]
     return hosts.RepairStrategy(verify_dag, repair_actions, 'labstation')

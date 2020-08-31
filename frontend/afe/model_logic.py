@@ -1007,7 +1007,7 @@ class ModelExtensions(rdb_model_extensions.ModelValidators):
         Overwriting existing values is allowed in order to be able to sync i.e.
         the aborted bit from the master to a shard.
 
-        The whitelisting mechanism is in place to prevent overwriting local
+        The allowlisting mechanism is in place to prevent overwriting local
         status: If all fields were overwritten, jobs would be completely be
         set back to their original (unstarted) state.
 
@@ -1094,7 +1094,7 @@ class ModelExtensions(rdb_model_extensions.ModelValidators):
 
         If an object of the same type with the same id already exists, it's
         local values will be left untouched, unless they are explicitly
-        whitelisted in SERIALIZATION_LOCAL_LINKS_TO_UPDATE.
+        allowlisted in SERIALIZATION_LOCAL_LINKS_TO_UPDATE.
 
         Deserialize will always recursively propagate to all related objects
         present in data though.

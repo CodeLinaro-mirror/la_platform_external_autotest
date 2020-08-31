@@ -204,14 +204,14 @@ class InputEventRecorder(object):
         """Record input events."""
         logging.info('Recording input events of %s.', self.device_node)
         cmd = 'evtest %s' % self.device_node
-        self._recorder = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+        recorder = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                           shell=True)
         with open(self.tmp_file, 'w') as output_f:
             while True:
                 read_list, _, _ = select.select(
-                        [self._recorder.stdout], [], [], 1)
+                        [recorder.stdout], [], [], 1)
                 if read_list:
-                    line = self._recorder.stdout.readline()
+                    line = recorder.stdout.readline()
                     output_f.write(line)
                     ev = Event.from_string(line)
                     if ev:
@@ -219,6 +219,8 @@ class InputEventRecorder(object):
                 elif self._stop_recording_thread_event.is_set():
                     self._stop_recording_thread_event.clear()
                     break
+
+        recorder.terminate()
 
 
     def start(self):

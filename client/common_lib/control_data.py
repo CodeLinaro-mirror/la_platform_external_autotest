@@ -98,8 +98,7 @@ class ControlData(object):
         self.job_retries = 0
         # Default to require server-side package. Unless require_ssp is
         # explicitly set to False, server-side package will be used for the
-        # job. This can be overridden by global config
-        # AUTOSERV/enable_ssp_container
+        # job.
         self.require_ssp = None
         self.attributes = set()
         self.max_result_size_KB = DEFAULT_MAX_RESULT_SIZE_KB
@@ -312,10 +311,7 @@ class ControlData(object):
         self._set_string('source_archive_uri', val)
 
     def set_attributes(self, val):
-        # Add subsystem:default if subsystem is not specified.
         self._set_set('attributes', val)
-        if not any(a.startswith('subsystem') for a in self.attributes):
-            self.attributes.add('subsystem:default')
 
 
 def _extract_const(expr):

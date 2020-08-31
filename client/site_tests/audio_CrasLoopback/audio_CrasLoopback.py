@@ -11,8 +11,8 @@ from autotest_lib.client.cros.audio import audio_test_data
 from autotest_lib.client.cros.audio import cmd_utils
 from autotest_lib.client.cros.audio import cras_utils
 
-
 TEST_DURATION = 1
+
 
 class audio_CrasLoopback(audio_helper.cras_rms_test):
     """Verifies audio playback and capture function."""
@@ -20,26 +20,23 @@ class audio_CrasLoopback(audio_helper.cras_rms_test):
 
     @staticmethod
     def wait_for_active_stream_count(expected_count):
+        """Make sure the active stream is enabled/disabled"""
         utils.poll_for_condition(
-            lambda: cras_utils.get_active_stream_count() == expected_count,
-            exception=error.TestError(
-                'Timeout waiting active stream count to become %d' %
-                 expected_count))
-
+                lambda: cras_utils.get_active_stream_count() == expected_count,
+                exception=error.TestError(
+                        'Timeout waiting active stream count to become %d' %
+                        expected_count))
 
     def run_once(self):
         """Entry point of this test."""
 
         # Generate sine raw file that lasts 5 seconds.
         raw_path = os.path.join(self.bindir, '5SEC.raw')
-        data_format = dict(file_type='raw', sample_format='S16_LE',
-                channel=2, rate=48000)
         raw_file = audio_test_data.GenerateAudioTestData(
-            path=raw_path,
-            data_format=data_format,
-            duration_secs=5,
-            frequencies=[440, 440],
-            volume_scale=0.9)
+                path=raw_path,
+                duration_secs=5,
+                frequencies=[440, 440],
+                volume_scale=0.9)
 
         recorded_file = os.path.join(self.resultsdir, 'cras_recorded.raw')
 
@@ -58,4 +55,3 @@ class audio_CrasLoopback(audio_helper.cras_rms_test):
 
         rms_value = audio_helper.get_rms(recorded_file)[0]
         self.write_perf_keyval({'rms_value': rms_value})
-

@@ -4,6 +4,7 @@
 
 import difflib
 import logging
+import math
 import time
 
 from autotest_lib.client.common_lib import error
@@ -30,6 +31,10 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
     # Initialize the FWMP with a non-zero value. Use 100, because it's an
     # unused flag and it wont do anything like lock out dev mode or ccd.
     FWMP_FLAGS = '0x100'
+    # The deep sleep count may not exactly match the suspend count. This is the
+    # ratio of difference the test tolerates. If the difference/total suspend
+    # count is greater than this ratio, fail the test.
+    TOLERATED_ERROR = 0.05
 
     def initialize(self, host, cmdline_args, suspend_count, reset_type):
         """Make sure the test is running with access to the cr50 console"""
@@ -48,6 +53,7 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
 
         # Save the original version, so we can make sure cr50 doesn't rollback.
         self.original_cr50_version = self.cr50.get_active_version_info()
+        self._suspend_diff = 0
 
 
     def cleanup(self):
@@ -164,7 +170,7 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
         # Disable CCD so Cr50 can enter deep sleep
         rv = self.wait_for_client_after_changing_ccd(False)
         if rv:
-            raise error.TestFail('Network connection issue %s', rv)
+            raise error.TestFail('Network connection issue %s' % rv)
         self.cr50.clear_deep_sleep_count()
         rv = self.check_cr50_deep_sleep(0)
         if rv:
@@ -178,7 +184,8 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
                            min_resume=self.MIN_RESUME,
                            check_connection=False,
                            suspend_iterations=suspend_count,
-                           suspend_state=self.MEM)
+                           suspend_state=self.MEM,
+                           check_client_result=True)
 
 
     def check_cr50_deep_sleep(self, suspend_count):
@@ -197,7 +204,20 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
         """
         exp_count = suspend_count if self._enters_deep_sleep else 0
         act_count = self.cr50.get_deep_sleep_count()
-        logging.info('suspend %d: deep sleep count %d', act_count, exp_count)
+        logging.info('suspend %d: deep sleep count exp %d got %d',
+                     suspend_count, exp_count, act_count)
+
+        # Cr50 sometimes misses a suspend. Don't fail if the mismatch is within
+        # the tolerated difference.
+        tolerated_diff = math.ceil(exp_count * self.TOLERATED_ERROR)
+        act_diff = exp_count - act_count
+        logging.debug('suspend %d: tolerated diff %d got %d', suspend_count,
+                      tolerated_diff, act_diff)
+        if act_diff != self._suspend_diff:
+            logging.warning('suspend %d: mismatch changed from %d to %d',
+                            suspend_count, self._suspend_diff, act_diff)
+            self._suspend_diff = act_diff
+
         self.cr50.get_sleepmask()
         self.cr50.get_ccdstate()
         hibernate = self.cr50.was_reset('RESET_FLAG_HIBERNATE')
@@ -206,9 +226,11 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
         if exp_count and not hibernate:
                 errors.append('reset during suspend')
 
-        if exp_count != act_count:
-            errors.append('count mismatch DUT %d cr50 %d' % (exp_count,
-                                                             act_count))
+        # Use the absolute value, because cr50 shouldn't suspend more or less
+        # than expected.
+        if abs(act_diff) > tolerated_diff:
+            errors.append('count mismatch expected %d got %d' % (exp_count,
+                                                                 act_count))
         return ', '.join(errors) if errors else None
 
 

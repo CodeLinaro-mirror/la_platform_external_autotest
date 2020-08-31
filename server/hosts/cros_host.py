@@ -15,6 +15,8 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import hosts
 from autotest_lib.client.common_lib import lsbrelease_utils
+from autotest_lib.client.common_lib import utils as common_utils
+from autotest_lib.client.common_lib.cros import cros_config
 from autotest_lib.client.common_lib.cros import dev_server
 from autotest_lib.client.common_lib.cros import retry
 from autotest_lib.client.cros import constants as client_constants
@@ -32,7 +34,9 @@ from autotest_lib.server.hosts import cros_label
 from autotest_lib.server.hosts import cros_repair
 from autotest_lib.server.hosts import pdtester_host
 from autotest_lib.server.hosts import servo_host
+from autotest_lib.server.hosts import servo_constants
 from autotest_lib.site_utils.rpm_control_system import rpm_client
+from autotest_lib.site_utils.admin_audit import constants as audit_const
 
 # In case cros_host is being ran via SSP on an older Moblab version with an
 # older chromite version.
@@ -43,6 +47,11 @@ except ImportError:
 
 
 CONFIG = global_config.global_config
+
+# Device is not fixable due issues with hardware and has to be replaced
+DEVICE_STATE_NEEDS_REPLACEMENT = 'needs_replacement'
+# Device required manual attention to be fixed
+DEVICE_STATE_NEEDS_MANUAL_REPAIR = 'needs_manual_repair'
 
 
 class FactoryImageCheckerException(error.AutoservError):
@@ -157,7 +166,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
     _BIOS_REGEX = '(%s\.\w*\.\w*\.\w*)'
 
     # Command to update firmware located on DUT
-    _FW_UPDATE_CMD = 'chromeos-firmwareupdate --mode=recovery -i %s %s'
+    _FW_UPDATE_CMD = 'chromeos-firmwareupdate --mode=recovery %s'
 
     @staticmethod
     def check_host(host, timeout=10):
@@ -206,18 +215,35 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         @param args_dict Dictionary from which to extract the chameleon
           arguments.
         """
-        if 'chameleon_host_list' in args_dict:
-            result = []
-            for chameleon in args_dict['chameleon_host_list'].split(','):
-                result.append({key: value for key,value in
-                    zip(('chameleon_host','chameleon_port'),
-                    chameleon.split(':'))})
+        return {key: args_dict[key]
+                for key in ('chameleon_host', 'chameleon_port')
+                if key in args_dict}
 
-            logging.info(result)
+    @staticmethod
+    def get_btpeer_arguments(args_dict):
+        """Extract btpeer options from `args_dict` and return the result.
+
+        This is used to parse details of Bluetooth peer.
+        Recommended usage:
+        ~~~~~~~~
+            args_dict = utils.args_to_dict(args)
+            btpeer_args = hosts.CrosHost.get_btpeer_arguments(args_dict)
+            host = hosts.create_host(machine, btpeer_args=btpeer_args)
+        ~~~~~~~~
+
+        @param args_dict: Dictionary from which to extract the btpeer
+          arguments.
+        """
+        if 'btpeer_host_list' in args_dict:
+            result = []
+            for btpeer in args_dict['btpeer_host_list'].split(','):
+                result.append({key: value for key,value in
+                    zip(('btpeer_host','btpeer_port'),
+                    btpeer.split(':'))})
             return result
         else:
            return {key: args_dict[key]
-                for key in ('chameleon_host', 'chameleon_port')
+                for key in ('btpeer_host', 'btpeer_port')
                 if key in args_dict}
 
 
@@ -254,23 +280,23 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         @param args_dict Dictionary from which to extract the servo
           arguments.
         """
-        servo_attrs = (servo_host.SERVO_HOST_ATTR,
-                       servo_host.SERVO_PORT_ATTR,
-                       servo_host.SERVO_BOARD_ATTR,
-                       servo_host.SERVO_MODEL_ATTR)
+        servo_attrs = (servo_constants.SERVO_HOST_ATTR,
+                       servo_constants.SERVO_PORT_ATTR,
+                       servo_constants.SERVO_BOARD_ATTR,
+                       servo_constants.SERVO_MODEL_ATTR)
         servo_args = {key: args_dict[key]
                       for key in servo_attrs
                       if key in args_dict}
         return (
             None
-            if servo_host.SERVO_HOST_ATTR in servo_args
-                and not servo_args[servo_host.SERVO_HOST_ATTR]
+            if servo_constants.SERVO_HOST_ATTR in servo_args
+                and not servo_args[servo_constants.SERVO_HOST_ATTR]
             else servo_args)
 
 
     def _initialize(self, hostname, chameleon_args=None, servo_args=None,
                     pdtester_args=None, try_lab_servo=False,
-                    try_servo_repair=False,
+                    try_servo_repair=False, btpeer_args=[],
                     ssh_verbosity_flag='', ssh_options='',
                     *args, **dargs):
         """Initialize superclasses, |self.chameleon|, and |self.servo|.
@@ -300,6 +326,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         super(CrosHost, self)._initialize(hostname=hostname,
                                           *args, **dargs)
         self._repair_strategy = cros_repair.create_cros_repair_strategy()
+        # hold special dut_state for repair process
+        self._device_repair_state = None
         self.labels = base_label.LabelRetriever(cros_label.CROS_LABELS)
         # self.env is a dictionary of environment variable settings
         # to be exported for commands run on the host.
@@ -308,33 +336,29 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         self.env['LIBC_FATAL_STDERR_'] = '1'
         self._ssh_verbosity_flag = ssh_verbosity_flag
         self._ssh_options = ssh_options
-        self.set_servo_host(
-            servo_host.create_servo_host(
-                dut=self, servo_args=servo_args,
-                try_lab_servo=try_lab_servo,
-                try_servo_repair=try_servo_repair,
-                dut_host_info=self.host_info_store.get()))
+        _servo_host, servo_state = servo_host.create_servo_host(
+            dut=self,
+            servo_args=servo_args,
+            try_lab_servo=try_lab_servo,
+            try_servo_repair=try_servo_repair,
+            dut_host_info=self.host_info_store.get())
+        self.set_servo_host(_servo_host, servo_state)
         self._default_power_method = None
 
         # TODO(waihong): Do the simplication on Chameleon too.
-        if type(chameleon_args) is list:
-            self.multi_chameleon = True
-            chameleon_args_list = chameleon_args
-        else:
-            self.multi_chameleon = False
-            chameleon_args_list = [chameleon_args]
-
-        self._chameleon_host_list = [
-            chameleon_host.create_chameleon_host(
-            dut=self.hostname, chameleon_args=_args)
-            for _args in chameleon_args_list]
-
-        self.chameleon_list = [_host.create_chameleon_board() for _host in
-                               self._chameleon_host_list if _host is not None]
-        if len(self.chameleon_list) > 0:
-            self.chameleon = self.chameleon_list[0]
+        self._chameleon_host = chameleon_host.create_chameleon_host(
+            dut=self.hostname,
+            chameleon_args=chameleon_args)
+        if self._chameleon_host:
+            self.chameleon = self._chameleon_host.create_chameleon_board()
         else:
             self.chameleon = None
+
+        # Initialize Bluetooth peers.
+        try:
+            self.initialize_btpeer(btpeer_args)
+        except Exception as e:
+            logging.error('Exception %s in initialize_btpeer', str(e))
 
         # Add pdtester host if pdtester args were added on command line
         self._pdtester_host = pdtester_host.create_pdtester_host(
@@ -350,6 +374,45 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             self.pdtester = None
 
 
+    def initialize_btpeer(self, btpeer_args):
+        """ Initialize the Bluetooth peers
+
+        Initialize Bluetooth peer devices given in the arguments. Bluetooth peer
+        is chameleon host on Raspberry Pi.
+        @param btpeer_args: A dictionary that contains args for creating
+                            a ChameleonHost. See chameleon_host for details.
+
+        """
+        #TODO (b:142486063) Remove the try..except
+        try:
+            self._btpeer_host_list = []
+            self.btpeer_list = []
+            self.btpeer = None
+
+            if type(btpeer_args) is list:
+                btpeer_args_list = btpeer_args
+            else:
+                btpeer_args_list = [btpeer_args]
+
+            self._btpeer_host_list = chameleon_host.create_btpeer_host(
+                dut=self.hostname, btpeer_args_list=btpeer_args_list)
+            logging.debug('Bluetooth peer hosts are  %s',
+                          self._btpeer_host_list)
+            self.btpeer_list = [_host.create_chameleon_board() for _host in
+                                self._btpeer_host_list if _host is not None]
+
+            if len(self.btpeer_list) > 0:
+                self.btpeer = self.btpeer_list[0]
+
+            logging.debug('After initialize_btpeer btpeer_list %s '
+                          'btpeer_host_list is %s and btpeer is %s',
+                          self.btpeer_list, self._btpeer_host_list,
+                          self.btpeer)
+        except Exception as e:
+            logging.error('Exception %s in initialize_btpeer', str(e))
+
+
+
     def get_cros_repair_image_name(self):
         """Get latest stable cros image name from AFE.
 
@@ -358,17 +421,18 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
         @returns: current stable cros image name for this host.
         """
-        board = self.host_info_store.get().board
-        if not board:
+        info = self.host_info_store.get()
+        if not info.board:
             logging.warn('No board label value found. Trying to infer '
                          'from the host itself.')
             try:
-                board = self.get_board().split(':')[1]
+                info.labels.append(self.get_board())
             except (error.AutoservRunError, error.AutoservSSHTimeout) as e:
                 logging.error('Also failed to get the board name from the DUT '
                               'itself. %s.', str(e))
-                raise error.AutoservError('Cannot obtain repair image name.')
-        return afe_utils.get_stable_cros_image_name_v2(self.host_info_store.get())
+                raise error.AutoservError('Cannot determine board of the DUT'
+                                          ' while getting repair image name.')
+        return afe_utils.get_stable_cros_image_name_v2(info)
 
 
     def host_version_prefix(self, image):
@@ -383,6 +447,27 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         """
         return provision.get_version_label_prefix(image)
 
+    def stage_build_to_usb(self, build):
+        """Stage the current ChromeOS image on the USB stick connected to the
+        servo.
+
+        @param build: The build to download and send to USB.
+        """
+        if not self.servo:
+            raise error.TestError('Host %s does not have servo.' %
+                                  self.hostname)
+
+        _, update_url = self.stage_image_for_servo(build)
+
+        try:
+            self.servo.image_to_servo_usb(update_url)
+        finally:
+            # servo.image_to_servo_usb turned the DUT off, so turn it back on
+            logging.debug('Turn DUT power back on.')
+            self.servo.get_power_state_controller().power_on()
+
+        logging.debug('ChromeOS image %s is staged on the USB stick.',
+                      build)
 
     def verify_job_repo_url(self, tag=''):
         """
@@ -608,32 +693,45 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         self.host_info_store.commit(info)
 
 
-    def get_latest_release_version(self, board):
+    def get_latest_release_version(self, platform, ref_board=None):
         """Search for the latest package release version from the image archive,
             and return it.
 
-        @param board: board name
+        @param platform: platform name, a.k.a. board or model
+        @param ref_board: reference board name, a.k.a. baseboard, parent
 
-        @return 'firmware-{board}-{branch}-firmwarebranch/{release-version}'
+        @return 'firmware-{platform}-{branch}-firmwarebranch/{release-version}/'
+                '{platform}'
                 or None if LATEST release file does not exist.
         """
 
-        # This might be in the format of 'baseboard_model',
-        # e.g. octopus_fleex. In that case, board should be just
-        # 'baseboard' to use in search for image package, e.g. octopus.
-        board = board.split('_')[0]
+        platforms = [ platform ]
 
-        # Read 'LATEST-1.0.0' file
-        branch_dir = provision.FW_BRANCH_GLOB % board
-        latest_file = os.path.join(provision.CROS_IMAGE_ARCHIVE, branch_dir,
-                                'LATEST-1.0.0')
+        # Search the image path in reference board archive as well.
+        # For example, bob has its binary image under its reference board (gru)
+        # image archive.
+        if ref_board:
+            platforms.append(ref_board)
 
-        try:
-            # The result could be one or more.
-            result = utils.system_output('gsutil ls -d ' +  latest_file)
+        for board in platforms:
+            # Read 'LATEST-1.0.0' file
+            branch_dir = provision.FW_BRANCH_GLOB % board
+            latest_file = os.path.join(provision.CROS_IMAGE_ARCHIVE, branch_dir,
+                                       'LATEST-1.0.0')
 
-            candidates = re.findall('gs://.*', result)
-        except error.CmdError:
+            try:
+                # The result could be one or more.
+                result = utils.system_output('gsutil ls -d ' +  latest_file)
+
+                candidates = re.findall('gs://.*', result)
+
+                # Found the directory candidates. No need to check the other
+                # board name cadidates. Let's break the loop.
+                break
+            except error.CmdError:
+                # It doesn't exist. Let's move on to the next item.
+                pass
+        else:
             logging.error('No LATEST release info is available.')
             return None
 
@@ -641,7 +739,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             result = utils.system_output('gsutil cat ' + cand_dir)
 
             release_path = cand_dir.replace('LATEST-1.0.0', result)
-            release_path = os.path.join(release_path, board)
+            release_path = os.path.join(release_path, platform)
             try:
                 # Check if release_path does exist.
                 release = utils.system_output('gsutil ls -d ' + release_path)
@@ -680,9 +778,10 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             raise error.TestFail('Failed to read version from %s.' % image)
 
 
-    def firmware_install(self, build=None, rw_only=False, dest=None,
+    def firmware_install(self, build, rw_only=False, dest=None,
                          local_tarball=None, verify_version=False,
-                         try_scp=False):
+                         try_scp=False, install_ec=True, install_bios=True,
+                         board_as=None):
         """Install firmware to the DUT.
 
         Use stateful update if the DUT is already running the same build.
@@ -707,6 +806,9 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                                programming firmware, default is False.
         @param try_scp: False to always program using servo, true to try copying
                         the firmware and programming from the DUT.
+        @param install_ec: True to install EC FW, and False to skip it.
+        @param install_bios: True to install BIOS, and False to skip it.
+        @param board_as: A board name to force to use.
 
         TODO(dshi): After bug 381718 is fixed, update here with corresponding
                     exceptions that could be raised.
@@ -724,40 +826,50 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         if board is None or board == '':
             board = self.servo.get_board()
 
+        # if board_as argument is passed, then use it instead of the original
+        # board name.
+        if board_as:
+            board = board_as
+
         if model is None or model == '':
             model = self.get_platform_from_fwid()
 
         # If local firmware path not provided fetch it from the dev server
         tmpd = None
         if not local_tarball:
-            # If build is not set, try to install firmware from stable CrOS.
-            if not build:
-                build = afe_utils.get_stable_faft_version_v2(info)
-                if not build:
-                    raise error.TestError(
-                            'Failed to find stable firmware build for %s.',
-                            self.hostname)
-                logging.info('Will install firmware from build %s.', build)
+            logging.info('Will install firmware from build %s.', build)
 
-            ds = dev_server.ImageServer.resolve(build, self.hostname)
-            ds.stage_artifacts(build, ['firmware'])
+            try:
+                ds = dev_server.ImageServer.resolve(build, self.hostname)
+                ds.stage_artifacts(build, ['firmware'])
 
-            if not dest:
-                tmpd = autotemp.tempdir(unique_id='fwimage')
-                dest = tmpd.name
+                if not dest:
+                    tmpd = autotemp.tempdir(unique_id='fwimage')
+                    dest = tmpd.name
 
-            # Download firmware image
-            fwurl = self._FW_IMAGE_URL_PATTERN % (ds.url(), build)
-            local_tarball = os.path.join(dest, os.path.basename(fwurl))
-            ds.download_file(fwurl, local_tarball)
+                # Download firmware image
+                fwurl = self._FW_IMAGE_URL_PATTERN % (ds.url(), build)
+                local_tarball = os.path.join(dest, os.path.basename(fwurl))
+                ds.download_file(fwurl, local_tarball)
+            except Exception as e:
+                raise error.TestError('Failed to download firmware package: %s'
+                                      % str(e))
 
-        # Extract EC image from tarball
-        logging.info('Extracting EC image.')
-        ec_image = self.servo.extract_ec_image(board, model, local_tarball)
+        ec_image = None
+        if install_ec:
+            # Extract EC image from tarball
+            logging.info('Extracting EC image.')
+            ec_image = self.servo.extract_ec_image(board, model, local_tarball)
 
-        # Extract BIOS image from tarball
-        logging.info('Extracting BIOS image.')
-        bios_image = self.servo.extract_bios_image(board, model, local_tarball)
+        bios_image = None
+        if install_bios:
+            # Extract BIOS image from tarball
+            logging.info('Extracting BIOS image.')
+            bios_image = self.servo.extract_bios_image(board, model,
+                                                       local_tarball)
+
+        if not bios_image and not ec_image:
+            raise error.TestError('No firmware installation was processed.')
 
         # Clear firmware version labels
         self._clear_fw_version_labels(rw_only)
@@ -771,15 +883,17 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                 dest_folder = '/tmp/firmware'
                 self.run('mkdir -p ' + dest_folder)
 
-                # Send BIOS firmware image to DUT
-                logging.info('Sending BIOS firmware.')
-                dest_bios_path = os.path.join(dest_folder,
-                                              os.path.basename(bios_image))
-                self.send_file(bios_image, dest_bios_path)
+                fw_cmd = self._FW_UPDATE_CMD % ('--wp=1' if rw_only else '')
 
-                # Initialize firmware update command for BIOS image
-                fw_cmd = self._FW_UPDATE_CMD % (dest_bios_path,
-                                                '--wp=1' if rw_only else '')
+                if bios_image:
+                    # Send BIOS firmware image to DUT
+                    logging.info('Sending BIOS firmware.')
+                    dest_bios_path = os.path.join(dest_folder,
+                                                  os.path.basename(bios_image))
+                    self.send_file(bios_image, dest_bios_path)
+
+                    # Initialize firmware update command for BIOS image
+                    fw_cmd += ' -i %s' % dest_bios_path
 
                 # Send EC firmware image to DUT when EC image was found
                 if ec_image:
@@ -791,14 +905,29 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                     # Add EC image to firmware update command
                     fw_cmd += ' -e %s' % dest_ec_path
 
+                # Make sure command is allowed to finish even if ssh fails.
+                fw_cmd = "trap '' SIGHUP; %s" % fw_cmd
+
                 # Update firmware on DUT
                 logging.info('Updating firmware.')
-                self.run(fw_cmd)
+                try:
+                    self.run(fw_cmd, options="-o LogLevel=verbose")
+                except error.AutoservRunError as e:
+                    if e.result_obj.exit_status != 255:
+                        raise
+                    elif ec_image:
+                        logging.warn("DUT network dropped during update"
+                                     " (often caused by EC resetting USB)")
+                    else:
+                        logging.error("DUT network dropped during update"
+                                      " (unexpected, since no EC image)")
+                        raise
             else:
                 # Host is not available, program firmware using servo
                 if ec_image:
                     self.servo.program_ec(ec_image, rw_only)
-                self.servo.program_bios(bios_image, rw_only)
+                if bios_image:
+                    self.servo.program_bios(bios_image, rw_only)
                 if utils.host_is_in_lab_zone(self.hostname):
                     self._add_fw_version_label(build, rw_only)
 
@@ -823,17 +952,19 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                             'Failed to update EC RO, version %s (expected %s)' %
                             (dest_ec_version, image_ec_version))
 
-                # Check programmed BIOS firmware against expected version
-                logging.info('Checking BIOS firmware version.')
-                dest_bios_version = self.get_firmware_version()
-                bios_version_prefix = dest_bios_version.split('.', 1)[0]
-                bios_regex = self._BIOS_REGEX % bios_version_prefix
-                image_bios_version = self.get_version_from_image(bios_image,
-                                                                 bios_regex)
-                if dest_bios_version != image_bios_version:
-                    raise error.TestFail(
-                        'Failed to update BIOS RO, version %s (expected %s)' %
-                        (dest_bios_version, image_bios_version))
+                if bios_image:
+                    # Check programmed BIOS firmware against expected version
+                    logging.info('Checking BIOS firmware version.')
+                    dest_bios_version = self.get_firmware_version()
+                    bios_version_prefix = dest_bios_version.split('.', 1)[0]
+                    bios_regex = self._BIOS_REGEX % bios_version_prefix
+                    image_bios_version = self.get_version_from_image(bios_image,
+                                                                     bios_regex)
+                    if dest_bios_version != image_bios_version:
+                        raise error.TestFail(
+                            'Failed to update BIOS RO, version %s '
+                            '(expected %s)' % (dest_bios_version,
+                                               image_bios_version))
         finally:
             if tmpd:
                 tmpd.clean()
@@ -859,15 +990,25 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         @raises AutoservError if the image fails to boot.
 
         """
-        logging.info('Downloading image to USB, then booting from it. Usb boot '
-                     'timeout = %s', usb_boot_timeout)
+        if image_url:
+            logging.info('Downloading image to USB, then booting from it.'
+                         ' Usb boot timeout = %s', usb_boot_timeout)
+        else:
+            logging.info('Booting from USB directly. Usb boot timeout = %s',
+                    usb_boot_timeout)
+
+        metrics_field = {'download': bool(image_url)}
+        metrics.Counter(
+            'chromeos/autotest/provision/servo_install/download_image'
+            ).increment(fields=metrics_field)
+
         with metrics.SecondsTimer(
                 'chromeos/autotest/provision/servo_install/boot_duration'):
             self.servo.install_recovery_image(image_url)
             if not self.wait_up(timeout=usb_boot_timeout):
                 raise hosts.AutoservRepairError(
                         'DUT failed to boot from USB after %d seconds' %
-                        usb_boot_timeout, 'failed_to_reboot')
+                        usb_boot_timeout, 'failed_to_boot_pre_install')
 
         # The new chromeos-tpm-recovery has been merged since R44-7073.0.0.
         # In old CrOS images, this command fails. Skip the error.
@@ -881,31 +1022,63 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         with metrics.SecondsTimer(
                 'chromeos/autotest/provision/servo_install/install_duration'):
             logging.info('Installing image through chromeos-install.')
-            self.run('chromeos-install --yes',timeout=install_timeout)
-
-            self.halt()
-
-        logging.info('Power cycling DUT through servo.')
-        self.servo.get_power_state_controller().power_off()
-        self.servo.switch_usbkey('off')
-        # N.B. The Servo API requires that we use power_on() here
-        # for two reasons:
-        #  1) After turning on a DUT in recovery mode, you must turn
-        #     it off and then on with power_on() once more to
-        #     disable recovery mode (this is a Parrot specific
-        #     requirement).
-        #  2) After power_off(), the only way to turn on is with
-        #     power_on() (this is a Storm specific requirement).
-        self.servo.get_power_state_controller().power_on()
+            try:
+                self.run('chromeos-install --yes',timeout=install_timeout)
+                self.halt()
+            except Exception as e:
+                storage_errors = [
+                   'No space left on device',
+                   'I/O error when trying to write primary GPT',
+                   'Input/output error while writing out',
+                   'cannot read GPT header',
+                   'can not determine destination device'
+                ]
+                has_error = [msg for msg in storage_errors if(msg in str(e))]
+                if has_error:
+                    info = self.host_info_store.get()
+                    info.set_version_label(
+                        audit_const.DUT_STORAGE_STATE_PREFIX,
+                        audit_const.HW_STATE_NEED_REPLACEMENT)
+                    self.host_info_store.commit(info)
+                    self.set_device_repair_state(
+                        DEVICE_STATE_NEEDS_REPLACEMENT)
+                    logging.debug(
+                        'Fail install image from USB; Storage error; %s', e)
+                    raise error.AutoservError(
+                        'Failed to install image from USB due to a suspect '
+                        'disk failure, DUT storage state changed to '
+                        'need_replacement, please check debug log '
+                        'for details.')
+                else:
+                    logging.debug('Fail install image from USB; %s', e)
+                    raise error.AutoservError(
+                        'Failed to install image from USB due to unexpected '
+                        'error, please check debug log for details.')
+            finally:
+                # We need reset the DUT no matter re-install success or not,
+                # as we don't want leave the DUT in boot from usb state.
+                logging.info('Power cycling DUT through servo.')
+                self.servo.get_power_state_controller().power_off()
+                self.servo.switch_usbkey('off')
+                # N.B. The Servo API requires that we use power_on() here
+                # for two reasons:
+                #  1) After turning on a DUT in recovery mode, you must turn
+                #     it off and then on with power_on() once more to
+                #     disable recovery mode (this is a Parrot specific
+                #     requirement).
+                #  2) After power_off(), the only way to turn on is with
+                #     power_on() (this is a Storm specific requirement).
+                self.servo.get_power_state_controller().power_on()
 
         logging.info('Waiting for DUT to come back up.')
         if not self.wait_up(timeout=self.BOOT_TIMEOUT):
-            raise error.AutoservError('DUT failed to reboot installed '
-                                      'test image after %d seconds' %
-                                      self.BOOT_TIMEOUT)
+            raise hosts.AutoservRepairError('DUT failed to reboot installed '
+                                            'test image after %d seconds' %
+                                            self.BOOT_TIMEOUT,
+                                            'failed_to_boot_post_install')
 
 
-    def set_servo_host(self, host):
+    def set_servo_host(self, host, servo_state = None):
         """Set our servo host member, and associated servo.
 
         @param host  Our new `ServoHost`.
@@ -913,9 +1086,12 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         self._servo_host = host
         if self._servo_host is not None:
             self.servo = self._servo_host.get_servo()
-            self._update_servo_labels()
+            servo_state = self._servo_host.get_servo_state()
+            self._set_smart_usbhub_label(self._servo_host.smart_usbhub)
         else:
             self.servo = None
+        self.set_servo_type()
+        self.set_servo_state(servo_state)
 
 
     def repair_servo(self):
@@ -941,15 +1117,72 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             self.set_servo_host(self._servo_host)
 
 
-    def _update_servo_labels(self):
+    def set_servo_type(self):
         """Set servo info labels to dut host_info"""
-        if self._servo_host:
+        if not self.servo:
+            logging.debug('Servo is not initialized to get servo_type.')
+            return
+        servo_type = self.servo.get_servo_type()
+        if not servo_type:
+            logging.debug('Cannot collect servo_type from servo'
+                ' by `dut-control servo_type`! Please file a bug'
+                ' and inform infra team as we are not expected '
+                ' to reach this point.')
+            return
+        host_info = self.host_info_store.get()
+        prefix = servo_constants.SERVO_TYPE_LABEL_PREFIX
+        old_type = host_info.get_label_value(prefix)
+        if old_type == servo_type:
+            # do not need update
+            return
+        host_info.set_version_label(prefix, servo_type)
+        self.host_info_store.commit(host_info)
+        logging.info('ServoHost: servo_type updated to %s '
+                    '(previous: %s)', servo_type, old_type)
+
+
+    def set_servo_state(self, servo_state):
+        """Set servo info labels to dut host_info"""
+        if servo_state is not None:
             host_info = self.host_info_store.get()
-
-            servo_state = self._servo_host.get_servo_state()
-            host_info.set_version_label(servo_host.SERVO_STATE_LABEL_PREFIX, servo_state)
-
+            servo_state_prefix = servo_constants.SERVO_STATE_LABEL_PREFIX
+            old_state = host_info.get_label_value(servo_state_prefix)
+            if old_state == servo_state:
+                # do not need update
+                return
+            host_info.set_version_label(servo_state_prefix, servo_state)
             self.host_info_store.commit(host_info)
+            logging.info('ServoHost: servo_state updated to %s (previous: %s)',
+                         servo_state, old_state)
+
+
+    def get_servo_state(self):
+        host_info = self.host_info_store.get()
+        servo_state_prefix = servo_constants.SERVO_STATE_LABEL_PREFIX
+        return host_info.get_label_value(servo_state_prefix)
+
+
+    def _set_smart_usbhub_label(self, smart_usbhub_detected):
+        if smart_usbhub_detected is None:
+            # skip the label update here as this indicate we wasn't able
+            # to confirm usbhub type.
+            return
+        host_info = self.host_info_store.get()
+        if (smart_usbhub_detected ==
+                (servo_constants.SMART_USBHUB_LABEL in host_info.labels)):
+            # skip label update if current label match the truth.
+            return
+        if smart_usbhub_detected:
+            logging.info('Adding %s label to host %s',
+                         servo_constants.SMART_USBHUB_LABEL,
+                         self.hostname)
+            host_info.labels.append(servo_constants.SMART_USBHUB_LABEL)
+        else:
+            logging.info('Removing %s label from host %s',
+                         servo_constants.SMART_USBHUB_LABEL,
+                         self.hostname)
+            host_info.labels.remove(servo_constants.SMART_USBHUB_LABEL)
+        self.host_info_store.commit(host_info)
 
 
     def repair(self):
@@ -964,16 +1197,22 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         info = self.host_info_store.get()
         message %= (self.hostname, info.board, info.model)
         self.record('INFO', None, None, message)
-        self._repair_strategy.repair(self)
+        try:
+            self._repair_strategy.repair(self)
+        except hosts.AutoservVerifyDependencyError as e:
+            # We don't want flag a DUT as failed if only non-critical
+            # verifier(s) failed during the repair.
+            if e.is_critical():
+                self.try_set_device_need_manual_repair()
+                raise
 
 
     def close(self):
         """Close connection."""
         super(CrosHost, self).close()
 
-        for chameleon_host in self._chameleon_host_list:
-            if chameleon_host:
-                chameleon_host.close()
+        if self._chameleon_host:
+            self._chameleon_host.close()
 
         if self._servo_host:
             self._servo_host.close()
@@ -1039,6 +1278,20 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             return None
 
 
+    def get_battery_state(self):
+        """Get the battery charging state.
+
+        @return: A string representing the battery charging state. It can be
+                 'Charging', 'Fully charged', or 'Discharging'.
+        """
+        try:
+            info = self.get_power_supply_info()
+            logging.info(info)
+            return info['Battery']['state']
+        except (KeyError, ValueError, error.AutoservRunError):
+            return None
+
+
     def get_battery_display_percentage(self):
         """Get the battery display percentage.
 
@@ -1080,7 +1333,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                           'cleanup through the RPM Infrastructure.')
 
             battery_percentage = self.get_battery_percentage()
-            if battery_percentage and battery_percentage < 50:
+            if (battery_percentage and
+                battery_percentage < cros_repair.MIN_BATTERY_LEVEL):
                 raise
             elif self.is_ac_connected():
                 logging.info('The device has power adapter connected and '
@@ -1219,10 +1473,11 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             self.cleanup_services()
         except (error.AutotestRunError, error.AutoservRunError,
                 FactoryImageCheckerException):
-            logging.warning('Unable to restart ui, rebooting device.')
-            # Since restarting the UI fails fall back to normal Autotest
-            # cleanup routines, i.e. reboot the machine.
-            super(CrosHost, self).cleanup()
+            logging.warning('Unable to restart ui.')
+
+        # cleanup routines, i.e. reboot the machine.
+        super(CrosHost, self).cleanup()
+
         # Check if the rpm outlet was manipulated.
         if self.has_power():
             self._cleanup_poweron()
@@ -1406,7 +1661,13 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         info = self.host_info_store.get()
         message %= (self.hostname, info.board, info.model)
         self.record('INFO', None, None, message)
-        self._repair_strategy.verify(self)
+        try:
+            self._repair_strategy.verify(self)
+        except hosts.AutoservVerifyDependencyError as e:
+            # We don't want flag a DUT as failed if only non-critical
+            # verifier(s) failed during the repair.
+            if e.is_critical():
+                raise
 
 
     def make_ssh_command(self, user='root', port=22, opts='', hosts_file=None,
@@ -1794,7 +2055,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
         @returns a string representing this host's platform.
         """
-        # Look at the firmware for non-unibuild cases or if mosys fails.
+        # Look at the firmware for non-unibuild cases or if cros_config fails.
         crossystem = utils.Crossystem(self)
         crossystem.init()
         # Extract fwid value and use the leading part as the platform id.
@@ -1814,18 +2075,17 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                                               run_method=self.run)
         platform = ''
         if release_info.get('CHROMEOS_RELEASE_UNIBUILD') == '1':
-            platform = self.get_platform_from_mosys()
+            platform = self.get_model_from_cros_config()
         return platform if platform else self.get_platform_from_fwid()
 
 
-    def get_platform_from_mosys(self):
-        """Get the host platform from mosys command.
+    def get_model_from_cros_config(self):
+        """Get the host model from cros_config command.
 
-        @returns a string representing this host's platform.
+        @returns a string representing this host's model.
         """
-        cmd = 'mosys platform model'
-        result = self.run(command=cmd, ignore_status=True)
-        return result.stdout.strip() if result.exit_status == 0 else ''
+        return cros_config.call_cros_config_get_output('/ name',
+                self.run, ignore_status=True)
 
 
     def get_architecture(self):
@@ -2105,7 +2365,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             if board_type in _NO_BATTERY_BOARD_TYPE:
                 logging.warn('Do NOT believe type %s has battery. '
                              'See debug for mosys details', board_type)
-                psu = self.system_output('mosys -vvvv psu type',
+                psu = utils.system_output('mosys -vvvv psu type',
                                          ignore_status=True)
                 logging.debug(psu)
                 rv = False
@@ -2321,3 +2581,49 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             if security:
                 cmd += ' ' + security
         return self.run(cmd, ignore_status=True).exit_status == 0
+
+    def get_device_repair_state(self):
+        """Get device repair state"""
+        return self._device_repair_state
+
+    def set_device_repair_state(self, state):
+        """Set device repair state.
+
+        The special device state will be written to the 'dut_state.repair'
+        file in result directory. The file will be read by Lucifer.
+        """
+        if self.job:
+            target = os.path.join(self.job.resultdir, 'dut_state.repair')
+            common_utils.open_write_close(target, state)
+        else:
+            logging.debug('Cannot write the device state due missing info '
+                          'about result dir.')
+        self._device_repair_state = state
+
+    def try_set_device_need_manual_repair(self):
+        """Check if device require manual attention to be fixed.
+
+        The state 'needs_manual_repair' can be set when auto repair cannot
+        fix the device due hardware or cable issues.
+        """
+        # ignore the logic if state present
+        # state can be set by any cros repair actions
+        if self.get_device_repair_state():
+            return
+
+        # set need manual attention if servo has hardware issue
+        servo_state_required_manual_fix = [
+            servo_constants.SERVO_STATE_NOT_CONNECTED,
+            servo_constants.SERVO_STATE_NEED_REPLACEMENT,
+            servo_constants.SERVO_STATE_LID_OPEN_FAILED,
+            servo_constants.SERVO_STATE_BAD_RIBBON_CABLE,
+            servo_constants.SERVO_STATE_EC_BROKEN,
+        ]
+        if self.get_servo_state() in servo_state_required_manual_fix:
+            data = {'host': self.hostname,
+                    'state': DEVICE_STATE_NEEDS_MANUAL_REPAIR}
+            metrics.Counter(
+                'chromeos/autotest/repair/special_dut_state'
+                ).increment(fields=data)
+            # TODO (otabek) unblock when be sure that we do not have flakiness
+            # self.set_device_repair_state(DEVICE_STATE_NEEDS_MANUAL_REPAIR)

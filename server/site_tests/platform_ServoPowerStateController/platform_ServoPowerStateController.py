@@ -114,6 +114,7 @@ class platform_ServoPowerStateController(test.test):
 
     def cleanup(self):
         """Clean up DUT after servo actions."""
+        self.host.servo.set_servo_v4_role('src')
         if not self.host.is_up():
             # Power off, then power on DUT from internal storage.
             self.controller.power_off()
@@ -159,6 +160,14 @@ class platform_ServoPowerStateController(test.test):
 
     def test_with_usb_plugged_in(self):
         """Run test when USB stick is plugged in to servo."""
+
+        # Servo V4 needs to be in snk role to allow booting from USB in
+        # recovery mode (b/161464597).
+        # TODO(waihong): Add a check to see if the battery level is too
+        # low and sleep for a while for charging.
+        logging.info('Put servo_v4 into snk role')
+        self.host.servo.set_servo_v4_role('snk')
+
         logging.info('Power off DUT')
         self.controller.power_off()
         self.assert_dut_off('power_state:off did not turn DUT off.')
@@ -190,6 +199,9 @@ class platform_ServoPowerStateController(test.test):
         self.controller.power_on(self.controller.REC_OFF)
         self.assert_dut_on()
         self.host.servo.switch_usbkey('off')
+
+        logging.info('Put servo_v4 back into src role')
+        self.host.servo.set_servo_v4_role('src')
 
 
     def test_with_usb_unplugged(self):

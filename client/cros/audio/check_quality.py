@@ -10,9 +10,7 @@ import argparse
 import collections
 import json
 import logging
-import math
 import numpy
-import os
 import pprint
 import subprocess
 import tempfile
@@ -250,6 +248,11 @@ class WaveFile(object):
                 binary=self._binary,
                 channel=self._n_channels,
                 sample_format=format_str)
+
+
+    def get_number_frames(self):
+        """Get the number of frames in the wave file."""
+        return self._n_frames
 
 
 class QualityCheckerError(Exception):

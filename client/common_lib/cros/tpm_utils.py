@@ -6,6 +6,7 @@ import logging, os
 import time
 
 from autotest_lib.client.common_lib import error
+from autotest_lib.client.cros import constants
 
 
 _PASSWD_FILE = '/var/tmp/tpm_password'
@@ -13,7 +14,7 @@ _RM_FILES = ['/home/chronos/.oobe_completed',
              '/home/chronos/Local\ State',
              '/var/cache/shill/default.profile']
 _RM_DIRS = ['/home/.shadow/*',
-            '/var/lib/whitelist/*',
+            os.path.join(constants.ALLOWLIST_DIR, '*'),
             '/var/cache/app_pack',
             '/var/lib/tpm']
 
@@ -117,6 +118,11 @@ def ClearTPMOwnerRequest(client, wait_for_ready=False, timeout=60):
                     ignore_status=True).stdout.strip()
             logging.debug(status)
             time.sleep(1)
+        # Verify if the TPM is unowned.
+        tpm_status = TPMStatus(client)
+        logging.info('TPM status: %s', tpm_status)
+        if tpm_status['Owned']:
+            raise error.TestFail('Failed to clear TPM.')
 
 
 def ClearTPMIfOwned(client):
