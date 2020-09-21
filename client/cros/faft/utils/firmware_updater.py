@@ -203,45 +203,18 @@ class FirmwareUpdater(object):
         else:
             return None
 
-    def get_all_fwids(self, target='bios'):
-        """Get all non-empty fwids from in-memory image, for the given target.
+    def get_device_fwids(self, target='bios'):
+        """Get all non-empty fwids from flash, for the given target.
 
         @param target: the image type to get from: 'bios' (default) or 'ec'
-        @return: fwid for the sections
-
-        @type target: str
-        @rtype: dict | None
-        """
-        image_path = self._get_image_path(target)
-        if target == 'ec' and not os.path.isfile(image_path):
-            # If the EC image is missing, report a specific error message.
-            raise FirmwareUpdaterError("Shellball does not contain ec.bin")
-
-        handler = self._get_handler(target)
-        handler.new_image(image_path)
-
-        fwids = {}
-        for section in handler.fv_sections:
-            fwid = handler.get_section_fwid(section)
-            if fwid is not None:
-                fwids[section] = fwid
-        return fwids
-
-    def get_all_installed_fwids(self, target='bios', filename=None):
-        """Get all non-empty fwids from disk or flash, for the given target.
-
-        @param target: the image type to get from: 'bios' (default) or 'ec'
-        @param filename: filename to read instead of using the actual flash
         @return: fwid for the sections
 
         @type target: str
         @type filename: str
         @rtype: dict
         """
-        handler = self._create_handler(target, 'installed')
-        if filename:
-            filename = os.path.join(self._temp_path, filename)
-        handler.new_image(filename)
+        handler = self._create_handler(target, 'flashdevice')
+        handler.new_image()
 
         fwids = {}
         for section in handler.fv_sections:
@@ -250,7 +223,36 @@ class FirmwareUpdater(object):
                 fwids[section] = fwid
         return fwids
 
-    def modify_fwids(self, target='bios', sections=None):
+    def get_image_fwids(self, target='bios', filename=None):
+        """Get all non-empty fwids from disk, for the given target.
+
+        @param target: the image type to get from: 'bios' (default) or 'ec'
+        @param filename: filename to read instead of using the default shellball
+        @return: fwid for the sections
+
+        @type target: str
+        @type filename: str
+        @rtype: dict
+        """
+        if filename:
+            filename = os.path.join(self._temp_path, filename)
+            handler = self._create_handler(target, 'image')
+            handler.new_image(filename)
+        else:
+            filename = self._get_image_path(target)
+            handler = self._get_handler(target)
+            if target == 'ec' and not os.path.isfile(filename):
+                # If the EC image is missing, report a specific error message.
+                raise FirmwareUpdaterError("Shellball does not contain ec.bin")
+
+        fwids = {}
+        for section in handler.fv_sections:
+            fwid = handler.get_section_fwid(section)
+            if fwid is not None:
+                fwids[section] = fwid
+        return fwids
+
+    def modify_image_fwids(self, target='bios', sections=None):
         """Modify the fwid in the image, but don't flash it.
 
         @param target: the image type to modify: 'bios' (default) or 'ec'
@@ -491,8 +493,8 @@ class FirmwareUpdater(object):
             self._real_ec_handler.deinit()
             self._real_ec_handler.init(ec_file, allow_fallback=True)
 
-    def run_firmwareupdate(self, mode, append=None, options=None):
-        """Do firmwareupdate with updater in temp_dir.
+    def get_firmwareupdate_command(self, mode, append=None, options=None):
+        """Get the command to run firmwareupdate with updater in temp_dir.
 
         @param append: decide which shellball to use with format
                 chromeos-firmwareupdate-[append].
@@ -508,7 +510,7 @@ class FirmwareUpdater(object):
             # Since CL:459837, bootok is moved to chromeos-setgoodfirmware.
             set_good_cmd = '/usr/sbin/chromeos-setgoodfirmware'
             if os.path.isfile(set_good_cmd):
-                return self.os_if.run_shell_command_get_status(set_good_cmd)
+                return set_good_cmd
 
         updater = os.path.join(self._temp_path, 'chromeos-firmwareupdate')
         if append:
@@ -530,10 +532,23 @@ class FirmwareUpdater(object):
                 bios_reader.dump_flash(fake_bios)
             options = ['--emulate', fake_bios] + options
 
-        update_cmd = '/bin/sh %s --mode %s %s' % (updater, mode,
-                                                  ' '.join(options))
+        return '/bin/sh %s --mode %s %s' % (updater, mode, ' '.join(options))
 
-        return self.os_if.run_shell_command_get_status(update_cmd)
+    def run_firmwareupdate(self, mode, append=None, options=None):
+        """Do firmwareupdate with updater in temp_dir.
+
+        @param append: decide which shellball to use with format
+                chromeos-firmwareupdate-[append].
+                Use'chromeos-firmwareupdate' if append is None.
+        @param mode: ex.'autoupdate', 'recovery', 'bootok', 'factory_install'...
+        @param options: ex. ['--noupdate_ec', '--force'] or [] or None.
+
+        @type append: str
+        @type mode: str
+        @type options: list | tuple | None
+        """
+        return self.os_if.run_shell_command_get_status(
+                self.get_firmwareupdate_command(mode, append, options))
 
     def cbfs_setup_work_dir(self):
         """Sets up cbfs on DUT.

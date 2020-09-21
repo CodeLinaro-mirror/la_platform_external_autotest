@@ -5,7 +5,6 @@
 import logging
 import re
 
-from autotest_lib.client.common_lib import autotemp
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils
 from autotest_lib.client.cros.enterprise import enterprise_policy_base
@@ -39,12 +38,12 @@ class policy_DeviceTargetVersionPrefix(
     _POLICY_TO_REQUEST = {'4444.': '4444', '4444.4.4': '4444.4.'}
 
 
-    def _test_version_prefix(self, prefix_value, port):
+    def _test_version_prefix(self, prefix_value, update_url):
         """
         Actual test.  Fail if update request doesn't match expected.
 
         @param prefix_value: the value of this policy.
-        @param port: The port we should connect to Nebraska server.
+        @param update_url: The URL to get update from.
 
         @raises error.TestFail if test does not pass.
 
@@ -52,7 +51,7 @@ class policy_DeviceTargetVersionPrefix(
         # E.g. <updatecheck targetversionprefix="10718.25.0.">
         MATCH_STR = r'targetversionprefix="(.*?).?"'
 
-        self._check_for_update(port=port)
+        self._check_for_update(update_url)
 
         utils.poll_for_condition(
                 self._is_update_started,
@@ -98,16 +97,11 @@ class policy_DeviceTargetVersionPrefix(
         self.setup_case(device_policies={self._POLICY_NAME: case_value},
                         enroll=True)
 
-        metadata_dir = autotemp.tempdir()
-        self._get_payload_properties_file(image_url, metadata_dir.name,
-                                          target_version='999999.9.9')
-        base_url = ''.join(image_url.rpartition('/')[0:2])
         with nebraska_wrapper.NebraskaWrapper(
-                log_dir=self.resultsdir,
-                update_metadata_dir=metadata_dir.name,
-                update_payloads_address=base_url) as nebraska:
+            log_dir=self.resultsdir, payload_url=image_url,
+            target_version='999999.9.9') as nebraska:
 
             update_url = nebraska.get_update_url()
             self._create_custom_lsb_release(update_url, build='1.1.1')
 
-            self._test_version_prefix(case_value, nebraska.get_port())
+            self._test_version_prefix(case_value, nebraska.get_update_url())

@@ -11,7 +11,7 @@ from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
 
 # Assigning local names for some frequently used long method names.
 method_name = bluetooth_adapter_tests.method_name
-_test_retry_and_log = bluetooth_adapter_tests._test_retry_and_log
+_test_retry_and_log = bluetooth_adapter_tests.test_retry_and_log
 
 DEFAULT_START_DELAY_SECS = 2
 DEFAULT_HOLD_INTERVAL = 10
@@ -63,7 +63,7 @@ class BluetoothDBusAPITests(bluetooth_adapter_tests.BluetoothAdapterTests):
         else:
             return True
 
-    def _compare_error(self, expected, actual):
+    def _compare_error(self, actual, expected):
         """ Helper function to compare error and log. """
         if expected == actual:
             return True
@@ -564,6 +564,9 @@ class BluetoothDBusAPITests(bluetooth_adapter_tests.BluetoothAdapterTests):
         reset = self._reset_state()
         is_discovering = self._wait_till_discovery_starts()
         pause_discovery, error = self.bluetooth_facade.pause_discovery()
+        # Make sure the pause discovery has completed
+        pause_discovery_complete = self._wait_till_hci_state_no_inquiry_holds()
+
         unpause_discovery, _ = self.bluetooth_facade.unpause_discovery()
 
         unpause_again, error = self.bluetooth_facade.unpause_discovery()
@@ -574,6 +577,7 @@ class BluetoothDBusAPITests(bluetooth_adapter_tests.BluetoothAdapterTests):
             'reset' : reset,
             'is_discovering': is_discovering,
             'pause_discovery' : pause_discovery,
+            'pause_discovery_complete' : pause_discovery_complete,
             'unpause_discovery' : unpause_discovery,
             'unpause_again_failed': not unpause_again,
             'error_matches' : self._compare_error(error,

@@ -13,7 +13,8 @@ TIME = "SHORT"
 TEST_CATEGORY = "Stress"
 TEST_CLASS = "network"
 TEST_TYPE = "client"
-DEPENDENCIES = "modem:huawei-e303"
+DEPENDENCIES = "carrier:tmobile"
+#The dongle used for this test contains T-Mobile SIM card.
 
 DOC = """
   Stress-tests enabling and disabling a technology at short intervals.

@@ -74,7 +74,7 @@ class firmware_ECUsbPorts(FirmwareTest):
 
     def __get_usb_enable_name(self, idx):
       """Returns the USB enable signal name for a given index"""
-      if hasattr(self.faft_config, 'custom_usb_enable_names'):
+      if self.faft_config.custom_usb_enable_names:
         if idx >= len(self.faft_config.custom_usb_enable_names):
           raise error.TestFail('No USB enable for index %d' % idx)
         return self.faft_config.custom_usb_enable_names[idx]
@@ -129,8 +129,7 @@ class firmware_ECUsbPorts(FirmwareTest):
     def check_power_off_mode(self):
         """Shutdown the system and check USB ports are disabled."""
         self._failed = False
-        self.faft_client.system.run_shell_command("shutdown -P now")
-        self.switcher.wait_for_client_offline()
+        self.run_shutdown_cmd()
         if not self.wait_port_disabled(self._port_count, self.SHUTDOWN_TIMEOUT):
             logging.info("Fails to wait for USB port disabled")
             self._failed = True
@@ -154,6 +153,9 @@ class firmware_ECUsbPorts(FirmwareTest):
 
         if self.servo.main_device_is_ccd():
             logging.info("Using CCD, ignore checking USB port connection.")
+        elif (self.servo.has_control('servo_v4_type') and
+              self.servo.get('servo_v4_type') == 'type-c'):
+            logging.info("Using type-c servo, ignore checking USB port connection.")
         else:
             logging.info("Turn off all USB ports and then turn them on again.")
             self.switcher.mode_aware_reboot(

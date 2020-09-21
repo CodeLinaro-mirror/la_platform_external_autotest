@@ -30,6 +30,7 @@ class firmware_InvalidUSB(FirmwareTest):
     def initialize(self, host, cmdline_args):
         """Initialize the test"""
         super(firmware_InvalidUSB, self).initialize(host, cmdline_args)
+        self.setup_usbkey(usbkey=True)
         self.servo.switch_usbkey('host')
         usb_dev = self.servo.probe_host_usb_dev()
         self.assert_test_image_in_usb_disk(usb_dev)

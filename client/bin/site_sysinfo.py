@@ -192,7 +192,7 @@ class diffable_logdir(logdir):
             for f in files:
                 if f.startswith('autoserv'):
                     continue
-                if f.endswith('.journal'):
+                if f.endswith('.journal') or f.endswith('.journal~'):
                     continue
                 full_path = os.path.join(root, f)
                 # Only list regular files or symlinks to those (os.stat follows

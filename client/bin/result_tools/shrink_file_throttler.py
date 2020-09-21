@@ -21,6 +21,7 @@ UNSHRINKABLE_EXTENSIONS = set([
         '.html',
         '.img',
         '.journal',
+        '.journal~',
         '.jpg',
         '.json',
         '.pcap',

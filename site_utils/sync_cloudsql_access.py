@@ -111,7 +111,7 @@ def update_allowed_networks(project, instance, afe=None, extra_servers=None,
     cidr_ips = [str(ip) + '/32' for ip in ips]
 
     if dryrun:
-        print 'This is a dryrun: skip updating glcoud sql whitelists.'
+        print 'This is a dryrun: skip updating glcoud sql allowlists.'
         return
 
     login = False
@@ -120,7 +120,7 @@ def update_allowed_networks(project, instance, afe=None, extra_servers=None,
             utils.run('gcloud config set project %s -q' % project)
             cmd = ('gcloud sql instances patch %s --authorized-networks %s '
                    '-q' % (instance, ','.join(cidr_ips)))
-            print 'Running command to update whitelists: "%s"' % cmd
+            print 'Running command to update allowlists: "%s"' % cmd
             utils.run(cmd, stdout_tee=sys.stdout, stderr_tee=sys.stderr)
             return
         except error.CmdError:
@@ -148,7 +148,7 @@ def main():
                         default=None)
     parser.add_argument('--dryrun', dest='dryrun', action='store_true',
                         default=False,
-                        help='Fetch IPs without updating whitelists in gcloud.')
+                        help='Fetch IPs without updating allowlists in gcloud.')
     options = parser.parse_args()
 
     update_allowed_networks(options.project, options.instance, options.afe,

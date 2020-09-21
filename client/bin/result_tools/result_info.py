@@ -180,7 +180,7 @@ class ResultInfo(dict):
         assert original_info
         # The result information dictionary has only 1 key, which is the file or
         # directory name.
-        self._name = original_info.keys()[0]
+        self._name = list(original_info.keys())[0]
 
         # Dictionary to store details of the given path is set to a keyval of
         # the wrapper class. Save the dictionary to an attribute for faster

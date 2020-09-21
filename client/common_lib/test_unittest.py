@@ -8,6 +8,9 @@ import json
 import tempfile
 import unittest
 import common
+import mock as pymock
+import os
+import shutil
 from autotest_lib.client.common_lib import test
 from autotest_lib.client.common_lib.test_utils import mock
 
@@ -505,6 +508,53 @@ class Test_base_test_execute(TestTestCase):
         }
         self.maxDiff = None
         self.assertDictEqual(expected_result, json.loads(f.read()))
+
+class Test_runtest(unittest.TestCase):
+    _TEST_CONTENTS = """
+from autotest_lib.client.common_lib import test
+
+class mocktest(test.base_test):
+    version = 1
+    def initialize(self, host, arg1=None):
+        self.job.initialize_mock(host, arg1)
+
+    def warmup(self, host):
+        self.job.warmup_mock(host)
+
+    def run_once(self, arg2):
+        self.job.run_once_mock(arg2)
+
+    def cleanup(self, **kwargs):
+        self.job.cleanup_mock(**kwargs)
+    """
+    def setUp(self):
+        self.workdir = tempfile.mkdtemp()
+        self.testname = 'mocktest'
+        testdir = os.path.join(self.workdir, 'tests')
+        resultdir = os.path.join(self.workdir, 'results')
+        tmpdir = os.path.join(self.workdir, 'tmp')
+
+        os.makedirs(os.path.join(testdir, self.testname))
+        os.makedirs(os.path.join(resultdir, self.testname))
+        os.makedirs(tmpdir)
+
+        self.job = pymock.MagicMock(testdir=testdir, resultdir=resultdir,
+                                    tmpdir=tmpdir, site_testdir=None)
+
+        with open(os.path.join(self.job.testdir, self.testname,
+                  '{}.py'.format(self.testname)), 'w') as f:
+            f.write(self._TEST_CONTENTS)
+
+    def tearDown(self):
+        shutil.rmtree(self.workdir)
+
+    def test_runtest(self):
+        all_args = {'host': 'hostvalue', 'arg1': 'value1', 'arg2': 'value2'}
+        test.runtest(self.job, self.testname, '', (), all_args)
+        self.job.initialize_mock.assert_called_with('hostvalue', 'value1')
+        self.job.warmup_mock.assert_called_with('hostvalue')
+        self.job.run_once_mock.assert_called_with('value2')
+        self.job.cleanup_mock.assert_called_with(**all_args)
 
 if __name__ == '__main__':
     unittest.main()

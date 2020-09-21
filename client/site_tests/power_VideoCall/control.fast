@@ -6,6 +6,7 @@ TIME = "SHORT"
 TEST_CATEGORY = "Benchmark"
 TEST_CLASS = "power"
 TEST_TYPE = "client"
+ATTRIBUTES = "suite:crosbolt_perf_perbuild"
 
 DOC = """
 This test simulates video call multitasking and record power related statistic.

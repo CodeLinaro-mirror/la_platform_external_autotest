@@ -109,7 +109,6 @@ class LinuxSystem(object):
         logging.debug('Current regulatory domain %r',
                       self.iw_runner.get_regulatory_domain())
         self._interfaces = []
-        self._brif_index = 0
         for interface in self.iw_runner.list_interfaces():
             if self.inherit_interfaces:
                 self._interfaces.append(NetDev(inherited=True,
@@ -137,6 +136,19 @@ class LinuxSystem(object):
         if self.host.path_exists(self._UMA_EVENTS):
             self.host.run('truncate -s 0 %s' % self._UMA_EVENTS,
                           ignore_status=True)
+
+        # Tear down hostapbr bridge and intermediate functional block
+        # interfaces. Run this even for pcaps, because pcap devices sometimes
+        # are run as APs too.
+        # TODO(crbug.com/1005443): drop the ifb hack when we deploy an AP OS
+        # image that has fixes for crbug.com/960551.
+        result = self.host.run('ls -d /sys/class/net/%s* /sys/class/net/%s*'
+                               ' 2>/dev/null' %
+                               (self.HOSTAP_BRIDGE_INTERFACE_PREFIX,
+                                self.IFB_INTERFACE_PREFIX),
+                               ignore_status=True)
+        for path in result.stdout.splitlines():
+            self.delete_link(path.split('/')[-1])
 
 
     @property
@@ -267,6 +279,16 @@ class LinuxSystem(object):
             if net_dev.if_name == interface:
                 self._interfaces.remove(net_dev)
                 break
+
+
+    def delete_link(self, name):
+        """Delete link using the `ip` command.
+
+        @param name string link name.
+
+        """
+        self.host.run('%s link del %s' % (self.cmd_ip, name),
+                      ignore_status=True)
 
 
     def close(self):
@@ -510,13 +532,6 @@ class LinuxSystem(object):
             self.ensure_unique_mac(net_dev)
 
         return net_dev
-
-
-    def get_brif(self):
-        brif_name = '%s%d' % (self.HOSTAP_BRIDGE_INTERFACE_PREFIX,
-                              self._brif_index)
-        self._brif_index += 1
-        return brif_name
 
 
     def get_configured_interface(self, phytype, spatial_streams=None,

@@ -5,23 +5,37 @@
 # found in the LICENSE file.
 
 import base64
+import collections
+from datetime import datetime
 import dbus
 import dbus.mainloop.glib
 import dbus.service
+import glob
 import gobject
 import json
 import logging
 import logging.handlers
+import os
 import subprocess
 import functools
+import time
 
 import common
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib.cros.bluetooth import bluetooth_socket
+from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros import constants
+from autotest_lib.client.cros.udev_helpers import UdevadmInfo, UdevadmTrigger
 from autotest_lib.client.cros import xmlrpc_server
+from autotest_lib.client.cros.audio import check_quality
+from autotest_lib.client.cros.audio import cras_utils
 from autotest_lib.client.cros.bluetooth import advertisement
 from autotest_lib.client.cros.bluetooth import output_recorder
+from autotest_lib.client.cros.power import sys_power
+
+
+CheckQualityArgsClass = collections.namedtuple(
+        'args_type', ['filename', 'rate', 'channel', 'bit_width'])
 
 
 def _dbus_byte_array_to_b64_string(dbus_byte_array):
@@ -30,12 +44,12 @@ def _dbus_byte_array_to_b64_string(dbus_byte_array):
 
 
 def _b64_string_to_dbus_byte_array(b64_string):
-  """Base64 decodes a dbus byte array for use with the xml rpc proxy."""
-  dbus_array = dbus.Array([], signature=dbus.Signature('y'))
-  bytes = bytearray(base64.standard_b64decode(b64_string))
-  for byte in bytes:
-    dbus_array.append(dbus.Byte(byte))
-  return dbus_array
+    """Base64 decodes a dbus byte array for use with the xml rpc proxy."""
+    dbus_array = dbus.Array([], signature=dbus.Signature('y'))
+    bytes = bytearray(base64.standard_b64decode(b64_string))
+    for byte in bytes:
+        dbus_array.append(dbus.Byte(byte))
+    return dbus_array
 
 
 def dbus_print_error(default_return_value=False):
@@ -165,6 +179,13 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
     # after reset.
     ADAPTER_TIMEOUT = 30
 
+    # How long to wait for uhid device
+    UHID_TIMEOUT = 15
+    UHID_CHECK_SECS = 2
+
+    # How long we should wait for property update signal before we cancel it
+    PROPERTY_UPDATE_TIMEOUT_MILLI_SECS = 5000
+
     def __init__(self):
         super(BluetoothDeviceXmlRpcDelegate, self).__init__()
 
@@ -214,7 +235,12 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         self.btmon = output_recorder.OutputRecorder(
                 'btmon', stop_delay_secs=self.BTMON_STOP_DELAY_SECS)
 
+        self._cras_test_client = cras_utils.CrasTestClient()
+
         self.advertisements = []
+        self._chrc_property = None
+        self._timeout_id = 0
+        self._signal_watch = None
         self._dbus_mainloop = gobject.MainLoop()
 
 
@@ -250,6 +276,230 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         except Exception as e:
             logging.error("log_message %s failed with %s", cmd, str(e))
 
+    def is_wrt_supported(self):
+        """Check if Bluetooth adapter support WRT logs
+
+        WRT is supported on Intel adapters other than (StP2 and WP2)
+
+        @returns : True if adapter is Intel made.
+        """
+        # Dict of Intel Adapters that support WRT and vid:pid
+        vid_pid_dict = {'HrP2' : '8086:02f0',
+                        'ThP2' : '8086:2526',
+                        'JfP2':  '8086:31dc',
+                        'JfP2-2' : '8086:9df0' }  # On Sarien/Arcada
+
+
+        def _get_lspci_vid_pid(output):
+            """ parse output of lspci -knn and get the vid:pid
+
+            output is of the form '01:00.0 Network controller [0280]:
+            \Intel Corporation Device [8086:2526] (rev 29)\n'
+
+            @returns : 'vid:pid' or None
+            """
+            try:
+                for i in output.split('\n'):
+                    if 'Network controller' in i:
+                        logging.debug('Got line %s', i)
+                        if 'Intel Corporation' in i:
+                            return i.split('[')[2].split(']')[0]
+                return None
+            except Exception as e:
+                logging.debug('Exception in _get_lspci_vidpid %s', str(e))
+                return None
+
+        try:
+            cmd = ['lspci', '-knn']
+            output = subprocess.check_output(cmd)
+            vid_pid = _get_lspci_vid_pid(output)
+            logging.debug("got vid_pid %s", vid_pid)
+            if vid_pid is not None:
+                if vid_pid in vid_pid_dict.values():
+                    return True
+        except Exception as e:
+            logging.error('is_intel_adapter  failed with %s', cmd, str(e))
+            return False
+
+    def enable_wrt_logs(self):
+        """ Enable WRT logs for Intel Bluetooth adapters.
+
+            This is applicable only to Intel adapters.
+            Execute a series of custom hciconfig commands to
+            setup WRT log collection
+
+            Precondition :
+                1) Check if the DUT has Intel controller other than StP2
+                2) Make sure the controller is powered on
+        """
+        fw_trace_cmd = ('hcitool cmd 3f 7c 01 10 00 00 00 FE 81 02 80 04 00 00'
+                       ' 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'
+                       ' 00 00 00 00 00 00 00')
+        ddc_read_cmd = 'hcitool cmd 3f 8c 28 01'
+        ddc_write_cmd_prefix = 'hcitool cmd 3f 8b 03 28 01'
+        hw_trace_cmd = ('hcitool cmd 3f 6f 01 08 00 00 00 00 00 00 00 00 01 00'
+                       ' 00 03 01 03 03 03 10 03 6A 0A 6A 0A 6A 0A 6A 0A 00 00'
+                       ' 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'
+                       ' 00 00 00 00 00 00')
+        multi_comm_trace_str = ('000000F600000000005002000000003F3F3F3'
+                                'F3F003F000000000000000001000000000000000000'
+                                '000000000000000000000000000000000000000000'
+                                '00000000000000000000000000000000000000000'
+                                '00000000000000000')
+        multi_comm_trace_file = ('/sys/kernel/debug/ieee80211'
+                                 '/phy0/iwlwifi/iwlmvm/send_hcmd')
+
+        def _execute_cmd(cmd_str, msg=''):
+            """Wrapper around subprocess.check_output.
+
+            @params cmd: Command to be executed as a string
+            @params msg: Optional description of the command
+
+            @returns: (True, output) if execution succeeded
+                  (False, None) if execution failed
+
+            """
+            try:
+                logging.info('Executing %s cmd', msg)
+                cmd = cmd_str.split(' ')
+                logging.debug('command is "%s"', cmd)
+                output = subprocess.check_output(cmd)
+                logging.info('%s cmd successfully executed', msg)
+                logging.debug('output is %s', output)
+                return (True, output)
+            except Exception as e:
+                logging.error('Exception %s while executing %s command', str(e),
+                              msg)
+                return (False, None)
+
+        def _get_ddc_write_cmd(ddc_read_result, ddc_write_cmd_prefix):
+            """ Create ddc_write_cmd from read command
+
+           This function performs the following
+           1) Take the output of ddc_read_cmd which is in following form
+              '< HCI Command: ogf 0x3f, ocf 0x008c, plen 1\n
+               01 \n>
+               HCI Event: 0x0e plen 6\n  01 8C FC 12 00 18 \n'
+           2) Take the last value of the output
+              01 8C FC 12 00 ===>> 18 <====
+           3) Bitwise or with 0x40
+              0x18 | 0x40 = 0x58
+           4) Add it to the end of the ddc_write_cmd
+              'hcitool 01 8C FC 00 28 01 ===> 58 <===='
+
+           """
+            last_line  = [i for i in ddc_read_result.split('\n') if i != ''][-1]
+            last_byte = [i for i in last_line.split(' ') if i != ''][-1]
+            processed_byte= hex(int(last_byte, 16) | 0x40).split('0x')[1]
+            cmd = ddc_write_cmd_prefix + ' ' + processed_byte
+            logging.debug('ddc_write_cmd is %s', cmd)
+            return cmd
+
+        try:
+            logging.info('Enabling WRT logs')
+            status, _ = _execute_cmd(fw_trace_cmd, 'FW trace cmd')
+            if not status:
+                logging.info('FW trace command execution failed')
+                return False
+
+            status, ddc_read_result = _execute_cmd(ddc_read_cmd, 'DDC Read')
+            if not status:
+                logging.info('DDC Read command  execution failed')
+                return False
+
+            ddc_write_cmd = _get_ddc_write_cmd(ddc_read_result,
+                                               ddc_write_cmd_prefix)
+            logging.debug('DDC Write command  is %s', ddc_write_cmd)
+            status, _ = _execute_cmd(ddc_write_cmd, 'DDC Write')
+            if not status:
+                logging.info('DDC Write commanad execution failed')
+                return False
+
+            status, hw_trace_result = _execute_cmd(hw_trace_cmd, 'HW trace')
+            if not status:
+                logging.info('HW Trace command  execution failed')
+                return False
+
+            logging.debug('Executing the multi_comm_trace cmd %s to file %s'
+                         ,multi_comm_trace_str, multi_comm_trace_file)
+            with open(multi_comm_trace_file, 'w') as f:
+                f.write(multi_comm_trace_str+'\n')
+                f.flush()
+
+            logging.info('WRT Logs enabled')
+            return True
+        except Exception as e:
+            logging.error('Exception %s while enabling WRT logs', str(e))
+            return False
+
+    def collect_wrt_logs(self):
+        """Collect the WRT logs for Intel Bluetooth adapters
+
+           This is applicable only to Intel adapters.
+           Execute following command to collect WRT log. The logs are
+           copied to /var/spool/crash/
+
+           'echo 1 > sudo tee /sys/kernel/debug/ieee80211/phy0'
+                           '/iwlwifi/iwlmvm/fw_dbg_collect'
+           This is to be called only after enable_wrt_logs is called
+
+
+           Precondition:
+                 1) enable_wrt_logs has been called
+        """
+        def _collect_logs():
+            """Execute command to collect wrt logs."""
+            try:
+                with open('/sys/kernel/debug/ieee80211/phy0/iwlwifi/'
+                          'iwlmvm/fw_dbg_collect', 'w') as f:
+                    f.write('1')
+                    f.flush()
+                # There is some flakiness in log collection. This sleep
+                # is due to the flakiness
+                time.sleep(10)
+                return True
+            except Exception as e:
+                logging.error('Exception %s in _collect logs ', str(e))
+                return False
+
+        def _get_num_log_files():
+            """Return number of WRT log files."""
+            try:
+                return len(glob.glob('/var/spool/crash/devcoredump_iwlwifi*'))
+            except Exception as e:
+                logging.debug('Exception %s raised in _get_num_log_files',
+                              str(e))
+                return 0
+
+        try:
+            logging.info('Collecting WRT logs')
+            #
+            # The command to trigger the logs does seems to work always.
+            # As a workaround for this flakiness, execute it multiple times
+            # until a new log is created
+            #
+            num_logs_present = _get_num_log_files()
+            logging.debug('%s logs present', num_logs_present)
+            for i in range(10):
+                time.sleep(1)
+                logging.debug('Executing command to collect WRT logs ')
+                if _collect_logs():
+                    logging.debug('Command to collect WRT logs executed')
+                else:
+                    logging.debug('Command to collect WRT logs failed')
+                    continue
+
+                if _get_num_log_files() > num_logs_present:
+                    logging.info('Successfully collected WRT logs ')
+                    return True
+                else:
+                    logging.debug('Log file not written. Trying again')
+
+            logging.info('Unable to collect WRT logs')
+            return False
+        except Exception as e:
+            logging.error('Exception %s while collecting WRT logs', str(e))
+            return False
 
     @xmlrpc_server.dbus_safe(False)
     def start_bluetoothd(self):
@@ -357,6 +607,28 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
 
         """
         return bool(self._get_dbus_proxy_for_bluetoothd())
+
+
+    def is_bluetoothd_proxy_valid(self):
+        """Checks whether the proxy object for bluetoothd is ok.
+
+        The dbus proxy object (self._bluez) can become unusable if bluetoothd
+        crashes or restarts for any reason. This method checks whether this has
+        happened by attempting to use the object proxy. If bluetoothd has
+        restarted (or is not available), then the session will no longer be
+        valid and this will result in a dbus exception.
+
+        Returns:
+            True if the bluez proxy is still usable. False otherwise.
+        """
+
+        try:
+            _ = self._bluez.GetManagedObjects(
+                    dbus_interface=self.BLUEZ_MANAGER_IFACE)
+        except dbus.exceptions.DBusException:
+            return False
+
+        return True
 
 
     def _update_bluez(self):
@@ -513,6 +785,68 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
 
         """
         return self._has_adapter and self._adapter is not None
+
+
+    def is_wake_enabled(self):
+        """Checks whether the bluetooth adapter has wake enabled.
+
+        This will walk through all parents of the hci0 sysfs path and try to
+        find one with a 'power/wakeup' entry and returns whether its value is
+        'enabled'.
+
+        @return True if 'power/wakeup' of an hci0 parent is 'enabled'
+        """
+        enabled = self._is_wake_enabled()
+        return enabled
+
+
+    def set_wake_enabled(self, value):
+        """Sets wake enabled to the value if path exists.
+
+        This will walk through all parents of the hci0 sysfs path and write the
+        value to the first one it finds.
+
+        Args:
+            value: Sets power/wakeup to "enabled" if value is true, else
+                   "disabled"
+
+        @return True if it wrote value to a power/wakeup, False otherwise
+        """
+        return self._set_wake_enabled(value)
+
+    def wait_for_uhid_device(self, device_address):
+        """Waits for uhid device with given device address.
+
+        Args:
+            device_address: Peripheral address
+        """
+        def match_uhid_to_device(uhidpath, device_address):
+            """Check if given uhid syspath is for the given device address """
+            # If the syspath has a uniq property that matches the peripheral
+            # device's address, then it has matched
+            props = UdevadmInfo.GetProperties(uhidpath)
+            if props.get('uniq', '').lower() == device_address.lower():
+                logging.info('Found uhid device for address {} at {}'.format(
+                        device_address, uhidpath))
+                return True
+
+            return False
+
+        start = datetime.now()
+
+        # Keep scanning udev for correct uhid device
+        while (datetime.now() - start).seconds <= self.UHID_TIMEOUT:
+            existing_inputs = UdevadmTrigger(
+                    subsystem_match=['input']).DryRun()
+            for entry in existing_inputs:
+                logging.info('udevadm trigger entry: {}'.format(entry))
+                if 'uhid' in entry and match_uhid_to_device(
+                        entry, device_address):
+                    return True
+
+            time.sleep(self.UHID_CHECK_SECS)
+
+        return False
 
 
     def _reset(self, set_power=False):
@@ -716,6 +1050,59 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
     def _is_powered_on(self):
         return bool(self._get_adapter_properties().get(u'Powered'))
 
+    def _get_wake_enabled_path(self):
+        # Walk up the parents from hci0 sysfs path and find the first one with
+        # a power/wakeup property. Return that path (including power/wakeup).
+
+        # Resolve hci path to get full device path (i.e. w/ usb or uart)
+        search_at = os.path.realpath('/sys/class/bluetooth/hci0')
+
+        # Exit early if path doesn't exist
+        if not os.path.exists(search_at):
+            return None
+
+        # Walk up parents and try to find one with 'power/wakeup'
+        for _ in xrange(search_at.count('/') - 1):
+            search_at = os.path.normpath(os.path.join(search_at, '..'))
+            try:
+                path = os.path.join(search_at, 'power', 'wakeup')
+                with open(path, 'r') as f:
+                    return path
+            except IOError:
+                # No power wakeup at the given location so keep going
+                continue
+
+        return None
+
+    def _is_wake_enabled(self):
+        search_at = self._get_wake_enabled_path()
+
+        if search_at is not None:
+            try:
+                with open(search_at, 'r') as f:
+                    value = f.read()
+                    logging.info('Power/wakeup found at {}: {}'.format(
+                            search_at, value))
+                    return 'enabled' in value
+            except IOError:
+                # Path was not readable
+                return False
+
+        logging.debug('No power/wakeup path found')
+        return False
+
+    def _set_wake_enabled(self, value):
+        path = self._get_wake_enabled_path()
+        if path is not None:
+            try:
+                with open(path, 'w') as f:
+                    f.write('enabled' if value else 'disabled')
+                    return True
+            except IOError:
+                # Path was not writeable
+                return False
+
+        return False
 
     def read_version(self):
         """Read the version of the management interface from the Kernel.
@@ -1014,8 +1401,9 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         @returns (capabilities, None) on Success. (None, <error>) on failure
         """
         value = self._adapter.GetSupportedCapabilities(
-            dbus_interface=self.BLUEZ_ADAPTER_IFACE)
+                dbus_interface=self.BLUEZ_ADAPTER_IFACE)
         return (json.dumps(value), None)
+
 
     @xmlrpc_server.dbus_safe(False)
     def register_profile(self, path, uuid, options):
@@ -1272,12 +1660,9 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         """Pairs a device with a given pin code.
 
         Registers a agent who handles pin code request and
-        pairs a device with known pin code.
-
-        Note that the adapter does not automatically connnect to the device
-        when pairing is done. The connect_device() method has to be invoked
-        explicitly to connect to the device. This provides finer control
-        for testing purpose.
+        pairs a device with known pin code. After pairing, this function will
+        automatically connect to the device as well (prevents timing issues
+        between pairing and connect and reduces overall test execution time).
 
         @param address: Address of the device to pair.
         @param pin: The pin code of the device to pair.
@@ -1301,6 +1686,19 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         self._setup_pairing_agent(pin)
         mainloop = gobject.MainLoop()
 
+        def connect_reply():
+            """Handler when connect succeeded."""
+            logging.info('Device connected: %s', device_path)
+            mainloop.quit()
+
+        def connect_error(error):
+            """Handler when connect failed.
+
+            @param error: one of the errors defined in org.bluez.Error
+            representing the error in connect.
+            """
+            logging.error('Connect device failed: %s', error)
+            mainloop.quit()
 
         def pair_reply():
             """Handler when pairing succeeded."""
@@ -1308,8 +1706,13 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             if trusted:
                 self._set_trusted_by_path(device_path, trusted=True)
                 logging.info('Device trusted: %s', device_path)
-            mainloop.quit()
 
+            # On finishing pairing, also connect; let connect result exit
+            # mainloop instead
+            device.Connect(
+                    reply_handler=connect_reply,
+                    error_handler=connect_error,
+                    timeout=timeout * 1000)
 
         def pair_error(error):
             """Handler when pairing failed.
@@ -1330,13 +1733,14 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                 mainloop.quit()
 
         try:
+            # On success, this will also connect
             device.Pair(reply_handler=pair_reply, error_handler=pair_error,
                         timeout=timeout * 1000)
         except Exception as e:
             logging.error('Exception %s in pair_legacy_device', e)
             return False
         mainloop.run()
-        return self._is_paired(device)
+        return self._is_paired(device) and self._is_connected(device)
 
 
     @xmlrpc_server.dbus_safe(False)
@@ -1376,8 +1780,8 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             logging.error('Device not found')
             return False
         if self._is_connected(device):
-          logging.info('Device is already connected')
-          return True
+            logging.info('Device is already connected')
+            return True
         device.Connect()
         return self._is_connected(device)
 
@@ -1414,8 +1818,8 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             logging.error('Device not found')
             return False
         if not self._is_connected(device):
-          logging.info('Device is not connected')
-          return True
+            logging.info('Device is not connected')
+            return True
         device.Disconnect()
         return not self._is_connected(device)
 
@@ -1453,8 +1857,8 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             return False
 
         if not self._is_connected(device):
-          logging.info('Device is not connected')
-          return False
+            logging.info('Device is not connected')
+            return False
 
         return self._device_services_resolved(device)
 
@@ -1649,9 +2053,199 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                     'reset_advertising: failed: %s', str(error)))
 
 
+    def start_capturing_audio_subprocess(self, audio_data, recording_device):
+        """Start capturing audio in a subprocess.
+
+        @param audio_data: the audio test data
+        @param recording_device: which device recorded the audio,
+                possible values are 'recorded_by_dut' or 'recorded_by_peer'
+
+        @returns: True on success. False otherwise.
+        """
+        audio_data = json.loads(audio_data)
+        return self._cras_test_client.start_capturing_subprocess(
+                audio_data[recording_device],
+                sample_format=audio_data['format'],
+                channels=audio_data['channels'],
+                rate=audio_data['rate'],
+                duration=audio_data['duration'])
+
+
+    def stop_capturing_audio_subprocess(self):
+        """Stop capturing audio.
+
+        @returns: True on success. False otherwise.
+        """
+        return self._cras_test_client.stop_capturing_subprocess()
+
+
+    def start_playing_audio_subprocess(self, audio_data):
+        """Start playing audio in a subprocess.
+
+        @param audio_data: the audio test data
+
+        @returns: True on success. False otherwise.
+        """
+        audio_data = json.loads(audio_data)
+        try:
+            return self._cras_test_client.start_playing_subprocess(
+                    audio_data['file'],
+                    channels=audio_data['channels'],
+                    rate=audio_data['rate'],
+                    duration=audio_data['duration'])
+        except Exception as e:
+            logging.error("start_playing_subprocess() failed: %s", str(e))
+            return False
+
+
+    def stop_playing_audio_subprocess(self):
+        """Stop playing audio in the subprocess.
+
+        @returns: True on success. False otherwise.
+        """
+        return self._cras_test_client.stop_playing_subprocess()
+
+
+    def play_audio(self, audio_data):
+        """Play audio.
+
+        It blocks until it has completed playing back the audio.
+
+        @param audio_data: the audio test data
+
+        @returns: True on success. False otherwise.
+        """
+        audio_data = json.loads(audio_data)
+        return self._cras_test_client.play(audio_data['file'],
+                                           channels=audio_data['channels'],
+                                           rate=audio_data['rate'],
+                                           duration=audio_data['duration'])
+
+
+    def check_audio_frames_legitimacy(self, audio_test_data, recording_device):
+        """Get the number of frames in the recorded audio file.
+
+        @param audio_test_data: the audio test data
+        @param recording_device: which device recorded the audio,
+                possible values are 'recorded_by_dut' or 'recorded_by_peer'
+
+        @returns: True if audio frames are legitimate.
+        """
+        audio_test_data = json.loads(audio_test_data)
+        recorded_filename = audio_test_data[recording_device]
+        if recorded_filename.endswith('.raw'):
+            # Make sure that the recorded file does not contain all zeros.
+            filesize = os.path.getsize(recorded_filename)
+            cmd_str = 'cmp -s -n %d %s /dev/zero' % (filesize,
+                                                     recorded_filename)
+            try:
+                result = subprocess.call(cmd_str.split())
+                return result != 0
+            except Exception as e:
+                logging.error("Failed: %s (%s)", cmd_str, str(e))
+                return False
+        else:
+            # The recorded wav file should not be empty.
+            wav_file = check_quality.WaveFile(audio_test_data[recording_device])
+            return wav_file.get_number_frames() > 0
+
+
+    def get_primary_frequencies(self, audio_test_data, recording_device):
+        """Get primary frequencies of the audio test file.
+
+        @param audio_test_data: the audio test data
+        @param recording_device: which device recorded the audio,
+                possible values are 'recorded_by_dut' or 'recorded_by_peer'
+
+        @returns: a list of primary frequencies of channels in the audio file
+        """
+        audio_test_data = json.loads(audio_test_data)
+        args = CheckQualityArgsClass(filename=audio_test_data[recording_device],
+                                     rate=audio_test_data['rate'],
+                                     channel=audio_test_data['channels'],
+                                     bit_width=16)
+        raw_data, rate = check_quality.read_audio_file(args)
+        checker = check_quality.QualityChecker(raw_data, rate)
+        # The highest frequency recorded would be near 24 Khz
+        # as the max sample rate is 48000 in our tests.
+        # So let's set ignore_high_freq to be 48000.
+        checker.do_spectral_analysis(ignore_high_freq=48000,
+                                     check_quality=False,
+                                     quality_params=None)
+        spectra = checker._spectrals
+        primary_freq = [float(spectra[i][0][0]) if spectra[i] else 0
+                        for i in range(len(spectra))]
+        primary_freq.sort()
+        return primary_freq
+
+
+    def enable_wbs(self, value):
+        """Enable or disable wideband speech (wbs) per the value.
+
+        @param value: True to enable wbs.
+
+        @returns: True if the operation succeeds.
+        """
+        return self._cras_test_client.enable_wbs(value)
+
+
+    def set_player_playback_status(self, status):
+        """Set playback status for the registered media player.
+
+        @param status: playback status in string.
+
+        """
+        return self._cras_test_client.set_player_playback_status(status)
+
+
+    def set_player_position(self, position):
+        """Set media position for the registered media player.
+
+        @param position: position in micro seconds.
+
+        """
+        return self._cras_test_client.set_player_position(position)
+
+
+    def set_player_metadata(self, metadata):
+        """Set metadata for the registered media player.
+
+        @param metadata: dictionary of media metadata.
+
+        """
+        return self._cras_test_client.set_player_metadata(metadata)
+
+
+    def set_player_length(self, length):
+        """Set media length for the registered media player.
+
+        Media length is a part of metadata information. However, without
+        specify its type to int64. dbus-python will guess the variant type to
+        be int32 by default. Separate it from the metadata function to help
+        prepare the data differently.
+
+        @param length: length in micro seconds.
+
+        """
+        length_variant = dbus.types.Int64(length, variant_level = 1)
+        length_dict = dbus.Dictionary({'length': length_variant},
+                signature='sv')
+        return self._cras_test_client.set_player_length(length_dict)
+
+
+    def select_input_device(self, device_name):
+        """Select the audio input device.
+
+        @param device_name: the name of the Bluetooth peer device
+
+        @returns: True if the operation succeeds.
+        """
+        return self._cras_test_client.select_input_device(device_name)
+
+
     @xmlrpc_server.dbus_safe(None)
     def get_gatt_attributes_map(self, address):
-        """Return a JSON formated string of the GATT attributes of a device,
+        """Return a JSON formatted string of the GATT attributes of a device,
         keyed by UUID
         @param address: a string of the MAC address of the device
 
@@ -1664,7 +2258,9 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         attribute_map = dict()
 
         device_object_path = self._get_device_path(address)
-        service_map = self._get_service_map(device_object_path)
+        objects = self._bluez.GetManagedObjects(
+            dbus_interface=self.BLUEZ_MANAGER_IFACE, byte_arrays=False)
+        service_map = self._get_service_map(device_object_path, objects)
 
         servs = dict()
         attribute_map['services'] = servs
@@ -1678,7 +2274,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             serv['characteristics'] = dict()
             chrcs = serv['characteristics']
 
-            chrcs_map = self._get_characteristic_map(path)
+            chrcs_map = self._get_characteristic_map(path, objects)
             for uuid, path in chrcs_map.items():
                 chrcs[uuid] = dict()
                 chrc = chrcs[uuid]
@@ -1687,7 +2283,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                 chrc['descriptors'] = dict()
                 descs = chrc['descriptors']
 
-                descs_map = self._get_descriptor_map(path)
+                descs_map = self._get_descriptor_map(path, objects)
 
                 for uuid, path in descs_map.items():
                     descs[uuid] = dict()
@@ -1810,7 +2406,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
 
 
     @xmlrpc_server.dbus_safe(False)
-    def _get_attribute_map(self, object_path, dbus_interface):
+    def _get_attribute_map(self, object_path, dbus_interface, objects):
         """Gets a map of object paths under an object path.
 
         Walks the object tree, and returns a map of UUIDs to object paths for
@@ -1818,6 +2414,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
 
         @param object_path: The object path of the attribute to retrieve
             gatt  UUIDs and paths from.
+        @param objects: The managed objects.
 
         @returns: A dictionary of object paths, keyed by UUID.
 
@@ -1825,9 +2422,6 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         attr_map = {}
 
         if object_path:
-            objects = self._bluez.GetManagedObjects(
-              dbus_interface=self.BLUEZ_MANAGER_IFACE, byte_arrays=False)
-
             for path, ifaces in objects.iteritems():
                 if (dbus_interface in ifaces and
                   path.startswith(object_path)):
@@ -1840,19 +2434,34 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         return attr_map
 
 
-    def _get_service_map(self, device_path):
-        """Gets a map of service paths for a device."""
-        return self._get_attribute_map(device_path, self.BLUEZ_GATT_SERV_IFACE)
+    def _get_service_map(self, device_path, objects):
+        """Gets a map of service paths for a device.
+
+        @param device_path: the object path of the device.
+        @param objects: The managed objects.
+        """
+        return self._get_attribute_map(
+            device_path, self.BLUEZ_GATT_SERV_IFACE, objects)
 
 
-    def _get_characteristic_map(self, serv_path):
-        """Gets a map of characteristic paths for a service."""
-        return self._get_attribute_map(serv_path, self.BLUEZ_GATT_CHAR_IFACE)
+    def _get_characteristic_map(self, serv_path, objects):
+        """Gets a map of characteristic paths for a service.
+
+        @param serv_path: the object path of the service.
+        @param objects: The managed objects.
+        """
+        return self._get_attribute_map(
+            serv_path, self.BLUEZ_GATT_CHAR_IFACE, objects)
 
 
-    def _get_descriptor_map(self, chrc_path):
-        """Gets a map of descriptor paths for a characteristic."""
-        return self._get_attribute_map(chrc_path, self.BLUEZ_GATT_DESC_IFACE)
+    def _get_descriptor_map(self, chrc_path, objects):
+        """Gets a map of descriptor paths for a characteristic.
+
+        @param chrc_path: the object path of the characteristic.
+        @param objects: The managed objects.
+        """
+        return self._get_attribute_map(
+            chrc_path, self.BLUEZ_GATT_DESC_IFACE, objects)
 
 
     @xmlrpc_server.dbus_safe(None)
@@ -1889,14 +2498,14 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         char_map = {}
 
         if device_path:
-          objects = self._bluez.GetManagedObjects(
-              dbus_interface=self.BLUEZ_MANAGER_IFACE, byte_arrays=False)
+            objects = self._bluez.GetManagedObjects(
+                dbus_interface=self.BLUEZ_MANAGER_IFACE, byte_arrays=False)
 
-          for path, ifaces in objects.iteritems():
-              if (self.BLUEZ_GATT_CHAR_IFACE in ifaces and
-                  path.startswith(device_path)):
-                  uuid = ifaces[self.BLUEZ_GATT_CHAR_IFACE]['UUID'].lower()
-                  char_map[uuid] = path
+            for path, ifaces in objects.iteritems():
+                if (self.BLUEZ_GATT_CHAR_IFACE in ifaces and
+                    path.startswith(device_path)):
+                    uuid = ifaces[self.BLUEZ_GATT_CHAR_IFACE]['UUID'].lower()
+                    char_map[uuid] = path
         else:
             logging.warning('Device %s not in object tree.', address)
 
@@ -1919,6 +2528,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         """
         path = self.get_characteristic_map(address).get(uuid)
         if not path:
+            logging.error("path not found: %s %s", uuid, address)
             return None
         return dbus.Interface(
             self._system_bus.get_object(self.BLUEZ_SERVICE_NAME, path),
@@ -1972,12 +2582,79 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         return True
 
 
+    @xmlrpc_server.dbus_safe(None)
+    def exchange_messages(self, tx_object_path, rx_object_path, value):
+        """Performs a write operation on a gatt characteristic and wait for
+        the response on another characteristic.
+
+        @param tx_object_path: the object path of the characteristic to write.
+        @param rx_object_path: the object path of the characteristic ti read.
+        @param value: A byte array containing the data to write.
+
+        @returns: The value of the characteristic to read from.
+                  None if the uuid/address was not found in the object tree, or
+                      if a DBus exception was raised by the write operation.
+
+        """
+        tx_obj = self._get_gatt_characteristic_object(tx_object_path)
+
+        if tx_obj is None:
+            return None
+
+        self._chrc_property = None
+
+        self._signal_watch = self._system_bus.add_signal_receiver(
+            self._property_changed,
+            signal_name='PropertiesChanged',
+            path=rx_object_path)
+
+        self._timeout_id = gobject.timeout_add(
+            self.PROPERTY_UPDATE_TIMEOUT_MILLI_SECS,
+            self._property_wait_timeout)
+
+        write_value = _b64_string_to_dbus_byte_array(value)
+        tx_obj.WriteValue(write_value, dbus.Dictionary({}, signature='sv'))
+
+        self._dbus_mainloop.run()
+
+        return _dbus_byte_array_to_b64_string(self._chrc_property)
+
+
+    def _property_changed(self, *args, **kwargs):
+        """Handler for properties changed signal."""
+        gobject.source_remove(self._timeout_id)
+        self._signal_watch.remove();
+        changed_prop = args
+
+        logging.info(changed_prop)
+        prop_dict = changed_prop[1]
+        self._chrc_property = prop_dict['Value']
+        if self._dbus_mainloop.is_running():
+            self._dbus_mainloop.quit()
+
+
+    def _property_wait_timeout(self):
+        """Timeout handler when waiting for properties update signal."""
+        self._signal_watch.remove();
+        if self._dbus_mainloop.is_running():
+            logging.warn("quit main loop due to timeout")
+            self._dbus_mainloop.quit()
+        # Return false so that this method will not be called again.
+        return False
+
+
     @xmlrpc_server.dbus_safe(False)
-    def start_notify(self, address, uuid, cccd_value):
+    def _get_gatt_characteristic_object(self, object_path):
+        return dbus.Interface(
+            self._system_bus.get_object(self.BLUEZ_SERVICE_NAME, object_path),
+            self.BLUEZ_GATT_CHAR_IFACE)
+
+
+    @xmlrpc_server.dbus_safe(False)
+    def start_notify(self, object_path, cccd_value):
         """Starts the notification session on the gatt characteristic.
 
-        @param address: The MAC address of the remote device.
-        @param uuid: The uuid of the characteristic.
+        @param object_path: the object path of the characteristic.
         @param cccd_value: Possible CCCD values include
                0x00 - inferred from the remote characteristic's properties
                0x01 - notification
@@ -1988,8 +2665,9 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                       if a DBus exception was raised by the operation.
 
         """
-        char_obj = self._get_char_object(uuid, address)
+        char_obj = self._get_gatt_characteristic_object(object_path)
         if char_obj is None:
+            logging.error("characteristic not found: %s %s", object_path)
             return False
 
         try:
@@ -2003,19 +2681,19 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
 
 
     @xmlrpc_server.dbus_safe(False)
-    def stop_notify(self, address, uuid):
+    def stop_notify(self, object_path):
         """Stops the notification session on the gatt characteristic.
 
-        @param address: The MAC address of the remote device.
-        @param uuid: The uuid of the characteristic.
+        @param object_path: the object path of the characteristic.
 
         @returns: True if the operation succeeds.
                   False if the characteristic is not found, or
                       if a DBus exception was raised by the operation.
 
         """
-        char_obj = self._get_char_object(uuid, address)
+        char_obj = self._get_gatt_characteristic_object(object_path)
         if char_obj is None:
+            logging.error("characteristic not found: %s %s", object_path)
             return False
 
         try:
@@ -2029,20 +2707,16 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
 
 
     @xmlrpc_server.dbus_safe(False)
-    def is_notifying(self, address, uuid):
+    def is_notifying(self, object_path):
         """Is the GATT characteristic in a notifying session?
 
-        @param address: The MAC address of the remote device.
-        @param uuid: The uuid of the characteristic.
+        @param object_path: the object path of the characteristic.
 
         @return True if it is in a notification session. False otherwise.
 
         """
-        path = self.get_characteristic_map(address).get(uuid)
-        if not path:
-            return False
 
-        return self.get_gatt_characteristic_property(path, 'Notifying')
+        return self.get_gatt_characteristic_property(object_path, 'Notifying')
 
 
     @xmlrpc_server.dbus_safe(False)
@@ -2135,6 +2809,88 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                     self.BLUEZ_SERVICE_NAME,
                     path),
                 self.BLUEZ_PLUGIN_DEVICE_IFACE)
+
+
+    def bt_caused_last_resume(self):
+        """Checks if last resume from suspend was caused by bluetooth
+
+        @return: True if BT wake path was cause of resume, False otherwise
+        """
+
+        # When the resume cause is printed to powerd log, it omits the
+        # /power/wakeup portion of wake path
+        bt_wake_path = self._get_wake_enabled_path()
+
+        # If bluetooth does not have a valid wake path, it could not have caused
+        # the resume
+        if not bt_wake_path:
+            return False
+
+        bt_wake_path = bt_wake_path.replace('/power/wakeup', '')
+
+        event_file = '/var/log/power_manager/powerd.LATEST'
+
+        # Each powerd_suspend wakeup has a log "powerd_suspend returned 0",
+        # with the return code of the suspend. We search for the last
+        # occurrence in the log, and then find the collocated event_count log,
+        # indicating the wakeup cause. -B option for grep will actually grab the
+        # *next* 5 logs in time, since we are piping the powerd file backwards
+        # with tac command
+        resume_indicator = 'powerd_suspend returned'
+        cmd = 'tac {} | grep -B 5 -m1 "{}"'.format(event_file, resume_indicator)
+
+        try:
+            last_resume_details = utils.run(cmd).stdout
+
+            # If BT caused wake, there will be a line describing the bt wake
+            # path's event_count before and after the resume
+            for line in last_resume_details.split('\n'):
+                if 'event_count' in line:
+                    logging.info('Checking wake event: {}'.format(line))
+                    if bt_wake_path in line:
+                        return True
+
+        except error.CmdError:
+            logging.error('Could not locate recent suspend')
+
+        return False
+
+
+    def do_suspend(self, seconds, expect_bt_wake):
+        """Suspend DUT using the power manager.
+
+        @param seconds: The number of seconds to suspend the device.
+        @param expect_bt_wake: Whether we expect bluetooth to wake us from
+            suspend. If true, we expect this resume will occur early
+
+        @throws: SuspendFailure on resume with unexpected timing or wake source.
+            The raised exception will be handled as a non-zero retcode over the
+            RPC, signalling for the test to fail.
+        """
+        early_wake = False
+        try:
+            sys_power.do_suspend(seconds)
+
+        except sys_power.SpuriousWakeupError:
+            logging.info('Early resume detected...')
+            early_wake = True
+
+        # Handle error conditions based on test expectations, whether resume
+        # was early, and cause of the resume
+        bt_caused_wake = self.bt_caused_last_resume()
+        logging.info('Cause for resume: {}'.format(
+            'BT' if bt_caused_wake else 'Not BT'))
+
+        if not expect_bt_wake and bt_caused_wake:
+            raise sys_power.SuspendFailure('BT woke us unexpectedly')
+
+        if expect_bt_wake and not bt_caused_wake:
+            raise sys_power.SuspendFailure('BT should have woken us')
+
+        if bt_caused_wake and not early_wake:
+            raise sys_power.SuspendFailure('BT wake did not come early')
+
+        return True
 
 
 if __name__ == '__main__':

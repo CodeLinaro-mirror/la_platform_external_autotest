@@ -297,9 +297,9 @@ class platform_KernelErrorPaths(test.test):
                                              'BUG: scheduling while atomic',
                                              'BUG: sleeping function called')),
             'EXCEPTION' : ('nullptr',     10, True,
-             # x86 gives "BUG: unable to" while ARM gives "Unableto".
-                           'nable to handle kernel NULL pointer '
-                           'dereference at'),
+             # Logs differ slightly between different kernels and archs (v5.4,
+             # x86, ARM), but all contain 'kernel NULL pointer dereference'.
+                           'kernel NULL pointer dereference'),
             'PANIC' : ('panic', 10, True, 'Kernel panic - not syncing:'),
             'CORRUPT_STACK' : (None, 10, True,
                                'stack-protector: Kernel stack is '
@@ -308,7 +308,7 @@ class platform_KernelErrorPaths(test.test):
 
         bad_kcrashes = []
 
-        #Expected input is comma-delimited kcrashes string
+        # Expected input is comma-delimited kcrashes string
         kcrash_list = kcrashes.split(',')
         if 'SYSRQ_X' in kcrash_list or 'ALL' in kcrash_list:
             self._test_sysrq_x()

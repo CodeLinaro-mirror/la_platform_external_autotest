@@ -1,0 +1,22 @@
+{
+  "chromeos1-row4-rack7-labstation2": [
+    {
+      "hostname": "chromeos1-row4-rack7-host1",
+      "board": "nami",
+      "model": "bard",
+      "servo_serial": "C1903145143",
+      "servo_port": "9999",
+      "mac_address": "F4:F5:E8:50:E7:85"
+    }
+  ],
+  "chromeos1-row4-rack7-labstation3": [
+    {
+      "hostname": "chromeos1-row4-rack7-host3",
+      "board": "nocturne",
+      "model": "nocturne",
+      "servo_serial": "C1706310022",
+      "servo_port": "9999",
+      "mac_address": "08:9E:08:E4:A0:1C"
+    }
+  ]
+}

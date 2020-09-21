@@ -19,6 +19,9 @@ The common options are:
 See topic_common.py for a High Level Design and Algorithm.
 
 """
+
+from __future__ import print_function
+
 import common
 import json
 import random
@@ -283,7 +286,7 @@ class host_list(action_common.atest_list, host):
                 result['labels'] = self._cleanup_labels(result['labels'],
                                                         result['platform'])
         if self.skylab and self.full_output:
-            print results
+            print(results)
             return
 
         if self.skylab:
@@ -338,7 +341,7 @@ class host_stat(host):
         @param results: the results to be printed.
         """
         for stats, acls, labels, attributes in results:
-            print '-'*5
+            print('-'*5)
             self.print_fields(stats,
                               keys=['hostname', 'id', 'platform',
                                     'status', 'locked', 'locked_by',
@@ -401,7 +404,7 @@ class host_get_migration_plan(host_stat):
         }
 
     def output(self, results):
-        print json.dumps(results, indent=4, sort_keys=True)
+        print(json.dumps(results, indent=4, sort_keys=True))
 
 
 class host_jobs(host):
@@ -460,8 +463,8 @@ class host_jobs(host):
         @param results: the results to be printed.
         """
         for host, jobs in results:
-            print '-'*5
-            print 'Hostname: %s' % host
+            print('-'*5)
+            print('Hostname: %s' % host)
             self.print_table(jobs, keys_header=['job_id',
                                                 'job_owner',
                                                 'job_name',
@@ -669,7 +672,7 @@ class host_mod(BaseHostModCreate):
                                      skylab_utils.MSG_ONLY_VALID_IN_SKYLAB),
                                default=None)
         self.parser.add_option('-f', '--force_modify_locking',
-                               help='Forcefully lock\unlock a host',
+                               help=r'Forcefully lock\unlock a host',
                                action='store_true')
         self.parser.add_option('--remove_acls',
                                help=('Remove all active acls. %s' %
@@ -806,7 +809,7 @@ class host_mod(BaseHostModCreate):
                 # TODO: Make the AFE return True or False,
                 # especially for lock
                 successes.append(host)
-            except topic_common.CliError, full_error:
+            except topic_common.CliError as full_error:
                 # Already logged by execute_rpc()
                 pass
 
@@ -884,7 +887,7 @@ class host_create(BaseHostModCreate):
         try:
             # Setup stuff needed for afe comm.
             obj.afe = rpc.afe_comm(web_server)
-        except rpc.AuthError, s:
+        except rpc.AuthError as s:
             obj.failure(str(s), fatal=True)
         obj.hosts = hosts
         obj.platform = platform
@@ -1161,7 +1164,7 @@ class host_rename(host):
             except InvalidHostnameError as e:
                 self.failure('Cannot rename host %s: %s' % (host, e), item=host,
                              what_failed='Failed to rename')
-            except topic_common.CliError, full_error:
+            except topic_common.CliError as full_error:
                 # Already logged by execute_rpc()
                 pass
 

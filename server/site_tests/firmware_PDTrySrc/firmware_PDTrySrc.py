@@ -10,7 +10,6 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
 from autotest_lib.server.cros.servo import pd_device
 
-
 class firmware_PDTrySrc(FirmwareTest):
     """
     Servo based USB PD Try.SRC protocol test.
@@ -23,11 +22,11 @@ class firmware_PDTrySrc(FirmwareTest):
     the time in SRC mode. When it is disabled, there must be at least 25%
     variation in connecting as SRC and SNK.
     """
-    version = 1
 
+    version = 1
     CONNECT_ITERATIONS = 20
-    PD_DISCONNECT_TIME = 1
-    PD_CONNECT_DELAY = 4
+    PD_DISCONNECT_TIME = 5
+    PD_CONNECT_DELAY = 10
     SNK = 0
     SRC = 1
     TRYSRC_OFF_THRESHOLD = 15.0
@@ -78,7 +77,7 @@ class firmware_PDTrySrc(FirmwareTest):
 
     def initialize(self, host, cmdline_args, flip_cc=False):
         super(firmware_PDTrySrc, self).initialize(host, cmdline_args)
-        self.setup_pdtester(flip_cc)
+        self.setup_pdtester(flip_cc, min_batt_level=10)
         # Only run in normal mode
         self.switcher.setup_mode('normal')
         # Turn off console prints, except for USBPD.

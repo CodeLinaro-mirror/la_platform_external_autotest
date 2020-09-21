@@ -9,14 +9,11 @@ import time
 from autotest_lib.server import test
 from autotest_lib.client.common_lib import error, utils
 from autotest_lib.server.cros import gsutil_wrapper
-from autotest_lib.server.cros.dynamic_suite import constants as ds_constants
 
 
 class FingerprintTest(test.test):
     """Base class that sets up helpers for fingerprint tests."""
     version = 1
-
-    _FINGERPRINT_BOARD_NAME_SUFFIX = '_fp'
 
     # Location of firmware from the build on the DUT
     _FINGERPRINT_BUILD_FW_DIR = '/opt/google/biod/fw'
@@ -55,16 +52,23 @@ class FingerprintTest(test.test):
     _KEY_TYPE_MP = 'mp'
 
     # EC board names for FPMCUs
+    _FP_BOARD_NAME_BLOONCHIPPER = 'bloonchipper'
     _FP_BOARD_NAME_DARTMONKEY = 'dartmonkey'
     _FP_BOARD_NAME_NOCTURNE = 'nocturne_fp'
     _FP_BOARD_NAME_NAMI = 'nami_fp'
 
     # Map from signing key ID to type of signing key
     _KEY_ID_MAP_ = {
+        # bloonchipper
+        '61382804da86b4156d666cc9a976088f8b647d44': _KEY_TYPE_DEV,
+        '07b1af57220c196e363e68d73a5966047c77011e': _KEY_TYPE_PRE_MP,
+        '1c590ef36399f6a2b2ef87079c135b69ef89eb60': _KEY_TYPE_MP,
+
         # dartmonkey
         '257a0aa3ac9e81aa4bc3aabdb6d3d079117c5799': _KEY_TYPE_MP,
 
         # nocturne
+        '8a8fc039a9463271995392f079b83ce33832d07d': _KEY_TYPE_DEV,
         '6f38c866182bd9bf7a4462c06ac04fa6a0074351': _KEY_TYPE_MP,
         'f6f7d96c48bd154dbae7e3fe3a3b4c6268a10934': _KEY_TYPE_PRE_MP,
 
@@ -77,6 +81,7 @@ class FingerprintTest(test.test):
     # RO versions that are flashed in the factory
     # (for eternity for a given board)
     _GOLDEN_RO_FIRMWARE_VERSION_MAP = {
+        _FP_BOARD_NAME_BLOONCHIPPER: 'bloonchipper_v2.0.4277-9f652bb3',
         _FP_BOARD_NAME_DARTMONKEY: 'dartmonkey_v2.0.2887-311310808',
         _FP_BOARD_NAME_NOCTURNE: 'nocturne_fp_v2.2.64-58cf5974e',
         _FP_BOARD_NAME_NAMI: 'nami_fp_v2.2.144-7a08e07eb',
@@ -94,6 +99,38 @@ class FingerprintTest(test.test):
     #   2) Used to verify that files that end up in the build (and therefore
     #      what we release) is exactly what we expect.
     _FIRMWARE_VERSION_MAP = {
+        _FP_BOARD_NAME_BLOONCHIPPER: {
+            'bloonchipper_v2.0.3455-bc55b4ae.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '821bb12c74920396f5ef8829ec283cdb73ef47b00dc0fdd417c1dc7fd87b4f18',
+                _FIRMWARE_VERSION_RO_VERSION: 'bloonchipper_v2.0.3455-bc55b4ae',
+                _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.3455-bc55b4ae',
+                _FIRMWARE_VERSION_KEY_ID: '07b1af57220c196e363e68d73a5966047c77011e',
+            },
+            'bloonchipper_v2.0.3504-f45c30a9.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '6f5fe59909097287c95ddd879832e30790926c307e203c617ba7d04bd007dcea',
+                _FIRMWARE_VERSION_RO_VERSION: 'bloonchipper_v2.0.3504-f45c30a9',
+                _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.3504-f45c30a9',
+                _FIRMWARE_VERSION_KEY_ID: '07b1af57220c196e363e68d73a5966047c77011e',
+            },
+            'bloonchipper_v2.0.4019-265ce611.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: 'c66ee09d60e4ad8c6afd00d4982cc7681a0bd37306bb156d3817aca4802d91e7',
+                _FIRMWARE_VERSION_RO_VERSION: 'bloonchipper_v2.0.4019-265ce611',
+                _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.4019-265ce611',
+                _FIRMWARE_VERSION_KEY_ID: '07b1af57220c196e363e68d73a5966047c77011e',
+            },
+            'bloonchipper_v2.0.4274-a9ed1089.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '3ae000ad5b31687f2fb6d0dc9926ec46e8262007d7bbaf0beeb2ace167761bc7',
+                _FIRMWARE_VERSION_RO_VERSION: 'bloonchipper_v2.0.4274-a9ed1089',
+                _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.4274-a9ed1089',
+                _FIRMWARE_VERSION_KEY_ID: '07b1af57220c196e363e68d73a5966047c77011e',
+            },
+            'bloonchipper_v2.0.4277-9f652bb3.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '7d9b788a908bee5c83e27450258b2bbf110d7253d49faa4804562ae27e42cb3b',
+                _FIRMWARE_VERSION_RO_VERSION: 'bloonchipper_v2.0.4277-9f652bb3',
+                _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.4277-9f652bb3',
+                _FIRMWARE_VERSION_KEY_ID: '1c590ef36399f6a2b2ef87079c135b69ef89eb60',
+            },
+        },
         _FP_BOARD_NAME_NOCTURNE: {
             'nocturne_fp_v2.2.110-b936c0a3c.bin': {
                 _FIRMWARE_VERSION_SHA256SUM: '9da32787d68e2ac408be55a4d8c7de13e0f8c0a4a9912d69108b91794e90ee4b',
@@ -111,6 +148,12 @@ class FingerprintTest(test.test):
                 _FIRMWARE_VERSION_SHA256SUM: '73d822071518cf1b6e705d9c5903c2bcf37bae536784b275b96d916c44d3b6b7',
                 _FIRMWARE_VERSION_RO_VERSION: 'nocturne_fp_v2.2.64-58cf5974e',
                 _FIRMWARE_VERSION_RW_VERSION: 'nocturne_fp_v2.0.3266-99b5e2c98',
+                _FIRMWARE_VERSION_KEY_ID: '6f38c866182bd9bf7a4462c06ac04fa6a0074351',
+            },
+            'nocturne_fp_v2.2.64-58cf5974e-RO_v2.0.4017-9c45fb4b3-RW.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '16c405eeaff75dcbc76dbc9f368f66e3fabc47e2ebcf13bd2b64b8b133bbff97',
+                _FIRMWARE_VERSION_RO_VERSION: 'nocturne_fp_v2.2.64-58cf5974e',
+                _FIRMWARE_VERSION_RW_VERSION: 'nocturne_fp_v2.0.4017-9c45fb4b3',
                 _FIRMWARE_VERSION_KEY_ID: '6f38c866182bd9bf7a4462c06ac04fa6a0074351',
             },
         },
@@ -133,6 +176,12 @@ class FingerprintTest(test.test):
                 _FIRMWARE_VERSION_RW_VERSION: 'nami_fp_v2.0.3266-99b5e2c98',
                 _FIRMWARE_VERSION_KEY_ID: '35486c0090ca390408f1fbbf2a182966084fe2f8',
             },
+            'nami_fp_v2.2.144-7a08e07eb-RO_v2.0.4017-9c45fb4b3-RW.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '7965ea4c4371ee6d21dc462b9ed7c99078d17f4b772bec51441ca9af7d8f3a80',
+                _FIRMWARE_VERSION_RO_VERSION: 'nami_fp_v2.2.144-7a08e07eb',
+                _FIRMWARE_VERSION_RW_VERSION: 'nami_fp_v2.0.4017-9c45fb4b3',
+                _FIRMWARE_VERSION_KEY_ID: '35486c0090ca390408f1fbbf2a182966084fe2f8',
+            },
         },
         _FP_BOARD_NAME_DARTMONKEY: {
             'dartmonkey_v2.0.2887-311310808.bin': {
@@ -145,6 +194,12 @@ class FingerprintTest(test.test):
                 _FIRMWARE_VERSION_SHA256SUM: 'ac1c74b5d2676923f041ee1a27bf5b9892fab1d4f82fe924550a9b55917606ae',
                 _FIRMWARE_VERSION_RO_VERSION: 'dartmonkey_v2.0.2887-311310808',
                 _FIRMWARE_VERSION_RW_VERSION: 'dartmonkey_v2.0.3266-99b5e2c98',
+                _FIRMWARE_VERSION_KEY_ID: '257a0aa3ac9e81aa4bc3aabdb6d3d079117c5799',
+            },
+            'dartmonkey_v2.0.2887-311310808-RO_v2.0.4017-9c45fb4b3-RW.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: 'b84914c70e93c28e2221f48be338dbf0ad0cfb12b7877baaf6b47f7bfd2aa958',
+                _FIRMWARE_VERSION_RO_VERSION: 'dartmonkey_v2.0.2887-311310808',
+                _FIRMWARE_VERSION_RW_VERSION: 'dartmonkey_v2.0.4017-9c45fb4b3',
                 _FIRMWARE_VERSION_KEY_ID: '257a0aa3ac9e81aa4bc3aabdb6d3d079117c5799',
             }
         }
@@ -197,11 +252,8 @@ class FingerprintTest(test.test):
                                  % ectool_output)
         return ret
 
-    def initialize(self, host, test_dir, use_dev_signed_fw=False,
-                   enable_hardware_write_protect=True,
-                   enable_software_write_protect=True,
-                   force_firmware_flashing=False, init_entropy=True):
-        """Performs initialization."""
+    def initialize(self, host):
+        """Perform minimal initialization, to avoid AttributeError in cleanup"""
         self.host = host
         self.servo = host.servo
 
@@ -209,6 +261,14 @@ class FingerprintTest(test.test):
 
         self.servo.initialize_dut()
 
+        self.fp_board = self.get_fp_board()
+        self._build_fw_file = self.get_build_fw_file()
+
+    def setup_test(self, test_dir, use_dev_signed_fw=False,
+                   enable_hardware_write_protect=True,
+                   enable_software_write_protect=True,
+                   force_firmware_flashing=False, init_entropy=True):
+        """Perform more complete initialization, including copying test files"""
         logging.info('HW write protect enabled: %s',
                      self.is_hardware_write_protect_enabled())
 
@@ -232,8 +292,7 @@ class FingerprintTest(test.test):
         logging.info('Created dut_working_dir: %s', self._dut_working_dir)
         self.copy_files_to_dut(test_dir, self._dut_working_dir)
 
-        self._build_fw_file = self.get_build_fw_file()
-        self._validate_build_fw_file(self._build_fw_file)
+        self.validate_build_fw_file()
 
         gen_script = os.path.abspath(os.path.join(self.autodir,
                                                   'server', 'cros', 'faft',
@@ -309,7 +368,10 @@ class FingerprintTest(test.test):
         cmd = ' '.join([gen_script,
                         self.get_fp_board(),
                         os.path.basename(build_fw_file)])
-        self.run_server_cmd(cmd)
+        result = self.run_server_cmd(cmd)
+        if result.exit_status != 0:
+            raise error.TestFail('Failed to run test image generation script')
+
         os.chdir(pushd)
 
         # Copy resulting files to DUT tmp dir
@@ -393,17 +455,6 @@ class FingerprintTest(test.test):
         FPMCUs have unique names.
         See go/cros-fingerprint-firmware-branching-and-signing.
         """
-
-        # For devices that don't have unibuild support (which is required to
-        # use cros_config).
-        # TODO(https://crrev.com/i/2313151): nami has unibuild support, but
-        # needs its model.yaml updated.
-        # TODO(https://crbug.com/1030862): remove when nocturne has cros_config
-        #  support.
-        board = self.host.get_board().replace(ds_constants.BOARD_PREFIX, '')
-        if board == 'nami' or board == 'nocturne':
-            return board + self._FINGERPRINT_BOARD_NAME_SUFFIX
-
         # Use cros_config to get fingerprint board.
         result = self._run_cros_config_cmd('board')
         if result.exit_status != 0:
@@ -413,13 +464,14 @@ class FingerprintTest(test.test):
 
     def get_build_fw_file(self):
         """Returns full path to build FW file on DUT."""
-
-        fp_board = self.get_fp_board()
-        ls_cmd = 'ls ' + self._FINGERPRINT_BUILD_FW_DIR + '/' + fp_board \
-                 + '*.bin'
+        ls_cmd = 'ls %s/%s*.bin' % (
+            self._FINGERPRINT_BUILD_FW_DIR, self.fp_board)
         result = self.run_cmd(ls_cmd)
         if result.exit_status != 0:
-            raise error.TestFail('Unable to find firmware from build on device')
+            raise error.TestFail(
+                'Unable to find firmware file on device:'
+                ' command failed (rc=%s): %s'
+                % (result.exit_status, result.stderr.strip() or ls_cmd))
         ret = result.stdout.rstrip()
         logging.info('Build firmware file: %s', ret)
         return ret
@@ -430,11 +482,17 @@ class FingerprintTest(test.test):
             raise error.TestFail('"%s" does not match expected "%s" for board '
                                  '%s' % (a, b, self.get_fp_board()))
 
-    def _validate_build_fw_file(self, build_fw_file):
+    def validate_build_fw_file(self,
+                               allowed_types=(_KEY_TYPE_PRE_MP, _KEY_TYPE_MP)):
         """
         Checks that all attributes in the given firmware file match their
         expected values.
+
+        @param allowed_types: If key type is something else, raise TestFail.
+                              Default: pre-MP or MP.
+        @type allowed_types: tuple | list
         """
+        build_fw_file = self._build_fw_file
         # check hash
         actual_hash = self._calculate_sha256sum(build_fw_file)
         expected_hash = self._get_expected_firmware_hash(build_fw_file)
@@ -445,23 +503,24 @@ class FingerprintTest(test.test):
         expected_key_id = self._get_expected_firmware_key_id(build_fw_file)
         self.check_equal(actual_key_id, expected_key_id)
 
-        # check that signing key is "pre mass production" (pre-mp) or
-        # "mass production" (MP) for firmware in the build
+        # check that the signing key for firmware in the build
+        # is "pre mass production" (pre-mp) or "mass production" (MP)
         key_type = self._get_key_type(actual_key_id)
-        if not (key_type == self._KEY_TYPE_MP or
-                key_type == self._KEY_TYPE_PRE_MP):
-            raise error.TestFail('Firmware key type must be MP or PRE-MP '
-                                 'for board: %s' % self.get_fp_board())
+        if key_type not in allowed_types:
+            raise error.TestFail(
+                'Firmware key type must be %s for board %s; got %s (%s)' %
+                (' or '.join(allowed_types), self.fp_board, key_type,
+                 actual_key_id))
 
         # check ro_version
         actual_ro_version = self._read_firmware_ro_version(build_fw_file)
-        expected_ro_version =\
+        expected_ro_version = \
             self._get_expected_firmware_ro_version(build_fw_file)
         self.check_equal(actual_ro_version, expected_ro_version)
 
         # check rw_version
         actual_rw_version = self._read_firmware_rw_version(build_fw_file)
-        expected_rw_version =\
+        expected_rw_version = \
             self._get_expected_firmware_rw_version(build_fw_file)
         self.check_equal(actual_rw_version, expected_rw_version)
 
@@ -615,12 +674,8 @@ class FingerprintTest(test.test):
         return golden_version
 
     def get_build_rw_firmware_version(self, use_dev_signed_fw):
-        """Returns RW firmware version from build (based on filename)."""
-        fw_file = os.path.basename(self._build_fw_file)
-        if not fw_file.endswith('.bin'):
-            raise error.TestFail('Unexpected filename for RW firmware: %s'
-                                 % fw_file)
-        fw_version = fw_file[:-4]
+        """Returns RW firmware version from build."""
+        fw_version = self._read_firmware_rw_version(self._build_fw_file)
         if use_dev_signed_fw:
             fw_version = self._construct_dev_version(fw_version)
         return fw_version

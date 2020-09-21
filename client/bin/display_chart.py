@@ -4,16 +4,22 @@
 
 '''Login with test account and display chart file using telemetry.'''
 
-# This sets up import paths for autotest.
-import common
-
 import argparse
 import contextlib
 import logging
 import os
 import signal
+import sys
 import time
 
+# Set chart process preferred logging format before overridden by importing
+# common package.
+logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s')
+
+# This sets up import paths for autotest.
+import common
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib.cros import chrome
 from autotest_lib.client.cros.input_playback import keyboard
@@ -53,15 +59,23 @@ def display(filepath):
 
     signal.signal(signal.SIGINT, handler)
 
-    with chrome.Chrome() as cr, set_display_brightness(DISPLAY_LEVEL):
+    with chrome.Chrome(init_network_controller=True
+                       ) as cr, set_display_brightness(DISPLAY_LEVEL):
         logging.info('Display chart file of path %r.', filepath)
+        cr.browser.platform.SetHTTPServerDirectories(os.path.dirname(filepath))
         tab = cr.browser.tabs[0]
-        tab.Navigate('file://' + filepath)
+        tab.Navigate(cr.browser.platform.http_server.UrlOf(filepath))
 
         logging.info('Set chart tab fullscreen.')
         kb = keyboard.Keyboard()
         kb.press_key('f4')
         kb.close()
+
+        logging.info('Chart is ready.')
+
+        # Flush the 'is ready' message for server test to sync with ready state.
+        sys.stdout.flush()
+        sys.stderr.flush()
 
         while displaying:
             time.sleep(1)

@@ -47,7 +47,18 @@ class firmware_Cr50ConsoleCommands(Cr50Test):
         ['BOARD_SLAVE_CONFIG_I2C', 'i2cs', 'sps,sps_ds_resume'],
         ['BOARD_USE_PLT_RESET', 'plt_rst', 'sys_rst'],
         ['BOARD_CLOSED_SOURCE_SET1', 'closed_source_set1', 'open_source_set'],
+        ['BOARD_EC_CR50_COMM_SUPPORT', 'ec_comm', 'no_ec_comm'],
+        ['BOARD_CCD_REC_LID_PIN_DIOA1', 'rec_lid_a1',
+         'rec_lid_a9,rec_lid_a12, i2cs,sps_ds_resume'],
+        ['BOARD_CCD_REC_LID_PIN_DIOA9', 'rec_lid_a9',
+         'rec_lid_a1,rec_lid_a12,i2cs'],
+        ['BOARD_CCD_REC_LID_PIN_DIOA12', 'rec_lid_a12',
+         'rec_lid_a1,rec_lid_a9,sps'],
     ]
+    GUC_BRANCH_STR = 'cr50_v1.9308_26_0.'
+    MP_BRANCH_STR = 'cr50_v1.9308_87_mp.'
+    PREPVT_BRANCH_STR = 'cr50_v1.9308_B.'
+    TOT_STR = 'cr50_v2.0.'
 
     def initialize(self, host, cmdline_args, full_args):
         super(firmware_Cr50ConsoleCommands, self).initialize(host, cmdline_args,
@@ -56,14 +67,16 @@ class firmware_Cr50ConsoleCommands(Cr50Test):
         self.missing = []
         self.extra = []
         self.past_matches = {}
+        self._ext = ''
 
         # Make sure the console is restricted
         if self.cr50.get_cap('GscFullConsole')[self.cr50.CAP_REQ] == 'Always':
             logging.info('Restricting console')
-            self.fast_open(enable_testlab=True)
+            self.fast_ccd_open(enable_testlab=True)
             self.cr50.set_cap('GscFullConsole', 'IfOpened')
             time.sleep(self.CCD_HOOK_WAIT)
             self.cr50.set_ccd_level('lock')
+        self.is_tot_run = (full_args.get('tot_test_run', '').lower() == 'true')
 
 
     def parse_output(self, output, split_str):
@@ -82,7 +95,8 @@ class firmware_Cr50ConsoleCommands(Cr50Test):
         """Return the cr50 console output"""
         old_output = []
         output = self.cr50.send_command_retry_get_output(
-                cmd, [regexp], safe=True, compare_output=True)[0][1].strip()
+                cmd, [regexp], safe=True, compare_output=True,
+                retries=10)[0][1].strip()
 
         # Record the original command output
         results_path = os.path.join(self.resultsdir, cmd)
@@ -100,10 +114,13 @@ class firmware_Cr50ConsoleCommands(Cr50Test):
 
     def get_expected_output(self, cmd, split_str):
         """Return the expected cr50 console output"""
-        path = os.path.join(os.path.dirname(os.path.realpath(__file__)), cmd)
-        logging.info('reading %s', path)
+        file_dir = os.path.dirname(os.path.realpath(__file__))
+        path = os.path.join(file_dir, cmd + self._ext)
+        if not os.path.isfile(path):
+            path = os.path.join(file_dir, cmd)
         if not os.path.isfile(path):
             raise error.TestFail('Could not find %s file %s' % (cmd, path))
+        logging.info('reading %s', path)
 
         with open(path, 'r') as f:
             contents = f.read()
@@ -165,22 +182,32 @@ class firmware_Cr50ConsoleCommands(Cr50Test):
                     self.exclude.extend(exclude.split(','))
             else:
                 self.exclude.append(include)
-        version = self.cr50.get_version().split('.')
+        version = self.cr50.get_full_version()
         # Factory images end with 22. Expect guc attributes if the version
         # ends in 22.
-        if version[2] == '22':
+        if self.GUC_BRANCH_STR in version:
+            self._ext = '.guc'
             self.include.append('guc')
-        else:
-            self.exclude.append('guc')
-
-        # Use the major version to determine prePVT or MP. prePVT have even
-        # major versions. prod have odd.
-        if int(version[1]) % 2:
-            self.include.append('mp')
+            self.exclude.append('tot')
             self.exclude.append('prepvt')
-        else:
-            self.exclude.append('mp')
+        elif self.is_tot_run or self.TOT_STR in version:
+            # TOT isn't that controlled. It may include prepvt, mp, or guc
+            # changes. Don't exclude any branches.
+            self.include.append('tot')
+        elif self.MP_BRANCH_STR in version:
+            self.include.append('mp')
+
+            self.exclude.append('prepvt')
+            self.exclude.append('guc')
+            self.exclude.append('tot')
+        elif self.PREPVT_BRANCH_STR in version:
             self.include.append('prepvt')
+
+            self.exclude.append('mp')
+            self.exclude.append('guc')
+            self.exclude.append('tot')
+        else:
+            raise error.TestNAError('Unsupported branch %s', version)
         brdprop = self.cr50.get_board_properties()
         logging.info('brdprop: 0x%x', brdprop)
         logging.info('include: %s', ', '.join(self.include))

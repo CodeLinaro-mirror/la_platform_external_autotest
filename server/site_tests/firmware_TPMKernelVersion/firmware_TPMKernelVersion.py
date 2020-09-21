@@ -67,5 +67,5 @@ class firmware_TPMKernelVersion(FirmwareTest):
         out = self.dut_run_cmd('crossystem tpm_kernver tpm_fwver')
         (kernver, fwver) = out[0].split(' ')
         logging.info('tpm_kernver=%s tpm_fwver=%s', kernver, fwver)
-        assert kernver != '0xFFFFFFFF'
-        assert fwver != '0xFFFFFFFF'
+        assert kernver.lower() != '0xffffffff'
+        assert fwver.lower() != '0xffffffff'

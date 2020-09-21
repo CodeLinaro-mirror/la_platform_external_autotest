@@ -11,11 +11,14 @@ from autotest_lib.server.cros.bluetooth.bluetooth_adapter_pairing_tests import \
      BluetoothAdapterPairingTests
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_hidreports_tests \
      import BluetoothAdapterHIDReportTests
+from autotest_lib.server.cros.bluetooth.bluetooth_sdp_tests import \
+     BluetoothSDPTests
 
 
 class bluetooth_AdapterCLSanity(BluetoothAdapterQuickTests,
         BluetoothAdapterPairingTests,
-        BluetoothAdapterHIDReportTests):
+        BluetoothAdapterHIDReportTests,
+        BluetoothSDPTests):
     """A Batch of Bluetooth Classic sanity tests. This test is written as a batch
        of tests in order to reduce test time, since auto-test ramp up time is
        costly. The batch is using BluetoothAdapterQuickTests wrapper methods to
@@ -36,6 +39,19 @@ class bluetooth_AdapterCLSanity(BluetoothAdapterQuickTests,
 
         self.test_discover_device(device.address)
         self.test_device_name(device.address, device.name)
+
+
+    @test_wrapper('Discoverable Test', devices={"MOUSE":1})
+    def cl_adapter_discoverable_test(self):
+        """Verifies that DUT can become discoverable and be discovered"""
+
+        device = self.devices['MOUSE'][0]
+
+        # Put DUT into discoverable state
+        self.test_discoverable()
+
+        # Try and discover DUT from peripheral device
+        self.test_discover_by_device(device)
 
 
     @test_wrapper('Pairing Test', devices={"MOUSE":1})
@@ -80,28 +96,36 @@ class bluetooth_AdapterCLSanity(BluetoothAdapterQuickTests,
     def cl_HID_reports_test(self):
         """Performs HID report test with mouse peripheral"""
         device = self.devices['MOUSE'][0]
-        self.run_hid_reports_test(device)
+        self.run_hid_reports_test(device,
+                          check_connected_method=\
+                          self.test_mouse_right_click)
 
 
     @test_wrapper('HID keyboard Reports Test', devices={'KEYBOARD':1})
     def cl_HID_keyboard_reports_test(self):
         """Performs HID report test with keyboard peripheral"""
         device = self.devices['KEYBOARD'][0]
-        self.run_hid_reports_test(device)
+        self.run_hid_reports_test(device,
+                          check_connected_method=\
+                          self.run_keyboard_tests)
 
 
     @test_wrapper('HID Reports Suspend Resume Test', devices={"MOUSE":1})
     def cl_HID_reports_suspend_resume_test(self):
         """Performs HID report test over resume with mouse peripheral"""
         device = self.devices['MOUSE'][0]
-        self.run_hid_reports_test(device, suspend_resume=True)
+        self.run_hid_reports_test(device,
+                          check_connected_method=\
+                          self.test_mouse_right_click, suspend_resume=True)
 
 
     @test_wrapper('HID Reports Reboot Test', devices={"MOUSE":1})
     def cl_HID_reports_reboot_test(self):
         """Performs HID report test over reboot with mouse peripheral"""
         device = self.devices['MOUSE'][0]
-        self.run_hid_reports_test(device, reboot=True)
+        self.run_hid_reports_test(device,
+                          check_connected_method=\
+                          self.test_mouse_right_click, reboot=True)
 
 
     @test_wrapper('Connect Disconnect Loop Test', devices={"MOUSE":1})
@@ -109,6 +133,37 @@ class bluetooth_AdapterCLSanity(BluetoothAdapterQuickTests,
         """Performs connect/disconnect test with mouse peripheral"""
         device = self.devices['MOUSE'][0]
         self.connect_disconnect_loop(device=device, loops=3)
+
+
+    @test_wrapper('SDP Service Browse Test', devices={"BLUETOOTH_TESTER":1})
+    def cl_sdp_service_browse_test(self):
+        """Performs sdp browse with tester peripheral"""
+        device = self.devices['BLUETOOTH_TESTER'][0]
+        self.sdp_service_browse_test(device=device)
+
+
+    @test_wrapper('SDP Service Attribute Request Test', \
+                  devices={"BLUETOOTH_TESTER":1})
+    def cl_sdp_service_attribute_request_test(self):
+        """Performs sdp browse with tester peripheral"""
+        device = self.devices['BLUETOOTH_TESTER'][0]
+        self.sdp_service_attribute_request_test(device=device)
+
+
+    @test_wrapper('SDP Service Search Attribute Request Test', \
+                  devices={"BLUETOOTH_TESTER":1})
+    def cl_sdp_service_search_attribute_request_test(self):
+        """Performs sdp browse with tester peripheral"""
+        device = self.devices['BLUETOOTH_TESTER'][0]
+        self.sdp_service_search_attribute_request_test(device=device)
+
+
+    @test_wrapper('SDP Service Search Request Basic Test', \
+                  devices={"BLUETOOTH_TESTER":1})
+    def cl_sdp_service_search_request_basic_test(self):
+        """Performs sdp browse with tester peripheral"""
+        device = self.devices['BLUETOOTH_TESTER'][0]
+        self.sdp_service_search_request_basic_test(device=device)
 
 
     @batch_wrapper('Classic Sanity')
@@ -124,16 +179,21 @@ class bluetooth_AdapterCLSanity(BluetoothAdapterQuickTests,
            @param test_name: specifc test to run otherwise None to run the
                              whole batch
         """
-        self.cl_adapter_pairing_test()
+        self.cl_HID_keyboard_reports_test()
+        self.cl_HID_reports_reboot_test()
+        self.cl_HID_reports_suspend_resume_test()
+        self.cl_HID_reports_test()
+        self.cl_adapter_discoverable_test()
+        self.cl_adapter_discovery_test()
         self.cl_adapter_keyboard_pairing_test()
         self.cl_adapter_pairing_suspend_resume_test()
+        self.cl_adapter_pairing_test()
         self.cl_adapter_pairing_twice_test()
-        self.cl_HID_reports_test()
-        self.cl_HID_keyboard_reports_test()
-        self.cl_HID_reports_suspend_resume_test()
-        #self.cl_HID_reports_reboot_test()
         self.cl_connect_disconnect_loop_test()
-        self.cl_adapter_discovery_test()
+        self.cl_sdp_service_attribute_request_test()
+        self.cl_sdp_service_browse_test()
+        self.cl_sdp_service_search_attribute_request_test()
+        self.cl_sdp_service_search_request_basic_test()
 
 
     def run_once(self, host, num_iterations=1, test_name=None,
@@ -146,6 +206,6 @@ class bluetooth_AdapterCLSanity(BluetoothAdapterQuickTests,
         """
 
         # Initialize and run the test batch or the requested specific test
-        self.quick_test_init(host, use_chameleon=True, flag=flag)
+        self.quick_test_init(host, use_btpeer=True, flag=flag)
         self.cl_sanity_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

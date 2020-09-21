@@ -14,6 +14,7 @@ import re
 from contextlib import contextmanager
 
 from autotest_lib.client.common_lib import error
+from autotest_lib.client.bin import utils
 from autotest_lib.client.cros import constants
 from autotest_lib.client.cros.audio import audio_analysis
 from autotest_lib.client.cros.audio import audio_spec
@@ -248,7 +249,7 @@ def has_echo_reference(host):
     """
     return audio_spec.has_echo_reference(get_board_name(host))
 
-def suspend_resume(host, suspend_time_secs, resume_network_timeout_secs=50):
+def suspend_resume(host, suspend_time_secs=30, resume_network_timeout_secs=60):
     """Performs the suspend/resume on Cros device.
 
     @param suspend_time_secs: Time in seconds to let Cros device suspend.
@@ -270,6 +271,28 @@ def suspend_resume(host, suspend_time_secs, resume_network_timeout_secs=50):
     host.test_wait_for_resume(boot_id,
                               suspend_time_secs + resume_network_timeout_secs)
     logging.info("DUT resumed!")
+
+
+def suspend_resume_and_verify(host,
+                              factory,
+                              suspend_time_secs=30,
+                              resume_network_timeout_secs=50,
+                              rpc_reconnect_timeout=60):
+    """Performs the suspend/resume on Cros device and verify it.
+
+    @param suspend_time_secs: Time in seconds to let Cros device suspend.
+    @resume_network_timeout_secs: Time in seconds to let Cros device resume and
+                                  obtain network.
+    @rpc_reconnect_timeout=60: Time in seconds to wait for multimedia server to
+                               reconnect.
+    """
+
+    suspend_resume(host,
+                   suspend_time_secs=suspend_time_secs,
+                   resume_network_timeout_secs=resume_network_timeout_secs)
+    utils.poll_for_condition(condition=factory.ready,
+                             timeout=rpc_reconnect_timeout,
+                             desc='multimedia server reconnect')
 
 
 def dump_cros_audio_logs(host,

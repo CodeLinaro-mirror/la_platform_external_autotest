@@ -26,7 +26,7 @@ class firmware_Cr50FactoryResetVC(Cr50Test):
                 full_args)
         if not self.cr50.has_command('bpforce'):
             raise error.TestNAError('Cannot run test without bpforce')
-        self.fast_open(enable_testlab=True)
+        self.fast_ccd_open(enable_testlab=True)
         # Reset ccd completely.
         self.cr50.send_command('ccd reset')
 

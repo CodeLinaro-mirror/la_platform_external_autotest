@@ -504,8 +504,8 @@ class TestPage(object):
 
         """
         utils.poll_for_condition(
-                lambda: self.get_scroll_position(
-                        scroll_vertical) == self._DEFAULT_SCROLL,
+                lambda: self.get_scroll_position( scroll_vertical) in
+                        [self._DEFAULT_SCROLL,self._DEFAULT_SCROLL-1],
                 exception=error.TestError('Page not set to default scroll!'))
 
 

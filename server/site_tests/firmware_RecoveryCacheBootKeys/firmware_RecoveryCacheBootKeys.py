@@ -20,7 +20,6 @@ class firmware_RecoveryCacheBootKeys(FirmwareTest):
     REBUILD_CACHE_MSG = "MRC: cache data 'RECOVERY_MRC_CACHE' needs update."
     RECOVERY_CACHE_SECTION = 'RECOVERY_MRC_CACHE'
     FIRMWARE_LOG_CMD = 'cbmem -1' + ' | grep ' + REBUILD_CACHE_MSG[:3]
-    FMAP_CMD = 'mosys eeprom map'
     RECOVERY_REASON_REBUILD_CMD = 'crossystem recovery_request=0xC4'
 
     def initialize(self, host, cmdline_args, dev_mode=False):
@@ -57,8 +56,12 @@ class firmware_RecoveryCacheBootKeys(FirmwareTest):
         """
         logging.info("Checking if device has RECOVERY_MRC_CACHE")
 
+        # If flashrom can read the section, this means it exists.
+        command = ('flashrom -p host -r -i %s:/dev/null'
+                   % self.RECOVERY_CACHE_SECTION)
+
         return self.faft_client.system.run_shell_command_check_output(
-                self.FMAP_CMD, self.RECOVERY_CACHE_SECTION)
+            command, 'SUCCESS')
 
     def check_cache_used(self):
         """Checks the firmware log to ensure that the recovery cache was used

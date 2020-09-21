@@ -1,5 +1,4 @@
-#ChromeOS Engprod Team (formerly ChromeOS Test Team)
-
+# ChromeOS Engprod Team (formerly ChromeOS Test Team)
 bhansknecht@chromium.org
 dbeckett@chromium.org
 dchan@chromium.org
@@ -19,6 +18,20 @@ shijinabraham@google.com
 timkovich@chromium.org
 vsuley@chromium.org
 
-#ChromeOS Bluetooth Platform Team
+# ChromeOS Bluetooth Platform Team
 danielwinkler@google.com
 howardchung@google.com
+
+# ChromeOS Graphics Platform Team
+ihf@chromium.org
+pwang@chromium.org
+
+# CFM Team
+bgoodwin@chromium.org
+jimmymani@chromium.org
+jnchase@chromium.org
+jrt@chromium.org
+kdgwill@chromium.org
+pceballos@chromium.org
+turg@google.com
+ziegs@chromium.org

@@ -212,8 +212,21 @@ class power_WakeSources(test.test):
 
             count_after = self._dr_utils.count_dark_resumes()
             if is_success and count_before != count_after:
-                logging.error('%s caused a dark resume.', wake_source)
-                is_success = False
+                # go/cros-dark-resume: only flag error if kernel >= 4.14
+                kernel_ver = None
+                try:
+                    kernel_ver = float('.'.join(self._kstr.split('.', 2)[:2]))
+                except Exception:
+                    logging.warn('Failed to parse kernel version string %s',
+                                 self._kstr)
+                if kernel_ver and kernel_ver < 4.14:
+                    logging.warn('%s caused a dark resume but forgiven '
+                                 'for kernel version %2.2f', wake_source,
+                                 kernel_ver)
+                else:
+                    logging.error('%s caused a dark resume.', wake_source)
+                    is_success = False
+
             elif is_success:
                 logging.info('%s caused a full resume.', wake_source)
         self._after_resume(wake_source)
@@ -286,6 +299,7 @@ class power_WakeSources(test.test):
         self._dr_utils.stop_resuspend_on_dark_resume()
         self._ec = chrome_ec.ChromeEC(self._host.servo)
         self._faft_config = FAFTConfig(self._host.get_platform())
+        self._kstr = host.get_kernel_version()
 
     def run_once(self):
         """Body of the test."""

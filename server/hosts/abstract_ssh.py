@@ -8,6 +8,7 @@ import subprocess
 
 from autotest_lib.client.bin.result_tools import runner as result_tools_runner
 from autotest_lib.client.common_lib import error
+from autotest_lib.client.common_lib import utils
 from autotest_lib.client.common_lib.cros.network import ping_runner
 from autotest_lib.client.common_lib.global_config import global_config
 from autotest_lib.server import utils, autotest
@@ -15,6 +16,11 @@ from autotest_lib.server.hosts import host_info
 from autotest_lib.server.hosts import remote
 from autotest_lib.server.hosts import rpc_server_tracker
 from autotest_lib.server.hosts import ssh_multiplex
+
+try:
+    from chromite.lib import metrics
+except ImportError:
+    metrics = utils.metrics_mock
 
 # pylint: disable=C0111
 
@@ -66,6 +72,7 @@ class AbstractSSHHost(remote.RemoteHost):
         @param connection_pool: ssh_multiplex.ConnectionPool instance to share
                 the master ssh connection across control scripts.
         """
+        self._track_class_usage()
         # IP address is retrieved only on demand. Otherwise the host
         # initialization will fail for host is not online.
         self._ip = None
@@ -585,6 +592,11 @@ class AbstractSSHHost(remote.RemoteHost):
             else:
                 logging.debug('skipping scp for empty source list')
 
+        # Make sure newly written files make it to stable storage, in
+        # case the next step of testing involves a reboot through
+        # servo power manipulation.
+        self.run("sync")
+
 
     def verify_ssh_user_access(self):
         """Verify ssh access to this host.
@@ -1003,3 +1015,24 @@ class AbstractSSHHost(remote.RemoteHost):
             self._cached_up_status = self.is_up_fast()
             self._cached_up_status_updated = time.time()
         return self._cached_up_status
+
+
+    def _track_class_usage(self):
+        """Tracking which class was used.
+
+        The idea to identify unused classes to be able clean them up.
+        We skip names with dynamic created classes where the name is
+        hostname of the device.
+        """
+        class_name = None
+        if 'chrome' not in self.__class__.__name__:
+            class_name = self.__class__.__name__
+        else:
+            for base in self.__class__.__bases__:
+                if 'chrome' not in base.__name__:
+                    class_name = base.__name__
+                    break
+        if class_name:
+            data = {'host_class': class_name}
+            metrics.Counter(
+                'chromeos/autotest/used_hosts').increment(fields=data)

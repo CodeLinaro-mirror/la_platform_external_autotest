@@ -40,7 +40,7 @@ def _format_args(channels, bits, rate):
 
 def generate_sine_tone_cmd(
         filename, channels=2, bits=16, rate=48000, duration=None, frequencies=440,
-        gain=None, raw=True):
+        gain=None, vol=None, raw=True):
     """Gets a command to generate sine tones at specified ferquencies.
 
     @param filename: The name of the file to store the sine wave in.
@@ -51,6 +51,9 @@ def generate_sine_tone_cmd(
     @param frequencies: The frequencies of the sine wave. Pass a number or a
                         list to specify frequency for each channel.
     @param gain: The gain (in db).
+    @param vol: A float for volume scale used in sox command.
+                         E.g. 1.0 is the same. 0.5 to scale volume by
+                         half. -1.0 to invert the data.
     @param raw: True to use raw data format. False to use what filename specifies.
 
     """
@@ -69,6 +72,8 @@ def generate_sine_tone_cmd(
         args += ['sine', str(freq)]
     if gain is not None:
         args += ['gain', str(gain)]
+    if vol is not None:
+        args += ['vol', str(vol)]
     return args
 
 

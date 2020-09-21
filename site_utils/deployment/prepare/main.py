@@ -21,6 +21,7 @@ from autotest_lib.client.common_lib import enum
 from autotest_lib.server import afe_utils
 from autotest_lib.server.hosts import file_store
 from autotest_lib.site_utils.deployment.prepare import dut as preparedut
+from autotest_lib.server.hosts import factory
 
 
 RETURN_CODES = enum.Enum(
@@ -28,6 +29,7 @@ RETURN_CODES = enum.Enum(
         'STAGE_USB_FAILURE',
         'INSTALL_FIRMWARE_FAILURE',
         'INSTALL_TEST_IMAGE_FAILURE',
+        'PRE_DEPLOY_VERIFICATION_FAILURE',
         'BOOT_FROM_RECOVERY_MODE_FAILURE',
         'SETUP_LABSTATION_FAILURE',
         'UPDATE_LABEL_FAILURE',
@@ -45,19 +47,19 @@ def main():
   _configure_logging('prepare_dut', os.path.join(opts.results_dir, _LOG_FILE))
 
   try:
-    info = _read_store(opts.host_info_file)
+    host_info = _read_store(opts.host_info_file)
   except Exception as err:
     logging.error("fail to prepare: %s", err)
     return RETURN_CODES.OTHER_FAILURES
 
-  with _create_host(opts.hostname, info, opts.results_dir) as host:
+  with create_host(opts.hostname, host_info, opts.results_dir) as host:
     if opts.dry_run:
       logging.info('DRY RUN: Would have run actions %s', opts.actions)
       return
 
     if 'stage-usb' in opts.actions:
       try:
-        repair_image = afe_utils.get_stable_cros_image_name_v2(info)
+        repair_image = afe_utils.get_stable_cros_image_name_v2(host_info.get())
         logging.info('Using repair image %s, obtained from AFE', repair_image)
         preparedut.download_image_to_servo_usb(host, repair_image)
       except Exception as err:
@@ -77,6 +79,13 @@ def main():
       except Exception as err:
         logging.error("fail to install firmware: %s", err)
         return RETURN_CODES.INSTALL_FIRMWARE_FAILURE
+
+    if 'run-pre-deploy-verification' in opts.actions:
+      try:
+        preparedut.verify_ccd_testlab_enable(host)
+      except Exception as err:
+        logging.error("fail on pre-deploy verification: %s", err)
+        return RETURN_CODES.PRE_DEPLOY_VERIFICATION_FAILURE
 
     if 'verify-recovery-mode' in opts.actions:
       try:
@@ -114,7 +123,8 @@ def _parse_args():
       'actions',
       nargs='+',
       choices=['stage-usb', 'install-test-image', 'install-firmware',
-               'verify-recovery-mode', 'update-label', 'setup-labstation'],
+               'verify-recovery-mode', 'run-pre-deploy-verification',
+               'update-label', 'setup-labstation'],
       help='DUT preparation actions to execute.',
   )
   parser.add_argument(
@@ -189,47 +199,44 @@ def _configure_logging(name, tee_file):
 def _read_store(path):
   """Read a HostInfo from a file at path."""
   store = file_store.FileStore(path)
-  return store.get()
+  return store
 
-
-def _create_host(hostname, info, results_dir):
+def create_host(hostname, host_info, results_dir):
   """Yield a hosts.CrosHost object with the given inventory information.
 
   @param hostname: Hostname of the DUT.
   @param info: A HostInfo with the inventory information to use.
   @param results_dir: Path to directory for logs / output artifacts.
+
   @yield server.hosts.CrosHost object.
   """
+  info = host_info.get()
   if not info.board:
     raise DutPreparationError('No board in DUT labels')
   if not info.model:
     raise DutPreparationError('No model in DUT labels')
 
-  if info.os == 'labstation':
-    return preparedut.create_labstation_host(hostname, info.board, info.model)
+  need_servo = info.os != 'labstation'
+  dut_logs_dir = None
 
-  # We assume target host is a cros DUT by default
-  if 'servo_host' not in info.attributes:
-    raise DutPreparationError('No servo_host in DUT attributes')
-  if 'servo_port' not in info.attributes:
-    raise DutPreparationError('No servo_port in DUT attributes')
+  if need_servo:
+    # We assume target host is a cros DUT by default
+    if 'servo_host' not in info.attributes:
+      raise DutPreparationError('No servo_host in DUT attributes')
+    if 'servo_port' not in info.attributes:
+      raise DutPreparationError('No servo_port in DUT attributes')
 
-  dut_logs_dir = os.path.join(results_dir, _DUT_LOGS_DIR)
-  try:
-    os.makedirs(dut_logs_dir)
-  except OSError as e:
-    if e.errno != errno.EEXIST:
-      raise
+    dut_logs_dir = os.path.join(results_dir, _DUT_LOGS_DIR)
+    try:
+      os.makedirs(dut_logs_dir)
+    except OSError as e:
+      if e.errno != errno.EEXIST:
+        raise
 
-  return preparedut.create_cros_host(
-      hostname,
-      info.board,
-      info.model,
-      info.attributes['servo_host'],
-      info.attributes['servo_port'],
-      info.attributes.get('servo_serial'),
-      dut_logs_dir,
-  )
+  return factory.create_target_host(hostname,
+                                    host_info_store=host_info,
+                                    try_lab_servo=need_servo,
+                                    servo_uart_logs_dir=dut_logs_dir)
 
 
 if __name__ == '__main__':

@@ -9,12 +9,12 @@ AUTHOR = 'chromeos-bluetooth'
 NAME = 'bluetooth_AdapterCLSanity'
 PURPOSE = ('Batch of Bluetooth Classic sanity tests')
 CRITERIA = 'Pass all sanity test'
-ATTRIBUTES = 'suite:bluetooth_e2e, suite:bluetooth_qualification'
+ATTRIBUTES = 'suite:bluetooth_qualification'
 TIME = 'LONG' #this test takes about 20 minutes
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'bluetooth'
 TEST_TYPE = 'server'
-DEPENDENCIES = 'bluetooth, chameleon:bt_hid'
+DEPENDENCIES = 'bluetooth, working_bluetooth_btpeer:1'
 
 DOC = """
 A Batch of Bluetooth Classic sanity tests. This test is written as a batch
@@ -35,10 +35,10 @@ Specifically, the following subtests are executed in this autotest.
     """
 
 args_dict = utils.args_to_dict(args)
-chameleon_args = hosts.CrosHost.get_chameleon_arguments(args_dict)
+btpeer_args = hosts.CrosHost.get_btpeer_arguments(args_dict)
 
 def run(machine):
-    host = hosts.create_host(machine, chameleon_args=chameleon_args)
+    host = hosts.create_host(machine, btpeer_args=btpeer_args)
     job.run_test('bluetooth_AdapterCLSanity', host=host,
                   num_iterations=1)
 

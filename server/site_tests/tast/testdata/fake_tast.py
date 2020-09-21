@@ -88,6 +88,9 @@ def parse_args():
     def add_common_args(subparser):
         """Adds arguments shared between tast's 'list' and 'run' subcommands."""
         subparser.add_argument('-build', type=to_bool, default=True, nargs='?')
+        subparser.add_argument('-buildbundle', default='cros')
+        subparser.add_argument('-checkbuilddeps', type=to_bool, default=True,
+                               nargs='?')
         subparser.add_argument('-downloadprivatebundles', type=to_bool,
                                default=False, nargs='?')
         subparser.add_argument('-devservers')
@@ -112,6 +115,7 @@ def parse_args():
     run_parser.add_argument('-var', action='append', default=[])
     run_parser.add_argument('-defaultvarsdir')
     run_parser.add_argument('-varsfile', action='append', default=[])
+    run_parser.add_argument('-buildartifactsurl')
 
     return parser.parse_args()
 

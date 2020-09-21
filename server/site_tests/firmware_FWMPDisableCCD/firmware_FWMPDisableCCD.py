@@ -16,13 +16,12 @@ class firmware_FWMPDisableCCD(Cr50Test):
 
     FWMP_DEV_DISABLE_CCD_UNLOCK = (1 << 6)
     GSCTOOL_ERR = 'Error: rv 7, response 7'
-    PASSWORD = 'Password'
 
     def initialize(self, host, cmdline_args, full_args):
         """Initialize servo check if cr50 exists"""
         super(firmware_FWMPDisableCCD, self).initialize(host, cmdline_args,
                 full_args)
-        self.fast_open(enable_testlab=True)
+        self.fast_ccd_open(enable_testlab=True)
 
 
     def try_set_ccd_level(self, level, fwmp_disabled_ccd):
@@ -40,7 +39,7 @@ class firmware_FWMPDisableCCD(Cr50Test):
         # Make sure the console is locked
         self.cr50.set_ccd_level('lock')
         try:
-            self.cr50.set_ccd_level(level, self.PASSWORD)
+            self.cr50.set_ccd_level(level, self.CCD_PASSWORD)
             if fwmp_disabled_ccd:
                 raise error.TestFail('FWMP failed to prevent %r' % level)
         except error.TestFail, e:
@@ -98,7 +97,7 @@ class firmware_FWMPDisableCCD(Cr50Test):
         # always allowed. Open and unlock should still be blocked. Opening cr50
         # requires the device is in dev mode unless there's a password set. FWMP
         # flags may disable dev mode. Set a password so we can get around this.
-        self.set_ccd_password(self.PASSWORD)
+        self.set_ccd_password(self.CCD_PASSWORD)
 
         # run ccd commands with the password. ccd open and unlock should fail
         # when the FWMP has disabled ccd.

@@ -8,13 +8,26 @@ import socket
 import common
 from autotest_lib.client.common_lib import hosts
 from autotest_lib.server import utils
+from autotest_lib.server.hosts import servo_constants
 
 
-def require_servo(host):
-    """Require a DUT to have a working servo for a repair action."""
-    if not host.servo:
+def require_servo(host, ignore_state=False):
+    """Require a DUT to have a working servo for a repair action.
+
+    @param host             Host object that require servo.
+    @param ignore_state     Ignore servo state as long as the we still have
+                            servo connection. Some non-critical verifier
+                            failures may not cause servo connection been
+                            disconnected.
+    """
+    servo_initialized = host.servo is not None
+    servo_working = (host.get_servo_state() ==
+                     servo_constants.SERVO_STATE_WORKING or ignore_state)
+
+    if not (servo_initialized and servo_working):
         raise hosts.AutoservRepairError(
                 '%s has no working servo.' % host.hostname, 'no_working_servo')
+    logging.info('Servo dependence is available for the RepairAction/test.')
 
 
 class SshVerifier(hosts.Verifier):
@@ -98,10 +111,6 @@ class RPMCycleRepair(hosts.RepairAction):
                     '%s has no RPM connection.' % host.hostname,
                     'no_working_rpm')
         host.power_cycle()
-        if not host.wait_up(timeout=host.BOOT_TIMEOUT):
-            raise hosts.AutoservRepairError(
-                    '%s is still offline after powercycling' %
-                    host.hostname, 'failed_to_boot_after_rpm_power_cycle')
 
 
     @property

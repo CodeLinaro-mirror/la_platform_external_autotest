@@ -9,7 +9,7 @@ TIME = "SHORT"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "Stress"
 TEST_TYPE = "server"
-ATTRIBUTES = 'suite:bluetooth_stress'
+ATTRIBUTES = 'suite:bluetooth_stress, suite:reboot_stress'
 
 DOC = """
 This test reboots the machine and checks whether the bluetooth adapter comes up.

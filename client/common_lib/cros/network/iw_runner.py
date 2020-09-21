@@ -955,15 +955,22 @@ class IwRunner(object):
         self._run('%s reg set %s' % (self._command_iw, domain_string))
 
 
-    def get_regulatory_domain(self):
+    def get_regulatory_domain(self, wiphy=None):
         """
         Get the regulatory domain of the current machine.
+
+        @param wiphy: string; if provided, check for the phy-specific domain,
+                      rather than the global one.
 
         @returns a string containing the 2-letter regulatory domain name
             (e.g. 'US').
 
         """
-        output = self._run('%s reg get' % self._command_iw).stdout
+        cmd = self._command_iw
+        if wiphy:
+            cmd += ' phy ' + wiphy
+        cmd += ' reg get'
+        output = self._run(cmd).stdout
         m = re.search('^country (..):', output, re.MULTILINE)
         if not m:
             return None

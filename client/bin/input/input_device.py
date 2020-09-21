@@ -519,8 +519,14 @@ class InputDevice:
                 (EV_ABS in self.events))
 
     def is_keyboard(self):
-        return ((EV_KEY in self.events) and
-                (KEY_F2 in self.events[EV_KEY]))
+        if EV_KEY not in self.events:
+            return False
+        # Check first 31 keys. This is the same method udev and the
+        # Chromium browser use.
+        for key in range(KEY_ESC, KEY_D + 1):
+            if key not in self.events[EV_KEY]:
+                return False
+        return True
 
     def is_touchscreen(self):
         return ((EV_KEY in self.events) and

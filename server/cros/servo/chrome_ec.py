@@ -51,6 +51,52 @@ class ChromeConsole(object):
     REGEXP = "_regexp"
     MULTICMD = "_multicmd"
 
+    # EC Features
+    # Quoted from 'enum ec_feature_code' in platform/ec/include/ec_commands.h.
+    EC_FEATURE = {
+        'EC_FEATURE_LIMITED'                            : 0,
+        'EC_FEATURE_FLASH'                              : 1,
+        'EC_FEATURE_PWM_FAN'                            : 2,
+        'EC_FEATURE_PWM_KEYB'                           : 3,
+        'EC_FEATURE_LIGHTBAR'                           : 4,
+        'EC_FEATURE_LED'                                : 5,
+        'EC_FEATURE_MOTION_SENSE'                       : 6,
+        'EC_FEATURE_KEYB'                               : 7,
+        'EC_FEATURE_PSTORE'                             : 8,
+        'EC_FEATURE_PORT80'                             : 9,
+        'EC_FEATURE_THERMAL'                            : 10,
+        'EC_FEATURE_BKLIGHT_SWITCH'                     : 11,
+        'EC_FEATURE_WIFI_SWITCH'                        : 12,
+        'EC_FEATURE_HOST_EVENTS'                        : 13,
+        'EC_FEATURE_GPIO'                               : 14,
+        'EC_FEATURE_I2C'                                : 15,
+        'EC_FEATURE_CHARGER'                            : 16,
+        'EC_FEATURE_BATTERY'                            : 17,
+        'EC_FEATURE_SMART_BATTERY'                      : 18,
+        'EC_FEATURE_HANG_DETECT'                        : 19,
+        'EC_FEATURE_PMU'                                : 20,
+        'EC_FEATURE_SUB_MCU'                            : 21,
+        'EC_FEATURE_USB_PD'                             : 22,
+        'EC_FEATURE_USB_MUX'                            : 23,
+        'EC_FEATURE_MOTION_SENSE_FIFO'                  : 24,
+        'EC_FEATURE_VSTORE'                             : 25,
+        'EC_FEATURE_USBC_SS_MUX_VIRTUAL'                : 26,
+        'EC_FEATURE_RTC'                                : 27,
+        'EC_FEATURE_FINGERPRINT'                        : 28,
+        'EC_FEATURE_TOUCHPAD'                           : 29,
+        'EC_FEATURE_RWSIG'                              : 30,
+        'EC_FEATURE_DEVICE_EVENT'                       : 31,
+        'EC_FEATURE_UNIFIED_WAKE_MASKS'                 : 32,
+        'EC_FEATURE_HOST_EVENT64'                       : 33,
+        'EC_FEATURE_EXEC_IN_RAM'                        : 34,
+        'EC_FEATURE_CEC'                                : 35,
+        'EC_FEATURE_MOTION_SENSE_TIGHT_TIMESTAMPS'      : 36,
+        'EC_FEATURE_REFINED_TABLET_MODE_HYSTERESIS'     : 37,
+        'EC_FEATURE_EFS2'                               : 38,
+        'EC_FEATURE_SCP'                                : 39,
+        'EC_FEATURE_ISH'                                : 40,
+    }
+
     def __init__(self, servo, name):
         """Initialize and keep the servo object.
 
@@ -64,15 +110,17 @@ class ChromeConsole(object):
         self.uart_multicmd = self.name + self.MULTICMD
 
         self._servo = servo
-        self._cached_uart_regexp = None
 
+    def __repr__(self):
+        """Return a string representation: <ChromeConsole 'foo_uart'>"""
+        return "<%s %r>" % (self.__class__.__name__, self.name)
 
     def set_uart_regexp(self, regexp):
-        if self._cached_uart_regexp == regexp:
-            return
-        self._cached_uart_regexp = regexp
         self._servo.set(self.uart_regexp, regexp)
 
+    def clear_uart_regex(self):
+        """Clear uart_regexp"""
+        self.set_uart_regexp('None')
 
     def send_command(self, commands):
         """Send command through UART.
@@ -83,7 +131,7 @@ class ChromeConsole(object):
         Args:
           commands: The commands to send, either a list or a string.
         """
-        self.set_uart_regexp('None')
+        self.clear_uart_regex()
         if isinstance(commands, list):
             try:
                 self._servo.set_nocheck(self.uart_multicmd, ';'.join(commands))
@@ -94,6 +142,7 @@ class ChromeConsole(object):
                     self._servo.set_nocheck(self.uart_cmd, command)
         else:
             self._servo.set_nocheck(self.uart_cmd, commands)
+        self.clear_uart_regex()
 
     def has_command(self, command):
         """Check whether EC console supports |command|.
@@ -145,7 +194,10 @@ class ChromeConsole(object):
 
         self.set_uart_regexp(str(regexp_list))
         self._servo.set_nocheck(self.uart_cmd, command)
-        return ast.literal_eval(self._servo.get(self.uart_cmd))
+        rv = ast.literal_eval(self._servo.get(self.uart_cmd))
+        self.clear_uart_regex()
+
+        return rv
 
 
 class ChromeEC(ChromeConsole):
@@ -159,6 +211,9 @@ class ChromeEC(ChromeConsole):
     def __init__(self, servo, name="ec_uart"):
         super(ChromeEC, self).__init__(servo, name)
 
+    def __repr__(self):
+        """Return a string representation of the object: <ChromeEC 'ec_uart'>"""
+        return "<%s %r>" % (self.__class__.__name__, self.name)
 
     def key_down(self, keyname):
         """Simulate pressing a key.
@@ -295,6 +350,52 @@ class ChromeEC(ChromeConsole):
         l = self.send_command_get_output("version", expected_output)
         self.send_command("chan 0xffffffff")
         return l
+
+    def check_ro_rw(self, img_exp):
+        """Tell if the current EC image matches the given input, 'RW' or 'RO.
+
+        Args:
+            img_exp: Expected image type. It should be either 'RW' or 'RO'.
+        Return:
+            True if the active EC image matches to 'img_exp'.
+            False otherwise.
+        Raise:
+            TestError if img_exp is neither 'RW' nor 'RO'.
+        """
+        if img_exp not in ['RW', 'RO']:
+            raise error.TestError('Arugment img_exp is neither RW nor RO')
+
+        result = self.send_command_get_output('sysinfo', [r'Copy:\s*(RO|RW)'])
+        return result[0][1] == img_exp
+
+    def check_feature(self, feature):
+        """Return true if EC supports the given feature
+
+        Args:
+            feature: feature name as a string as in self.EC_FEATURE.
+
+        Returns:
+            True if 'feature' is in EC's feature set.
+            False otherwise
+        """
+        feat_id = self.EC_FEATURE[feature]
+        if feat_id < 32:
+            feat_start = 0
+        else:
+            feat_start = 32
+
+        regexp = r'%d-%d:\s*(0x[0-9a-fA-F]{8})' % (feat_start,
+                                                   feat_start + 31)
+
+        try:
+            result = self.send_command_get_output('feat', [regexp])
+        except servo.ResponsiveConsoleError as e:
+            logging.warn("feat command is not available: %s", str(e))
+            return False
+
+        feat_bitmap = int(result[0][1], 16)
+
+        return ((1 << (feat_id - feat_start)) & feat_bitmap) != 0
 
 
 class ChromeUSBPD(ChromeEC):

@@ -535,7 +535,7 @@ class SuiteTest(mox.MoxTestBase):
 
 
     def testInheritedKeyvals(self):
-        """Tests should inherit some whitelisted job keyvals."""
+        """Tests should inherit some allowlisted job keyvals."""
         # Only keyvals in constants.INHERITED_KEYVALS are inherited to tests.
         job_keyvals = {
             constants.KEYVAL_CIDB_BUILD_ID: '111',

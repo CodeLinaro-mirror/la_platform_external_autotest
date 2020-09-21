@@ -7,7 +7,7 @@ NAME = 'network_WiFi_DisableEnable'
 TIME = 'SHORT'
 TEST_TYPE = 'Server'
 ATTRIBUTES = ('suite:wifi_matfunc,'
-              'suite:wificell-pre-cq')
+              'suite:wificell-cq')
 DEPENDENCIES = 'wificell'
 
 DOC = """

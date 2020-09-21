@@ -258,7 +258,7 @@ def create_powercap():
 
 
 class Powercap(power_status.PowerMeasurement):
-    """Classes to support RAPL power measurement via powercap sysfs
+    """Class to support RAPL power measurement via powercap sysfs
 
     This class utilizes the subset of Linux powercap driver to report
     energy consumption, in this manner, we do not need microarchitecture
@@ -319,7 +319,7 @@ class Powercap(power_status.PowerMeasurement):
 
 
 class PowercapPL1(power_status.PowerMeasurement):
-    """Classes to support RAPL power limit via powercap sysfs
+    """Class to support RAPL power limit via powercap sysfs
 
     This class utilizes the subset of Linux powercap driver to report
     energy consumption, in this manner, we do not need microarchitecture
@@ -349,3 +349,80 @@ class PowercapPL1(power_status.PowerMeasurement):
         """
         self._file.seek(0)
         return int(self._file.read().rstrip()) / 1000000.
+
+
+def create_amd_rapl():
+    """Create AMD RAPL instances."""
+    return [AmdRaplCore(), AmdRaplPackage()]
+
+
+class AmdRapl(power_status.PowerMeasurement):
+    """Class to support AMD RAPL via MSR."""
+
+    _MSR_UNIT = 0.5 ** 16  # ~15.3uj
+
+    def __init__(self, domain):
+        """Constructor.
+
+        Args:
+            domain: domain name.
+        """
+        super(AmdRapl, self).__init__(domain)
+        self._energy_start = self._get_energy()
+        self._time_start = time.time()
+
+    def _get_energy(self):
+        """Get energy reading in joule unit."""
+        raise NotImplementedError
+
+    def refresh(self):
+        """Calculate the average power used per RAPL domain."""
+        energy_now = self._get_energy()
+        time_now = time.time()
+        if energy_now >= self._energy_start:
+            energy_used = energy_now - self._energy_start
+        else:
+            energy_used = energy_now
+            logging.info('AMD RAPL wraparound detected.')
+        time_used = time_now - self._time_start
+        average_power = energy_used / time_used
+        logging.debug("RAPL: domain: %s, energy: %d, time: %f, power: %f",
+                      self.domain, energy_used, time_used, average_power)
+        self._energy_start = energy_now
+        self._time_start = time_now
+        return average_power
+
+
+class AmdRaplCore(AmdRapl):
+    """Class to support AMD core RAPL via MSR."""
+
+    def __init__(self):
+        """Constructor."""
+        self._address = 0xc001029a
+        self._domain = 'core'
+        cpuinfo = utils.get_cpuinfo()
+        physical_cores = int(cpuinfo[0]['cpu cores'])
+        self._total_cores = len(cpuinfo)
+        # Total energy is sum of all cores but we also have SMT core.
+        # So adjust the unit accordingly.
+        self._unit = self._MSR_UNIT * physical_cores / self._total_cores
+        super(AmdRaplCore, self).__init__(self._domain)
+
+    def _get_energy(self):
+        """Get energy reading in joule unit."""
+        return sum(utils.rdmsr(self._address, core)
+                   for core in range(self._total_cores)) * self._unit
+
+
+class AmdRaplPackage(AmdRapl):
+    """Class to support AMD package RAPL via MSR."""
+
+    def __init__(self):
+        """Constructor."""
+        self._address = 0xc001029b
+        self._domain = 'package-0'
+        super(AmdRaplPackage, self).__init__(self._domain)
+
+    def _get_energy(self):
+        """Get energy reading in joule unit."""
+        return utils.rdmsr(self._address) * self._MSR_UNIT

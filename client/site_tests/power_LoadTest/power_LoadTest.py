@@ -20,13 +20,14 @@ from autotest_lib.client.common_lib.cros import power_load_util
 from autotest_lib.client.common_lib.cros.network import interface
 from autotest_lib.client.common_lib.cros.network import xmlrpc_datatypes
 from autotest_lib.client.common_lib.cros.network import xmlrpc_security_types
-from autotest_lib.client.cros import backchannel, httpd
+from autotest_lib.client.cros import backchannel
+from autotest_lib.client.cros import ec
+from autotest_lib.client.cros import httpd
 from autotest_lib.client.cros import memory_bandwidth_logger
 from autotest_lib.client.cros import service_stopper
 from autotest_lib.client.cros.audio import audio_helper
 from autotest_lib.client.cros.networking import wifi_proxy
 from autotest_lib.client.cros.power import power_dashboard
-from autotest_lib.client.cros.power import power_rapl
 from autotest_lib.client.cros.power import power_status
 from autotest_lib.client.cros.power import power_utils
 from telemetry.core import exceptions
@@ -121,6 +122,9 @@ class power_LoadTest(arc.ArcTest):
         if force_discharge:
             if not self._power_status.battery:
                 raise error.TestNAError('DUT does not have battery. '
+                                        'Could not force discharge.')
+            if not ec.has_cros_ec():
+                raise error.TestNAError('DUT does not have CrOS EC. '
                                         'Could not force discharge.')
             if not power_utils.charge_control_by_ectool(False):
                 raise error.TestError('Could not run battery force discharge.')
@@ -266,25 +270,10 @@ class power_LoadTest(arc.ArcTest):
             logging.info("Assuming no keyboard backlight due to :: %s", str(e))
             self._keyboard_backlight = None
 
-        measurements = []
-        if self._power_status.battery:
-            measurements += \
-                    [power_status.SystemPower(self._power_status.battery_path)]
-        if power_utils.has_powercap_support():
-            measurements += power_rapl.create_powercap()
-        elif power_utils.has_rapl_support():
-            measurements += power_rapl.create_rapl()
         self._checkpoint_logger = power_status.CheckpointLogger()
-        self._plog = power_status.PowerLogger(measurements,
-                seconds_period=20,
-                checkpoint_logger=self._checkpoint_logger)
-        self._tlog = power_status.TempLogger([],
-                seconds_period=20,
-                checkpoint_logger=self._checkpoint_logger)
-        self._clog = power_status.CPUStatsLogger(
-                seconds_period=20,
-                checkpoint_logger=self._checkpoint_logger)
-        self._meas_logs = [self._plog, self._tlog, self._clog]
+        seconds_period = 20.0
+        self._meas_logs = power_status.create_measurement_loggers(
+                seconds_period, self._checkpoint_logger)
         for log in self._meas_logs:
             log.start()
         if self._log_mem_bandwidth:
@@ -551,18 +540,12 @@ class power_LoadTest(arc.ArcTest):
         if minutes_battery_life_tested * 60 < self._loop_time :
             logging.info('Data is less than 1 loop, skip sending to dashboard.')
             return
-        pdash = power_dashboard.PowerLoggerDashboard( \
-                self._plog, self.tagged_testname, self.resultsdir,
-                note=self._pdash_note)
-        pdash.upload()
-        cdash = power_dashboard.CPUStatsLoggerDashboard( \
-                self._clog, self.tagged_testname, self.resultsdir,
-                note=self._pdash_note)
-        cdash.upload()
-        tdash = power_dashboard.TempLoggerDashboard( \
-                self._tlog, self.tagged_testname, self.resultsdir,
-                note=self._pdash_note)
-        tdash.upload()
+
+        dashboard_factory = power_dashboard.get_dashboard_factory()
+        for log in self._meas_logs:
+            dashboard = dashboard_factory.createDashboard(log,
+                self.tagged_testname, self.resultsdir, note=self._pdash_note)
+            dashboard.upload()
 
 
     def cleanup(self):
@@ -606,6 +589,9 @@ class power_LoadTest(arc.ArcTest):
                 raise error.TestError('Running on AC power now.')
 
             if self._power_status.battery:
+                if (not self._ac_ok and
+                    self._power_status.battery.status != 'Discharging'):
+                    raise error.TestFail('The battery is not discharging.')
                 charge_now = self._power_status.battery.charge_now
                 energy_rate = self._power_status.battery.energy_rate
                 voltage_now = self._power_status.battery.voltage_now

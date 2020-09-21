@@ -150,16 +150,17 @@ class LinuxRouter(site_linux_system.LinuxSystem):
         return self.get_wifi_ip(0)
 
 
-    def __init__(self, host, test_name, enable_avahi=False):
+    def __init__(self, host, test_name, enable_avahi=False, role='router'):
         """Build a LinuxRouter.
 
         @param host Host object representing the remote machine.
         @param test_name string name of this test.  Used in SSID creation.
         @param enable_avahi: boolean True iff avahi should be started on the
                 router.
+        @param role string description of host (e.g. router, pcap)
 
         """
-        super(LinuxRouter, self).__init__(host, 'router')
+        super(LinuxRouter, self).__init__(host, role)
         self._ssid_prefix = test_name
         self._enable_avahi = enable_avahi
         self.__setup()
@@ -206,6 +207,8 @@ class LinuxRouter(site_linux_system.LinuxSystem):
             self._ssid_prefix = self._ssid_prefix[len(self.KNOWN_TEST_PREFIX):]
         self._number_unique_ssids = 0
 
+        self._brif_index = 0
+
         self._total_hostapd_instances = 0
         self.local_servers = []
         self.server_address_index = []
@@ -213,16 +216,6 @@ class LinuxRouter(site_linux_system.LinuxSystem):
         self.station_instances = []
         self.dhcp_low = 1
         self.dhcp_high = 128
-
-        # Tear down hostapbr bridge and intermediate functional block
-        # interfaces.
-        result = self.host.run('ls -d /sys/class/net/%s* /sys/class/net/%s*'
-                               ' 2>/dev/null' %
-                               (self.HOSTAP_BRIDGE_INTERFACE_PREFIX,
-                                self.IFB_INTERFACE_PREFIX),
-                               ignore_status=True)
-        for path in result.stdout.splitlines():
-            self.delete_link(path.split('/')[-1])
 
         # Kill hostapd and dhcp server if already running.
         self._kill_process_instance('hostapd', timeout_seconds=30)
@@ -253,7 +246,7 @@ class LinuxRouter(site_linux_system.LinuxSystem):
         self.host.run("sed -n -e '/%s/,$p' /var/log/messages >%s" %
                       (self._log_start_timestamp, router_log),
                       ignore_status=True)
-        self.host.get_file(router_log, 'debug/router_host_messages')
+        self.host.get_file(router_log, 'debug/%s_host_messages' % self.role)
         super(LinuxRouter, self).close()
 
 
@@ -306,8 +299,11 @@ class LinuxRouter(site_linux_system.LinuxSystem):
                      interface, phy_name, configuration.channel)
         self.router.run('rm %s' % log_file, ignore_status=True)
         self.router.run('stop wpasupplicant', ignore_status=True)
-        start_command = '%s -dd -t %s > %s 2> %s & echo $!' % (
-                self.cmd_hostapd, conf_file, log_file, stderr_log_file)
+        start_command = (
+            'OPENSSL_CONF=/etc/ssl/openssl.cnf.compat '
+            'OPENSSL_CHROMIUM_SKIP_TRUSTED_PURPOSE_CHECK=1 '
+            '%s -dd -t -K %s > %s 2> %s & echo $!' % (
+                self.cmd_hostapd, conf_file, log_file, stderr_log_file))
         pid = int(self.router.run(start_command).stdout.strip())
         self.hostapd_instances.append(HostapdInstance(
                 hostapd_conf_dict['ssid'],
@@ -429,10 +425,11 @@ class LinuxRouter(site_linux_system.LinuxSystem):
             log_identifier = '%d_%s' % (
                 self._total_hostapd_instances, instance.interface)
         files_to_copy = [(instance.log_file,
-                          'debug/hostapd_router_%s.log' % log_identifier),
+                          'debug/hostapd_%s_%s.log' %
+                          (self.role, log_identifier)),
                          (instance.stderr_log_file,
-                          'debug/hostapd_router_%s.stderr.log' %
-                          log_identifier)]
+                          'debug/hostapd_%s_%s.stderr.log' %
+                          (self.role, log_identifier))]
         for remote_file, local_file in files_to_copy:
             if self.host.run('ls %s >/dev/null 2>&1' % remote_file,
                              ignore_status=True).exit_status:
@@ -521,9 +518,6 @@ class LinuxRouter(site_linux_system.LinuxSystem):
             router_caps = self.get_capabilities()
             if site_linux_system.LinuxSystem.CAPABILITY_VHT not in router_caps:
                 raise error.TestNAError('Router does not have AC support')
-
-        if configuration.use_bridge:
-            configuration._bridge = self.get_brif()
 
         self.start_hostapd(configuration)
         interface = self.hostapd_instances[-1].interface
@@ -904,16 +898,6 @@ class LinuxRouter(site_linux_system.LinuxSystem):
                              (self.HOSTAP_BRIDGE_INTERFACE_PREFIX, brif))
 
 
-    def delete_link(self, name):
-        """Delete link using the `ip` command.
-
-        @param name string link name.
-
-        """
-        self.host.run('%s link del %s' % (self.cmd_ip, name),
-                      ignore_status=True)
-
-
     def set_ap_interface_down(self, instance=0):
         """Bring down the hostapd interface.
 
@@ -1129,3 +1113,15 @@ class LinuxRouter(site_linux_system.LinuxSystem):
         # Add peer interface to the bridge.
         self.add_interface_to_bridge(
                 self.get_virtual_ethernet_peer_interface())
+
+
+    def create_brif(self):
+        """Initialize a new bridge interface
+
+        @return string bridge interface name
+        """
+        brif_name = '%s%d' % (self.HOSTAP_BRIDGE_INTERFACE_PREFIX,
+                              self._brif_index)
+        self._brif_index += 1
+        self.host.run('brctl addbr %s' % brif_name)
+        return brif_name

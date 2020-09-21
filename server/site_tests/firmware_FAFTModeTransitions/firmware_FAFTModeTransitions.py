@@ -37,6 +37,11 @@ class firmware_FAFTModeTransitions(FirmwareTest):
 
         logging.info("Testing transition sequence: %s",  " -> ".join(mode_seq))
 
+        if 'rec' in mode_seq:
+            logging.info("Mode sequence contains 'rec', setup USB stick with"
+                         " image.")
+            self.setup_usbkey(usbkey=True)
+
         m1 = mode_seq[0]
 
         logging.info("Start in %s mode.", m1)

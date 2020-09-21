@@ -57,12 +57,18 @@ class platform_BootPerfServer(test.test):
         host.run(('/usr/share/vboot/bin/make_dev_ssd.sh --set_config /tmp/%s '
                 '--partitions %d') % (tmp_name, partition))
 
-    def initialize(self, host):
+    def initialize(self, host, cmdline_args):
         """Initialization steps before running the test"""
         # Some tests might disable rootfs verification and mount rootfs as rw.
         # If we run after those tests, re-enable rootfs verification to get
         # consistent boot perf metrics.
-        if not self._is_rootfs_verification_enabled(host):
+
+        args_dict = utils.args_to_dict(cmdline_args)
+        skip_rootfs_check = (args_dict.get('skip_rootfs_check', '').lower() ==
+                             'true')
+
+        if not (skip_rootfs_check or
+                self._is_rootfs_verification_enabled(host)):
             logging.info('Reimage to enable rootfs verification.')
             version = host.get_release_builder_path()
             # Force reimage to the current version to enable rootfs

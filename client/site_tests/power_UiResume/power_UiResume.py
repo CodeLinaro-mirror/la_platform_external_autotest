@@ -18,14 +18,14 @@ class power_UiResume(arc.ArcTest):
     """
     version = 3
 
-    def initialize(self):
+    def initialize(self, no_arc=False):
         """
         Entry point. Initialize ARC if it is enabled on the DUT, otherwise log
         in Chrome browser.
 
         """
-        self._arc_available = utils.is_arc_available()
-        if self._arc_available:
+        self._enable_arc = utils.is_arc_available() and not no_arc
+        if self._enable_arc:
             super(power_UiResume, self).initialize()
         else:
             self._chrome = chrome.Chrome()
@@ -42,7 +42,7 @@ class power_UiResume(arc.ArcTest):
                 max_devs_returned=max_devs_returned,
                 seconds=seconds,
                 ignore_kernel_warns=ignore_kernel_warns,
-                measure_arc=self._arc_available)
+                measure_arc=self._enable_arc)
 
 
     def cleanup(self):
@@ -50,7 +50,7 @@ class power_UiResume(arc.ArcTest):
         Clean up ARC if it is enabled on the DUT, otherwise close the Chrome
         browser.
         """
-        if self._arc_available:
+        if self._enable_arc:
             super(power_UiResume, self).cleanup()
         else:
             self._chrome.close()

@@ -9,7 +9,7 @@ CRITERIA = """
 Check if the audio played to line out can be heard mic in, and assert
 the latency is within certain limit.
 """
-ATTRIBUTES = "suite:audio"
+ATTRIBUTES = ""
 TIME= 'SHORT'
 TEST_CATEGORY = 'PLAYBACKCAPTURE'
 TEST_CLASS = "audio"
