@@ -211,11 +211,11 @@ class FlashromProgrammer(_BaseProgrammer):
                 # Read original HWID. The output format is:
                 #    hardware_id: RAMBI TEST A_A 0128
                 gbb_hwid_output = self._servo_host.run_output(
-                        'gbb_utility -g --hwid %s' % self._gbb)
+                        'futility gbb -g --hwid %s' % self._gbb)
                 original_hwid = gbb_hwid_output.split(':', 1)[1].strip()
 
                 # Write HWID to new firmware
-                self._servo_host.run("gbb_utility -s --hwid='%s' %s" %
+                self._servo_host.run("futility gbb -s --hwid='%s' %s" %
                         (original_hwid, self._fw_main))
 
             # Flash the new firmware

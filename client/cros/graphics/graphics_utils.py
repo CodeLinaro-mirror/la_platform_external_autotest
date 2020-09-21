@@ -1118,7 +1118,6 @@ class GraphicsStateChecker(object):
     Analyzes the state of the GPU and log history. Should be instantiated at the
     beginning of each graphics_* test.
     """
-    crash_blacklist = []
     dirty_writeback_centisecs = 0
     existing_hangs = {}
 

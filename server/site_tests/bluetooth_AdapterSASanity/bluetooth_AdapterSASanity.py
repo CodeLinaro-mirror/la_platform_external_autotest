@@ -116,6 +116,39 @@ class bluetooth_AdapterSASanity(BluetoothAdapterQuickTests,
         # the kernel and bluetooth daemon see the adapter.
         self.test_has_adapter()
 
+    @test_wrapper('Adapter reboot test')
+    def sa_adapter_reboot_test(self):
+        """Verify that adapter power setting persist over reboot
+
+        Test whether power setting persist after a reboot and whether
+        adapter can be turned on after reboot
+        """
+
+        def test_case_adapter_on_reboot():
+            """Test Case: Power on - reboot"""
+            self.test_power_on_adapter()
+            self.test_bluetoothd_running()
+            self.reboot()
+            self.test_bluetoothd_running()
+            self.test_adapter_work_state()
+
+        def test_case_adapter_off_reboot():
+            """Test Case: Power on - reboot"""
+            self.test_power_off_adapter()
+            self.test_bluetoothd_running()
+            self.reboot()
+            self.test_has_adapter()
+            self.test_is_powered_off()
+            self.test_power_on_adapter()
+            self.test_bluetoothd_running()
+
+        NUM_ITERATIONS = 3
+        for i in xrange(NUM_ITERATIONS):
+            logging.debug('Starting reboot test loop number #%d', i)
+            test_case_adapter_on_reboot()
+            test_case_adapter_off_reboot()
+
+
 
     # TODO(b/145302986): Silencing known firmware issue with AC7260 (WP2)
     @test_wrapper('Adapter DiscoverableTimeout test', model_testNA=[
@@ -199,10 +232,11 @@ class bluetooth_AdapterSASanity(BluetoothAdapterQuickTests,
         self.sa_basic_test()
         self.sa_adapter_suspend_resume_test()
         self.sa_adapter_present_test()
+        # self.sa_adapter_reboot_test() disabled since the test is not stable
         self.sa_adapter_discoverable_timeout_test()
         self.sa_default_state_test()
         self.sa_valid_address_test()
-        #self.sa_dbus_api_tests()  # Disabled since tests is not stable yet.
+        self.sa_dbus_api_tests()
 
 
     def run_once(self, host, num_iterations=1, test_name=None,
@@ -213,6 +247,7 @@ class bluetooth_AdapterSASanity(BluetoothAdapterQuickTests,
         @param num_iterations: the number of rounds to execute the test
         """
         # Initialize and run the test batch or the requested specific test
-        self.quick_test_init(host, use_btpeer=False, flag=flag)
+        self.quick_test_init(host, use_btpeer=False, flag=flag,
+                             start_browser=False)
         self.sa_sanity_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

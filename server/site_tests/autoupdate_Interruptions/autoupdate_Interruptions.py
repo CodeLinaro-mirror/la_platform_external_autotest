@@ -80,9 +80,7 @@ class autoupdate_Interruptions(update_engine_test.UpdateEngineTest):
                 raise error.TestFail('The update did not continue where it '
                                      'left off after interruption.')
 
-        # Add a new user and crash browser.
-        self._run_client_test_and_check_result(
-            'autoupdate_CrashBrowserAfterUpdate')
+        self._wait_for_update_to_complete()
         self._host.reboot()
         # Check that update engine is ready after reboot.
         utils.poll_for_condition(self._get_update_engine_status,

@@ -27,6 +27,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import urlparse
 
 from autotest_lib.client.bin import utils as client_utils
@@ -69,6 +70,10 @@ class TradefedTest(test.test):
     _num_media_bundles = 0
     _abilist = []
 
+    # A job will be aborted after 16h. Subtract 30m for setup/teardown.
+    _MAX_LAB_JOB_LENGTH_IN_SEC = 16 * 60 * 60 - 30 * 60
+    _job_deadline = None
+
     def _log_java_version(self):
         """Quick sanity and spew of java version installed on the server."""
         utils.run(
@@ -91,6 +96,9 @@ class TradefedTest(test.test):
                    hard_reboot_on_failure=False,
                    use_jdk9=False):
         """Sets up the tools and binary bundles for the test."""
+        if utils.is_in_container() and not client_utils.is_moblab():
+            self._job_deadline = time.time() + self._MAX_LAB_JOB_LENGTH_IN_SEC
+
         self._install_paths = []
         # TODO(pwang): Remove host if we enable multiple hosts everywhere.
         self._hosts = [host] if host else hosts
@@ -1155,6 +1163,15 @@ class TradefedTest(test.test):
 
     def _run_tradefed(self, command):
         timeout = self._timeout * self._timeout_factor
+        if self._job_deadline is not None:
+            clipped = int(min(timeout, self._job_deadline - time.time()))
+            # Even the shortest tradefed run takes 1.5 minutes. Took 2x'ed
+            # value as a threshold that a meaningful test can run.
+            if clipped < 3 * 60:
+                raise error.TestError(
+                        'Hitting job time limit: only %s seconds left' %
+                        clipped)
+            timeout = clipped
         return self._run_tradefed_with_timeout(command, timeout)
 
     def _run_tradefed_with_retries(self,

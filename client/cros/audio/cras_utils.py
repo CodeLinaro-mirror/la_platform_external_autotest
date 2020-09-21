@@ -469,6 +469,7 @@ def set_single_selected_output_node(node_type):
 
     @param node_type: A node type.
 
+    @returns: True if the output node type is found and set active.
     """
     nodes = get_cras_nodes()
     for node in nodes:
@@ -476,6 +477,8 @@ def set_single_selected_output_node(node_type):
             continue
         if node['Type'] == node_type:
             set_active_output_node(node['Id'])
+            return True
+    return False
 
 
 def set_single_selected_input_node(node_type):
@@ -486,6 +489,7 @@ def set_single_selected_input_node(node_type):
 
     @param node_type: A node type.
 
+    @returns: True if the input node type is found and set active.
     """
     nodes = get_cras_nodes()
     for node in nodes:
@@ -493,6 +497,8 @@ def set_single_selected_input_node(node_type):
             continue
         if node['Type'] == node_type:
             set_active_input_node(node['Id'])
+            return True
+    return False
 
 
 def set_selected_output_nodes(types):

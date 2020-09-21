@@ -108,11 +108,11 @@ class VirtualEthernetPair(object):
         # get any IP traffic through.  Since this is basically a loopback
         # device, just allow all traffic.
         for name in (self._interface_name, self._peer_interface_name):
-            status = self._run('iptables -I INPUT -i %s -j ACCEPT' % name,
+            status = self._run('iptables -w -I INPUT -i %s -j ACCEPT' % name,
                                ignore_status=True)
             if status.exit_status != 0:
-                logging.error('iptables rule addition failed for interface %s',
-                              name)
+                logging.error('iptables rule addition failed for interface %s: '
+                              '%s', name, status.stderr)
         self._is_healthy = True
 
 
@@ -123,7 +123,7 @@ class VirtualEthernetPair(object):
         isn't there or fails to be removed.
         """
         for name in (self._interface_name, self._peer_interface_name):
-            self._run('iptables -D INPUT -i %s -j ACCEPT' % name,
+            self._run('iptables -w -D INPUT -i %s -j ACCEPT' % name,
                       ignore_status=True)
         if not self._either_interface_exists():
             logging.warning('VirtualEthernetPair.teardown() called, '

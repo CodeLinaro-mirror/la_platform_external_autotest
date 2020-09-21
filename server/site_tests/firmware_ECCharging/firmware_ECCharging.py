@@ -47,7 +47,7 @@ class firmware_ECCharging(FirmwareTest):
             if p == 'Charge':
                 regex_str_list.append(p + ':\s+(\d+)\s+')
             else:
-                regex_str_list.append(p + ':\s+0x[0-9a-f]*\s+=\s+(\d+)\s+')
+                regex_str_list.append(p + ':\s+0x[0-9a-f]*\s+=\s+([0-9-]+)\s+')
 
         battery_regex_match = self.ec.send_command_get_output('battery',
                                                               regex_str_list)

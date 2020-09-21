@@ -137,7 +137,7 @@ class firmware_Cr50ECReset(Cr50Test):
         """Verify EC hibernate"""
         try:
             self.ec_hibernate()
-        except error.TestError, e:
+        except error.TestError as e:
             if 'Could not put the EC into hibernate' in str(e):
                 raise error.TestNAError("EC hibernate doesn't work.")
         finally:

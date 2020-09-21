@@ -1,5 +1,8 @@
 #!/usr/bin/python2
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import common
 import sys, os, signal, time, subprocess, fcntl
 
@@ -9,7 +12,7 @@ stderr_start = int(sys.argv[3])  # nubmer of bytes we can skip on stderr
 # TODO (crosbug.com/38224)- sbasi: Remove extra logging.
 stderr = open(os.path.join(logdir, 'stderr'), 'a', 0)
 
-print >> stderr, 'Entered autotestd_monitor.'
+print('Entered autotestd_monitor.', file=stderr)
 # if any of our tail processes die, the monitor should die too
 def kill_self(signum, frame):
     os.kill(os.getpid(), signal.SIGTERM)
@@ -29,7 +32,7 @@ def launch_tail(filename, outstream, start):
 stdout_pump = launch_tail('stdout', sys.stdout, stdout_start)
 stderr_pump = launch_tail('stderr', sys.stderr, stderr_start)
 
-print >> stderr, 'Finished launching tail subprocesses.'
+print('Finished launching tail subprocesses.', file=stderr)
 
 # wait for logdir/started to exist to be sure autotestd is started
 start_time = time.time()
@@ -39,12 +42,12 @@ while not os.path.exists(started_file_path):
     if time.time() - start_time >= 30:
         raise Exception("autotestd failed to start in %s" % logdir)
 
-print >> stderr, 'Finished waiting on autotestd to start.'
+print('Finished waiting on autotestd to start.', file=stderr)
 
 # watch the exit code file for an exit
 exit_code_file = open(os.path.join(logdir, 'exit_code'))
 fcntl.flock(exit_code_file, fcntl.LOCK_EX)
-print >> stderr, 'Got lock of exit_code_file.'
+print('Got lock of exit_code_file.', file=stderr)
 try:
     exit_code = exit_code_file.read()
     if len(exit_code) != 4:
@@ -54,12 +57,12 @@ try:
 finally:
     fcntl.flock(exit_code_file, fcntl.LOCK_UN)
     exit_code_file.close()
-    print >> stderr, 'Released lock of exit_code_file and closed it.'
+    print('Released lock of exit_code_file and closed it.', file=stderr)
 
 # Give tail a tiny bit of time to finish.
 time.sleep(0.01)
 
-print >> stderr, 'Killing child processes.'
+print('Killing child processes.', file=stderr)
 # clear the SIGCHLD handler so that killing the tails doesn't kill us
 signal.signal(signal.SIGCHLD, signal.SIG_DFL)
 os.kill(stdout_pump.pid, signal.SIGTERM)

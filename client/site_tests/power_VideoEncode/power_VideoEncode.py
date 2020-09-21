@@ -16,7 +16,6 @@ class power_VideoEncode(power_test.power_Test):
     version = 1
 
     video_url = 'https://crospower.page.link/power_VideoEncode'
-    extra_browser_args = ['--use-fake-ui-for-media-stream']
 
     codecs = ['h264', 'vp8', 'vp9', 'av1']
     resolutions = ['360', '720', '1080', '4k']
@@ -35,8 +34,9 @@ class power_VideoEncode(power_test.power_Test):
                            number in the range of 1 to 60.
 
         """
+        extra_browser_args = self.get_extra_browser_args_for_camera_test()
         with chrome.Chrome(init_network_controller=True,
-                           extra_browser_args=self.extra_browser_args) as cr:
+                           extra_browser_args=extra_browser_args) as cr:
 
             tab = cr.browser.tabs.New()
             tab.Activate()

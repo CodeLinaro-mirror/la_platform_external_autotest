@@ -130,11 +130,13 @@ def _parse_arguments_internal(argv):
                              'source tree changes not being reflected in the '
                              'run. If using --autotest_dir, this flag is '
                              'automatically applied.')
-    parser.add_argument('--whitelist-chrome-crashes', action='store_true',
-                        default=False, dest='whitelist_chrome_crashes',
+    parser.add_argument('--allow-chrome-crashes',
+                        action='store_true',
+                        default=False,
+                        dest='allow_chrome_crashes',
                         help='Ignore chrome crashes when producing test '
-                             'report. This flag gets passed along to the '
-                             'report generation tool.')
+                        'report. This flag gets passed along to the '
+                        'report generation tool.')
     parser.add_argument('--ssh_private_key', action='store',
                         default=test_runner_utils.TEST_KEY_PATH,
                         help='Path to the private ssh key.')
@@ -282,16 +284,23 @@ def _main_for_local_run(argv, arguments):
                 arguments, autotest_path, argv)
     else:
         return test_runner_utils.perform_run_from_autotest_root(
-                autotest_path, argv, arguments.tests, arguments.remote,
-                build=arguments.build, board=arguments.board,
-                args=arguments.args, ignore_deps=not arguments.enforce_deps,
+                autotest_path,
+                argv,
+                arguments.tests,
+                arguments.remote,
+                build=arguments.build,
+                board=arguments.board,
+                args=arguments.args,
+                ignore_deps=not arguments.enforce_deps,
                 results_directory=results_directory,
                 ssh_verbosity=arguments.ssh_verbosity,
                 ssh_options=arguments.ssh_options,
                 iterations=arguments.iterations,
-                fast_mode=arguments.fast_mode, debug=arguments.debug,
-                whitelist_chrome_crashes=arguments.whitelist_chrome_crashes,
-                pretend=arguments.pretend, job_retry=arguments.retry)
+                fast_mode=arguments.fast_mode,
+                debug=arguments.debug,
+                allow_chrome_crashes=arguments.allow_chrome_crashes,
+                pretend=arguments.pretend,
+                job_retry=arguments.retry)
 
 
 def _main_for_lab_run(argv, arguments):

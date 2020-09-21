@@ -108,6 +108,9 @@ class CrosDisksArchiveTester(CrosDisksTester):
                                 utf8(u'Char U+1F602 is \U0001F602 ' +
                                      u'FACE WITH TEARS OF JOY\n')),
                 ]),
+                FilesystemTestFile(
+                        utf8(u'File 1F600 \U0001F600.txt'),
+                        utf8(u'Char U+1F600 is \U0001F600 GRINNING FACE\n')),
         ]
 
         self._test_archive(os.path.join(mount_path, 'Format V5.rar'),
@@ -115,6 +118,13 @@ class CrosDisksArchiveTester(CrosDisksTester):
 
         self._test_archive(os.path.join(mount_path, 'Unicode.zip'),
                            FilesystemTestDirectory('', want))
+
+    def _test_symlinks(self, mount_path):
+        self._test_archive(
+                os.path.join(mount_path, 'Symlinks.zip'),
+                FilesystemTestDirectory(
+                        '', [FilesystemTestFile('textfile', 'sample text\n')],
+                        strict=True))
 
     def _test_multipart(self, mount_path):
         # Test multipart RARs.
@@ -126,9 +136,9 @@ class CrosDisksArchiveTester(CrosDisksTester):
 
         for archive_name in [
                 'Multipart Old Style.rar',
-                'Multipart New Style.part01.rar',
-                'Multipart New Style.part02.rar',
-                'Multipart New Style.part03.rar',
+                'Multipart New Style 01.rar',
+                'Multipart New Style 02.rar',
+                'Multipart New Style 03.rar',
         ]:
             self._test_archive(os.path.join(mount_path, archive_name), want)
 
@@ -153,15 +163,29 @@ class CrosDisksArchiveTester(CrosDisksTester):
             })
 
     def _test_need_password(self, mount_path):
-        want = FilesystemTestDirectory('', [
-            FilesystemTestFile('Secret.txt', 'This is my little secret\n')
+        fs1 = FilesystemTestDirectory('', [
+                FilesystemTestFile('Secret.txt', 'This is my little secret\n')
         ])
 
-        for archive_name in [
-                'Encrypted AES-128.zip',
-                'Encrypted AES-192.zip',
-                'Encrypted AES-256.zip',
-                'Encrypted ZipCrypto.zip',
+        fs2 = FilesystemTestDirectory('', [
+                FilesystemTestFile('ClearText.txt',
+                                   'This is not encrypted.\n'),
+                FilesystemTestFile('Encrypted AES-128.txt',
+                                   'This is encrypted with AES-128.\n'),
+                FilesystemTestFile('Encrypted AES-192.txt',
+                                   'This is encrypted with AES-192.\n'),
+                FilesystemTestFile('Encrypted AES-256.txt',
+                                   'This is encrypted with AES-256.\n'),
+                FilesystemTestFile('Encrypted ZipCrypto.txt',
+                                   'This is encrypted with ZipCrypto.\n'),
+        ])
+
+        for archive_name, want in [
+                ('Encrypted AES-128.zip', fs1),
+                ('Encrypted AES-192.zip', fs1),
+                ('Encrypted AES-256.zip', fs1),
+                ('Encrypted ZipCrypto.zip', fs1),
+                ('Encrypted Various.zip', fs2),
         ]:
             archive_path = os.path.join(mount_path, archive_name)
             logging.info('Mounting archive %r', archive_path)
@@ -169,13 +193,18 @@ class CrosDisksArchiveTester(CrosDisksTester):
             # Trying to mount archive without providing password should fail.
             self.cros_disks.mount(archive_path,
                                   os.path.splitext(archive_path)[1])
-            mount_result = self.cros_disks.expect_mount_completion({
-                    'status': 13,  # MOUNT_ERROR_NEED_PASSWORD
-                    'source_path': archive_path,
-                    'mount_path': '',
-            })
+            self.cros_disks.expect_mount_completion(
+                    {'status': 13})  # MOUNT_ERROR_NEED_PASSWORD
 
-            # Mounting archive with password.
+            # Trying to mount archive with a wrong password should fail.
+            for password in [b'', b'passwor', b'password ', b' password']:
+                self.cros_disks.mount(archive_path,
+                                      os.path.splitext(archive_path)[1],
+                                      [b'password=' + password])
+                self.cros_disks.expect_mount_completion(
+                        {'status': 13})  # MOUNT_ERROR_NEED_PASSWORD
+
+            # Mounting archive with right password should work.
             self._test_archive(os.path.join(mount_path, archive_name), want,
                                'password')
 
@@ -197,7 +226,6 @@ class CrosDisksArchiveTester(CrosDisksTester):
             logging.info('Archive mounted at %r', mount_path)
 
             self._test_unicode(mount_path)
-            self._test_multipart(mount_path)
             self._test_invalid(mount_path)
 
             logging.info('Unmounting archive')
@@ -221,17 +249,19 @@ class CrosDisksArchiveTester(CrosDisksTester):
                     'Encrypted AES-192.zip',
                     'Encrypted AES-256.zip',
                     'Encrypted ZipCrypto.zip',
+                    'Encrypted Various.zip',
                     'Invalid.rar',
                     'Invalid.zip',
                     'Format V4.rar',
                     'Format V5.rar',
                     'Multipart Old Style.rar',
                     'Multipart Old Style.r00',
-                    'Multipart New Style.part01.rar',
-                    'Multipart New Style.part02.rar',
-                    'Multipart New Style.part03.rar',
+                    'Multipart New Style 01.rar',
+                    'Multipart New Style 02.rar',
+                    'Multipart New Style 03.rar',
                     'Nested.rar',
                     'Nested.zip',
+                    'Symlinks.zip',
                     'Unicode.zip',
             ]:
                 logging.debug('Copying %r', archive_name)
@@ -258,6 +288,7 @@ class CrosDisksArchiveTester(CrosDisksTester):
 
             # Perform tests with the archive files in the mounted FAT filesystem.
             self._test_unicode(mount_path)
+            self._test_symlinks(mount_path)
             self._test_multipart(mount_path)
             self._test_invalid(mount_path)
             self._test_need_password(mount_path)

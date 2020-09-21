@@ -53,9 +53,8 @@ class firmware_FWupdate(FirmwareTest):
             self._want_restore = False
         else:
             self._want_restore = True
-        self.old_images = {}
-        self.new_images = {}
-        self.images = {'old': self.old_images, 'new': self.new_images}
+
+        self.images = {}
 
         for old_or_new in ('old', 'new'):
             for target in ('bios', 'bios_ro', 'bios_rw', 'ec', 'pd'):
@@ -68,15 +67,15 @@ class firmware_FWupdate(FirmwareTest):
                         raise error.TestError(
                                 "Specified file does not exist: %s=%s"
                                 % (arg_name, image_path))
-                    self.images[old_or_new][target] = image_path
+                    self.images[arg_name] = image_path
 
-        self.old_bios = self.old_images.get('bios')
-        self.old_bios_ro = self.old_images.get('bios_ro')
-        self.old_bios_rw = self.old_images.get('bios_rw')
+        self.old_bios = self.images.get('old_bios')
+        self.old_bios_ro = self.images.get('old_bios_ro')
+        self.old_bios_rw = self.images.get('old_bios_rw')
 
-        self.new_bios = self.new_images.get('bios')
-        self.new_bios_ro = self.new_images.get('bios_ro')
-        self.new_bios_rw = self.new_images.get('bios_rw')
+        self.new_bios = self.images.get('new_bios')
+        self.new_bios_ro = self.images.get('new_bios_ro')
+        self.new_bios_rw = self.images.get('new_bios_rw')
 
         if not (self.new_bios or self.new_bios_rw):
             raise error.TestError('Must specify at least new_bios=<path>'
@@ -160,12 +159,12 @@ class firmware_FWupdate(FirmwareTest):
         @param old_or_new: 'old' or 'new', to select a set from self.images
         @param section: 'ro' or 'rw', to use bios_ro or bios_rw.
         """
-        images_dict = self.images[old_or_new]
-
-        local_bios = (self.images.get('bios_%s' % section) or
-                      self.images.get('bios'))
-        local_ec = images_dict.get('ec')
-        local_pd = images_dict.get('pd')
+        local_bios = (
+            self.images.get('%s_bios_%s' % (old_or_new, section)) or
+            self.images.get('%s_bios' % old_or_new)
+        )
+        local_ec = self.images.get('%s_ec' % old_or_new)
+        local_pd = self.images.get('%s_pd' % old_or_new)
 
         extract_dir = self.faft_client.updater.get_work_path()
 
@@ -372,8 +371,7 @@ class firmware_FWupdate(FirmwareTest):
     def test_old(self, raise_error=True):
         """Test case: RO=old, RW=old"""
         logging.info('%s', self.test_old.__doc__)
-        if not self.old_images['bios']:
-            raise error.TestError('Must specify args: old_bios=<path>')
+        self.check_bios_specified(old_ro=True, old_rw=True)
 
         errors = []
 

@@ -10,9 +10,11 @@ import logging
 import os
 import re
 
-from autotest_lib.client.common_lib.cros import cr50_utils, dev_server
+from autotest_lib.client.common_lib.cros import cr50_utils
+from autotest_lib.client.common_lib import error
 from autotest_lib.server.cros import filesystem_util, gsutil_wrapper
 from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
+from chromite.lib import gs
 
 
 # TOT cr50 images are built as part of the reef image builder.
@@ -24,8 +26,6 @@ FIRMWARE_NAME = 'ChromeOS-firmware-%s-%s.tar.bz2'
 REMOTE_TMPDIR = '/tmp/cr50_tot_update'
 CR50_IMAGE_PATH = 'cr50/ec.bin'
 # Wait 10 seconds for the update to take effect.
-WAIT_FOR_UPDATE = 10
-
 class provision_Cr50TOT(FirmwareTest):
     """Update cr50 to TOT.
 
@@ -35,11 +35,36 @@ class provision_Cr50TOT(FirmwareTest):
     """
     version = 1
 
-    def get_latest_cr50_build(self):
-        """Download the TOT cr50 image from the reef artifacts."""
-        self.host.run('mkdir -p %s' % (REMOTE_TMPDIR))
+    def get_latest_builds(self, board='reef-release',
+                          bucket='chromeos-image-archive',
+                          num_builds=5):
+        """Gets the latest build for the given board.
 
-        latest_ver = dev_server.ImageServer.get_latest_build('reef-release')
+        Args:
+          board: The board for which the latest build needs to be fetched.
+          bucket: The GS bucket name.
+          num_builds: Number of builds to return.
+
+        Raises:
+          error.TestFail() if the List() method is unable to retrieve the
+              contents of the path gs://<bucket>/<board> for any reason.
+        """
+        path = 'gs://%s/%s' % (bucket, board)
+        try:
+            contents = gs.GSContext().List(path=path)
+            latest_contents = contents[(num_builds * -1):]
+            latest_builds = []
+            for content in latest_contents:
+                latest_builds.append(content.url.strip(path).strip('/'))
+            latest_builds.reverse()
+            logging.info('Checking latest builds %s', latest_builds)
+            return latest_builds
+        except Exception as e:
+            raise error.TestFail('Could not determine the latest build due '
+                                 'to exception: %s' % e)
+
+    def get_cr50_build(self, latest_ver, remote_dir):
+        """Download the TOT cr50 image from the reef artifacts."""
         bucket = os.path.join(GS_URL, latest_ver.split('-')[-1])
         filename = FIRMWARE_NAME % (latest_ver, BUILDER)
         logging.info('Using cr50 image from %s', latest_ver)
@@ -48,12 +73,24 @@ class provision_Cr50TOT(FirmwareTest):
         gsutil_wrapper.copy_private_bucket(host=self.host,
                                            bucket=bucket,
                                            filename=filename,
-                                           destination=REMOTE_TMPDIR)
+                                           destination=remote_dir)
 
         # Extract the cr50 image.
-        dut_path = os.path.join(REMOTE_TMPDIR, filename)
-        result = self.host.run('tar xfv %s -C %s' % (dut_path, REMOTE_TMPDIR))
-        return os.path.join(REMOTE_TMPDIR, CR50_IMAGE_PATH)
+        dut_path = os.path.join(remote_dir, filename)
+        result = self.host.run('tar xfv %s -C %s' % (dut_path, remote_dir))
+        return os.path.join(remote_dir, CR50_IMAGE_PATH)
+
+
+    def get_latest_cr50_build(self):
+        self.host.run('mkdir -p %s' % (REMOTE_TMPDIR))
+        latest_builds = self.get_latest_builds()
+        for latest_build in latest_builds:
+            try:
+                return self.get_cr50_build(latest_build, REMOTE_TMPDIR)
+            except Exception as e:
+                logging.warn('Unable to find %s cr50 image %s', latest_build, e)
+        raise error.TestFail('Unable to find latest cr50 image in %s' %
+                             latest_builds)
 
 
     def get_bin_version(self, dut_path):
@@ -80,7 +117,8 @@ class provision_Cr50TOT(FirmwareTest):
 
         cr50_utils.GSCTool(self.host, ['-a', cr50_path])
 
-        self.cr50.wait_for_reboot(timeout=WAIT_FOR_UPDATE)
+        self.cr50.wait_for_reboot(
+                timeout=self.faft_config.gsc_update_wait_for_reboot)
         cr50_version = self.cr50.get_active_version_info()[3].split('/')[-1]
         logging.info('Cr50 running %s. Expected %s', cr50_version,
                      expected_version)

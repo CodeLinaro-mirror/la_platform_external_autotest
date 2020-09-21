@@ -95,7 +95,7 @@ STDERR_PREFIX = '[stderr] '
 # safe characters for the shell (do not need quoting)
 _SHELL_QUOTING_ALLOWLIST = frozenset(string.ascii_letters +
                                     string.digits +
-                                    '_-+=>')
+                                    '_-+=>|')
 
 def custom_warning_handler(message, category, filename, lineno, file=None,
                            line=None):
@@ -1937,7 +1937,12 @@ def get_moblab_serial_number():
     return 'NoSerialNumber'
 
 
-def ping(host, deadline=None, tries=None, timeout=60, user=None):
+def ping(host,
+         deadline=None,
+         tries=None,
+         timeout=60,
+         ignore_timeout=False,
+         user=None):
     """Attempt to ping |host|.
 
     Shell out to 'ping' if host is an IPv4 addres or 'ping6' if host is an
@@ -1957,6 +1962,8 @@ def ping(host, deadline=None, tries=None, timeout=60, user=None):
     @param deadline: seconds within which |tries| pings must succeed.
     @param tries: number of pings to send.
     @param timeout: number of seconds after which to kill 'ping' command.
+    @param ignore_timeout: If true, timeouts won't raise CmdTimeoutError.
+    @param user: Run as a specific user
     @return exit code of ping command.
     """
     args = [host]
@@ -1971,8 +1978,12 @@ def ping(host, deadline=None, tries=None, timeout=60, user=None):
         args = [user, '-c', ' '.join([cmd] + args)]
         cmd = 'su'
 
-    result = run(cmd, args=args, verbose=True,
-                 ignore_status=True, timeout=timeout,
+    result = run(cmd,
+                 args=args,
+                 verbose=True,
+                 ignore_status=True,
+                 timeout=timeout,
+                 ignore_timeout=ignore_timeout,
                  stderr_tee=TEE_TO_LOGS)
 
     rc = result.exit_status

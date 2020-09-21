@@ -1,6 +1,11 @@
+# Lint as: python2, python3
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import logging
 import os
@@ -26,10 +31,13 @@ from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros import provision
 from autotest_lib.server.cros.dynamic_suite import constants as ds_constants
 from autotest_lib.server.cros.dynamic_suite import tools, frontend_wrappers
+from autotest_lib.server.cros.device_health_profile import device_health_profile
+from autotest_lib.server.cros.device_health_profile import profile_constants
 from autotest_lib.server.cros.servo import pdtester
 from autotest_lib.server.hosts import abstract_ssh
 from autotest_lib.server.hosts import base_label
 from autotest_lib.server.hosts import chameleon_host
+from autotest_lib.server.hosts import cros_constants
 from autotest_lib.server.hosts import cros_label
 from autotest_lib.server.hosts import cros_repair
 from autotest_lib.server.hosts import pdtester_host
@@ -37,6 +45,8 @@ from autotest_lib.server.hosts import servo_host
 from autotest_lib.server.hosts import servo_constants
 from autotest_lib.site_utils.rpm_control_system import rpm_client
 from autotest_lib.site_utils.admin_audit import constants as audit_const
+from autotest_lib.site_utils.admin_audit import verifiers as audit_verify
+from six.moves import zip
 
 # In case cros_host is being ran via SSP on an older Moblab version with an
 # older chromite version.
@@ -47,12 +57,6 @@ except ImportError:
 
 
 CONFIG = global_config.global_config
-
-# Device is not fixable due issues with hardware and has to be replaced
-DEVICE_STATE_NEEDS_REPLACEMENT = 'needs_replacement'
-# Device required manual attention to be fixed
-DEVICE_STATE_NEEDS_MANUAL_REPAIR = 'needs_manual_repair'
-
 
 class FactoryImageCheckerException(error.AutoservError):
     """Exception raised when an image is a factory image."""
@@ -215,9 +219,12 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         @param args_dict Dictionary from which to extract the chameleon
           arguments.
         """
-        return {key: args_dict[key]
-                for key in ('chameleon_host', 'chameleon_port')
-                if key in args_dict}
+        chameleon_args = {key: args_dict[key]
+                          for key in ('chameleon_host', 'chameleon_port')
+                          if key in args_dict}
+        if 'chameleon_ssh_port' in args_dict:
+            chameleon_args['port'] = int(args_dict['chameleon_ssh_port'])
+        return chameleon_args
 
     @staticmethod
     def get_btpeer_arguments(args_dict):
@@ -242,8 +249,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                     btpeer.split(':'))})
             return result
         else:
-           return {key: args_dict[key]
-                for key in ('btpeer_host', 'btpeer_port')
+            return {key: args_dict[key]
+                for key in ('btpeer_host', 'btpeer_port', 'btpeer_ssh_port')
                 if key in args_dict}
 
 
@@ -343,6 +350,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             try_servo_repair=try_servo_repair,
             dut_host_info=self.host_info_store.get())
         self.set_servo_host(_servo_host, servo_state)
+        self.health_profile = None
         self._default_power_method = None
 
         # TODO(waihong): Do the simplication on Chameleon too.
@@ -771,7 +779,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         """
         with open(image, 'rb') as f:
             image_data = f.read()
-        match = re.findall(version_regex, image_data)
+        match = re.findall(version_regex,
+                           image_data.decode('ISO-8859-1', errors='ignore'))
         if match:
             return match[0]
         else:
@@ -832,7 +841,10 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             board = board_as
 
         if model is None or model == '':
-            model = self.get_platform_from_fwid()
+            try:
+                model = self.get_platform_from_fwid()
+            except Exception as e:
+                logging.warn('Dut is unresponsive: %s', str(e))
 
         # If local firmware path not provided fetch it from the dev server
         tmpd = None
@@ -876,8 +888,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
         # Install firmware from local tarball
         try:
-            # Check if DUT is available and copying to DUT is enabled
-            if self.is_up() and try_scp:
+            # Check if copying to DUT is enabled and DUT is available
+            if try_scp and self.is_up():
                 # DUT is available, make temp firmware directory to store images
                 logging.info('Making temp folder.')
                 dest_folder = '/tmp/firmware'
@@ -949,8 +961,9 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                                                                    ec_regex)
                     if dest_ec_version != image_ec_version:
                         raise error.TestFail(
-                            'Failed to update EC RO, version %s (expected %s)' %
-                            (dest_ec_version, image_ec_version))
+                            'Failed to update EC firmware, version %s '
+                            '(expected %s)' % (dest_ec_version,
+                                               image_ec_version))
 
                 if bios_image:
                     # Check programmed BIOS firmware against expected version
@@ -962,7 +975,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                                                                      bios_regex)
                     if dest_bios_version != image_bios_version:
                         raise error.TestFail(
-                            'Failed to update BIOS RO, version %s '
+                            'Failed to update BIOS, version %s '
                             '(expected %s)' % (dest_bios_version,
                                                image_bios_version))
         finally:
@@ -1031,7 +1044,9 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                    'I/O error when trying to write primary GPT',
                    'Input/output error while writing out',
                    'cannot read GPT header',
-                   'can not determine destination device'
+                   'can not determine destination device',
+                   'wrong fs type',
+                   'bad superblock on',
                 ]
                 has_error = [msg for msg in storage_errors if(msg in str(e))]
                 if has_error:
@@ -1041,7 +1056,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                         audit_const.HW_STATE_NEED_REPLACEMENT)
                     self.host_info_store.commit(info)
                     self.set_device_repair_state(
-                        DEVICE_STATE_NEEDS_REPLACEMENT)
+                        cros_constants.DEVICE_STATE_NEEDS_REPLACEMENT)
                     logging.debug(
                         'Fail install image from USB; Storage error; %s', e)
                     raise error.AutoservError(
@@ -1050,6 +1065,9 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                         'need_replacement, please check debug log '
                         'for details.')
                 else:
+                    # DUT will be marked for replacement if storage is bad.
+                    audit_verify.VerifyDutStorage(self).verify()
+
                     logging.debug('Fail install image from USB; %s', e)
                     raise error.AutoservError(
                         'Failed to install image from USB due to unexpected '
@@ -1078,7 +1096,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                                             'failed_to_boot_post_install')
 
 
-    def set_servo_host(self, host, servo_state = None):
+    def set_servo_host(self, host, servo_state=None):
         """Set our servo host member, and associated servo.
 
         @param host  Our new `ServoHost`.
@@ -1161,6 +1179,27 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         servo_state_prefix = servo_constants.SERVO_STATE_LABEL_PREFIX
         return host_info.get_label_value(servo_state_prefix)
 
+    def get_servo_usb_state(self):
+        """Get the label value indicating the health of the USB drive.
+
+        @return: The label value if defined, otherwise '' (empty string).
+        @rtype: str
+        """
+        host_info = self.host_info_store.get()
+        servo_usb_state_prefix = audit_const.SERVO_USB_STATE_PREFIX
+        return host_info.get_label_value(servo_usb_state_prefix)
+
+    def is_servo_usb_usable(self):
+        """Check if the servo USB storage device is usable for FAFT.
+
+        @return: False if the label indicates a state that will break FAFT.
+                 True if state is okay, or if state is not defined.
+        @rtype: bool
+        """
+        usb_state = self.get_servo_usb_state()
+        return usb_state in ('', audit_const.HW_STATE_ACCEPTABLE,
+                             audit_const.HW_STATE_NORMAL,
+                             audit_const.HW_STATE_UNKNOWN)
 
     def _set_smart_usbhub_label(self, smart_usbhub_detected):
         if smart_usbhub_detected is None:
@@ -1197,14 +1236,18 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         info = self.host_info_store.get()
         message %= (self.hostname, info.board, info.model)
         self.record('INFO', None, None, message)
+        profile_state = profile_constants.DUT_STATE_READY
         try:
             self._repair_strategy.repair(self)
         except hosts.AutoservVerifyDependencyError as e:
             # We don't want flag a DUT as failed if only non-critical
             # verifier(s) failed during the repair.
             if e.is_critical():
-                self.try_set_device_need_manual_repair()
+                profile_state = profile_constants.DUT_STATE_REPAIR_FAILED
+                self.try_set_device_needs_manual_repair()
                 raise
+        finally:
+            self.set_health_profile_dut_state(profile_state)
 
 
     def close(self):
@@ -1214,9 +1257,15 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         if self._chameleon_host:
             self._chameleon_host.close()
 
+        if self.health_profile:
+            try:
+                self.health_profile.close()
+            except Exception as e:
+                logging.warning(
+                    'Failed to finalize device health profile; %s', e)
+
         if self._servo_host:
             self._servo_host.close()
-
 
     def get_power_supply_info(self):
         """Get the output of power_supply_info.
@@ -1433,18 +1482,28 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
 
     def verify_cros_version_label(self):
-        """ Make sure host's cros-version label match the actual image in dut.
+        """Verify if host's cros-version label match the actual image in dut.
 
-        Remove any cros-version: label that doesn't match that installed in
-        the dut.
-
-        @param raise_error: Set to True to raise exception if any mismatch found
-
-        @raise error.AutoservError: If any mismatch between cros-version label
-                                    and the build installed in dut is found.
+        @returns True if the label match with image in dut, otherwise False
         """
-        # crbug.com/1007333: This check is being removed.
-        return True
+        os_from_host = self.get_release_builder_path()
+        info = self.host_info_store.get()
+        os_from_label = info.get_label_value(self.VERSION_PREFIX)
+        if not os_from_label:
+            logging.debug('No existing %s label detected', self.VERSION_PREFIX)
+            return True
+
+        # known cases where the version label will not match the
+        # original CHROMEOS_RELEASE_BUILDER_PATH setting:
+        #  * Tests for the `arc-presubmit` append "-cheetsth" to the label.
+        if os_from_label.endswith(provision.CHEETS_SUFFIX):
+            logging.debug('%s label with %s suffix detected, this suffix will'
+                          ' be ignored when comparing label.',
+                          self.VERSION_PREFIX, provision.CHEETS_SUFFIX)
+            os_from_label = os_from_label[:-len(provision.CHEETS_SUFFIX)]
+        logging.debug('OS version from host: %s; OS verision cached in '
+                      'label: %s', os_from_host, os_from_label)
+        return os_from_label == os_from_host
 
 
     def cleanup_services(self):
@@ -1481,7 +1540,6 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         # Check if the rpm outlet was manipulated.
         if self.has_power():
             self._cleanup_poweron()
-        self.verify_cros_version_label()
 
 
     def reboot(self, **dargs):
@@ -1639,8 +1697,6 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         if not self._is_factory_image():
             self.run('update_engine_client --status')
 
-        self.verify_cros_version_label()
-
 
     @retry.retry(error.AutoservError, timeout_min=5, delay_sec=10)
     def wait_for_system_services(self):
@@ -1732,7 +1788,11 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                 (i.e. both True or both False).
 
         """
-        ping_val = utils.ping(self.hostname, tries=1, deadline=1)
+        ping_val = utils.ping(self.hostname,
+                              tries=1,
+                              deadline=1,
+                              timeout=2,
+                              ignore_timeout=True)
         return not (status ^ (ping_val == 0))
 
     def _ping_wait_for_status(self, status, timeout):
@@ -1802,6 +1862,23 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         """
         return self._ping_wait_for_status(self._PING_STATUS_DOWN, timeout)
 
+    def _is_host_port_forwarded(self):
+        """Checks if the dut is connected over port forwarding.
+
+      N.B. This method does not detect all situations where port forwarding is
+      occurring. Namely, running autotest on the dut may result in a
+      false-positive, and port forwarding using a different machine on the
+      same network will be a false-negative.
+
+      @return True if the dut is connected over port forwarding
+              False otherwise
+      """
+        is_localhost = self.hostname in ['localhost', '127.0.0.1']
+        is_forwarded = is_localhost and not self.is_default_port
+        if is_forwarded:
+            logging.info('Detected DUT connected by port forwarding')
+        return is_forwarded
+
     def test_wait_for_sleep(self, sleep_timeout=None):
         """Wait for the client to enter low-power sleep mode.
 
@@ -1829,7 +1906,15 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         if sleep_timeout is None:
             sleep_timeout = self.SLEEP_TIMEOUT
 
-        if not self.ping_wait_down(timeout=sleep_timeout):
+        # If the dut is accessed over SSH port-forwarding, `ping` is not useful
+        # for detecting the dut is down since a ping to localhost will always
+        # succeed. In this case, fall back to wait_down() which uses SSH.
+        if self._is_host_port_forwarded():
+            success = self.wait_down(timeout=sleep_timeout)
+        else:
+            success = self.ping_wait_down(timeout=sleep_timeout)
+
+        if not success:
             raise error.TestFail(
                 'client failed to sleep after %d seconds' % sleep_timeout)
 
@@ -1895,7 +1980,12 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         if shutdown_timeout is None:
             shutdown_timeout = self.SHUTDOWN_TIMEOUT
 
-        if not self.ping_wait_down(timeout=shutdown_timeout):
+        if self._is_host_port_forwarded():
+            success = self.wait_down(timeout=shutdown_timeout)
+        else:
+            success = self.ping_wait_down(timeout=shutdown_timeout)
+
+        if not success:
             raise error.TestFail(
                 'client failed to shut down after %d seconds' %
                     shutdown_timeout)
@@ -2586,21 +2676,41 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         """Get device repair state"""
         return self._device_repair_state
 
-    def set_device_repair_state(self, state):
+    def set_device_repair_state(self, state, resultdir=None):
         """Set device repair state.
 
         The special device state will be written to the 'dut_state.repair'
-        file in result directory. The file will be read by Lucifer.
+        file in result directory. The file will be read by Lucifer. The
+        file will not be created if result directory not specified.
+
+        @params state:      The new state for the device.
+        @params resultdir:  The path to result directory. If path not provided
+                            will be attempt to get retrieve it from job
+                            if present.
         """
-        if self.job:
-            target = os.path.join(self.job.resultdir, 'dut_state.repair')
+        resultdir = resultdir or getattr(self.job, 'resultdir', '')
+        if resultdir:
+            target = os.path.join(resultdir, 'dut_state.repair')
             common_utils.open_write_close(target, state)
+            logging.info('Set device state as %s. '
+                         'Created dut_state.repair file.', state)
         else:
             logging.debug('Cannot write the device state due missing info '
                           'about result dir.')
         self._device_repair_state = state
 
-    def try_set_device_need_manual_repair(self):
+    def set_device_needs_replacement(self, resultdir=None):
+        """Set device as required replacement.
+
+        @params resultdir:  The path to result directory. If path not provided
+                            will be attempt to get retrieve it from job
+                            if present.
+        """
+        self.set_device_repair_state(
+            cros_constants.DEVICE_STATE_NEEDS_REPLACEMENT,
+            resultdir=resultdir)
+
+    def try_set_device_needs_manual_repair(self):
         """Check if device require manual attention to be fixed.
 
         The state 'needs_manual_repair' can be set when auto repair cannot
@@ -2621,9 +2731,84 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         ]
         if self.get_servo_state() in servo_state_required_manual_fix:
             data = {'host': self.hostname,
-                    'state': DEVICE_STATE_NEEDS_MANUAL_REPAIR}
+                    'state': cros_constants.DEVICE_STATE_NEEDS_MANUAL_REPAIR}
             metrics.Counter(
                 'chromeos/autotest/repair/special_dut_state'
                 ).increment(fields=data)
             # TODO (otabek) unblock when be sure that we do not have flakiness
-            # self.set_device_repair_state(DEVICE_STATE_NEEDS_MANUAL_REPAIR)
+            # self.set_device_repair_state(
+            #   cros_constants.DEVICE_STATE_NEEDS_MANUAL_REPAIR)
+
+    def is_file_system_writable(self, testdirs=None):
+        """Check is the file systems are writable.
+
+        The standard linux response to certain unexpected file system errors
+        (including hardware errors in block devices) is to change the file
+        system status to read-only. This checks that that hasn't happened.
+
+        @param testdirs: List of directories to check. If no data provided
+                         then '/mnt/stateful_partition' and '/var/tmp'
+                         directories will be checked.
+
+        @returns boolean whether file-system writable.
+        """
+        def _check_dir(testdir):
+            # check if we can create a file
+            filename = os.path.join(testdir, 'writable_my_test_file')
+            command = 'touch %s && rm %s' % (filename, filename)
+            rv = self.run(command=command,
+                          timeout=30,
+                          ignore_status=True)
+            is_writable = rv.exit_status == 0
+            if not is_writable:
+                logging.info('Cannot create a file in "%s"!'
+                             ' Probably the FS is read-only', testdir)
+                logging.info("FileSystem is not writable!")
+                return False
+            return True
+
+        if not testdirs or len(testdirs) == 0:
+            # N.B. Order matters here:  Encrypted stateful is loop-mounted
+            # from a file in unencrypted stateful, so we don't test for
+            # errors in encrypted stateful if unencrypted fails.
+            testdirs = ['/mnt/stateful_partition', '/var/tmp']
+
+        for dir in testdirs:
+            # loop will be stopped if any directory fill fail the check
+            try:
+                if not _check_dir(dir):
+                    return False
+            except Exception as e:
+                # here expected only timeout error, all other will
+                # be catch by 'ignore_status=True'
+                logging.debug('Fail to check %s to write in it', dir)
+                return False
+        return True
+
+    def setup_device_health_profile(self):
+        """Setup device health profile for repair/provision task to consume.
+        """
+        if self.health_profile:
+            logging.info('Device health profile has already been initialized.')
+        if not self._servo_host:
+            logging.info('Servohost is not instantiated, skip device'
+                         ' health profile setup...')
+            return
+        # Also skip setup health profile if it's a task runs locally.
+        if self._servo_host.is_localhost():
+            logging.info('Servohost is a localhost, skip device'
+                         ' health profile setup...')
+            return
+        try:
+            self.health_profile = device_health_profile.DeviceHealthProfile(
+                self, self._servo_host)
+        except Exception as e:
+            logging.warning('Failed to setup device health profile; %s', e)
+
+    def set_health_profile_dut_state(self, state):
+        if not self.health_profile:
+            logging.debug('Device health profile is not initialized, skip'
+                          ' set dut state.')
+            return
+        reset_counters = state in profile_constants.STATES_NEED_RESET_COUNTER
+        self.health_profile.update_dut_state(state, reset_counters)

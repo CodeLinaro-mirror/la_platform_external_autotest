@@ -18,8 +18,19 @@ protos = proto.new_descriptor_set(
 protos.register()
 
 
-# Load test metadata.
-load("//metadata/metadata.star", "METADATA")
+load('@proto//chromiumos/config/api/test/metadata/v1/metadata.proto',
+    metadata_pb = 'chromiumos.config.api.test.metadata.v1'
+)
+load('//metadata/tests.star', 'define_tests')
+
+
+def _specification():
+    return metadata_pb.Specification(
+        remote_test_drivers = [metadata_pb.RemoteTestDriver(
+            name = 'remoteTestDrivers/tauto',
+            tests = define_tests(),
+        )]
+    )
 
 
 # Generate metadata proto output.
@@ -32,8 +43,8 @@ def _generate(config):
     def _generate_impl(ctx):
         ctx.output["config.cfg"] = proto.to_jsonpb(config)
         ctx.output["config.binaryproto"] = proto.to_wirepb(config)
-
     lucicfg.generator(impl = _generate_impl)
 
+
 def generate():
-    _generate(METADATA)
+    _generate(_specification())

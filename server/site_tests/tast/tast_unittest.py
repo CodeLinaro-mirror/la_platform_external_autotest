@@ -131,7 +131,8 @@ class TastTest(unittest.TestCase):
 
     def _init_tast_commands(self, tests, ssp=False, build=False,
                             build_bundle='fakebundle', run_private_tests=False,
-                            run_vars=[], run_varsfiles=None):
+                            run_vars=[], run_varsfiles=None,
+                            download_data_lazily=False):
         """Sets fake_tast.py's behavior for 'list' and 'run' commands.
 
         @param tests: List of TestInfo objects.
@@ -139,11 +140,14 @@ class TastTest(unittest.TestCase):
         @param run_vars: List of string values that should be passed to 'run'
             via -var.
         @param run_varsfiles: filenames should be passed to 'run' via -varsfile.
+        @param download_data_lazily: Whether to download external data files
+            lazily.
         """
         list_args = [
             'build=%s' % build,
             'patterns=%s' % self.TEST_PATTERNS,
             'sshretries=%d' % tast.tast._SSH_CONNECT_RETRIES,
+            'downloaddata=%s' % ('lazy' if download_data_lazily else 'batch'),
             'target=%s:%d' % (self.HOST, self.PORT),
             'verbose=True',
         ]
@@ -195,7 +199,8 @@ class TastTest(unittest.TestCase):
 
     def _run_test(self, ignore_test_failures=False, command_args=[],
                   ssp=False, build=False, build_bundle='fakebundle',
-                  run_private_tests=False, varsfiles=None):
+                  run_private_tests=False, varsfiles=None,
+                  download_data_lazily=False):
         """Writes fake_tast.py's configuration and runs the test.
 
         @param ignore_test_failures: Passed as the identically-named arg to
@@ -210,6 +215,8 @@ class TastTest(unittest.TestCase):
             Tast.initialize().
         @param varsfiles: list of names of yaml files containing variables set
              in |-varsfile| arguments.
+        @param download_data_lazily: Whether to download external data files
+            lazily.
         """
         self._test.initialize(self._host,
                               self.TEST_PATTERNS,
@@ -221,7 +228,8 @@ class TastTest(unittest.TestCase):
                               build=build,
                               build_bundle=build_bundle,
                               run_private_tests=run_private_tests,
-                              varsfiles=varsfiles)
+                              varsfiles=varsfiles,
+                              download_data_lazily=download_data_lazily)
         self._test.set_fake_now_for_testing(
                 (NOW - tast._UNIX_EPOCH).total_seconds())
 
@@ -530,6 +538,12 @@ class TastTest(unittest.TestCase):
         self._init_tast_commands([TestInfo('pkg.Test', 0, 0)],
                                  run_private_tests=True)
         self._run_test(ignore_test_failures=True, run_private_tests=True)
+
+    def testDownloadDataLazily(self):
+        """Tests downloading external data files lazily."""
+        self._init_tast_commands([TestInfo('pkg.Test', 0, 0)],
+                                 download_data_lazily=True)
+        self._run_test(ignore_test_failures=True, download_data_lazily=True)
 
     def testServoFromCommandArgs(self):
         """Tests passing servo info via command-line arg."""

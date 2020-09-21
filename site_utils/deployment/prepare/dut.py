@@ -102,6 +102,23 @@ def download_image_to_servo_usb(host, build):
     host.servo.image_to_servo_usb(update_url)
 
 
+def try_reset_by_servo(host):
+    """Reboot the DUT by run cold_reset by servo.
+
+    Cold reset implemented as
+    `dut-control -p <SERVO-PORT> power_state:reset`.
+
+    @params host: CrosHost instance with initialized servo instance.
+    """
+    logging.info('Attempting reset via servo...')
+    host.servo.get_power_state_controller().reset()
+
+    logging.info('Waiting for DUT to come back up.')
+    if not host.wait_up(timeout=host.BOOT_TIMEOUT):
+        raise error.AutoservError(
+            'DUT failed to come back after %d seconds' % host.BOOT_TIMEOUT)
+
+
 def power_cycle_via_servo(host):
     """Power cycle a host though it's attached servo.
 
@@ -160,6 +177,46 @@ def verify_ccd_testlab_enable(host):
             raise Exception(
                 'CCD testlab mode is not enabled on the DUT, enable '
                 'testlab mode is required for all DUTs that support CR50.')
+
+
+def verify_labstation_RPM_config_unsafe(host):
+    """Verify that we can power cycle a labstation with its RPM information.
+    Any host without RPM information will be safely skipped.
+
+    @param host: any host
+
+    This procedure is intended to catch inaccurate RPM info when the
+    host is deployed.
+
+    If the RPM config information is wrong, then this command will fail.
+
+    Note that we do not cleanly stop servod as part of power-cycling the DUT;
+    therefore calling this function is not safe in general.
+
+    """
+    host_info = host.host_info_store.get()
+
+    powerunit_hostname = host_info.attributes.get('powerunit_hostname')
+    powerunit_outlet   = host_info.attributes.get('powerunit_outlet')
+
+    powerunit_hasinfo = (bool(powerunit_hostname), bool(powerunit_outlet))
+
+    if powerunit_hasinfo == (True, True):
+        pass
+    elif powerunit_hasinfo == (False, False):
+        logging.info("intentionally skipping labstation %s", host.hostname)
+        return
+    else:
+        msg = "inconsistent power info: %s %s" % (
+            powerunit_hostname, powerunit_outlet
+        )
+        logging.error(msg)
+        raise Exception(msg)
+
+    logging.info("Shutting down labstation...")
+    host.rpm_power_off_and_wait()
+    host.rpm_power_on_and_wait()
+    logging.info("RPM Check Successful")
 
 
 def verify_boot_into_rec_mode(host):
@@ -264,6 +321,7 @@ def install_firmware(host):
 
     @param host   Host instance to use for servo and ssh operations.
     """
+    logging.info("Started install firmware on the DUT.")
     # Disable software-controlled write-protect for both FPROMs, and
     # install the RO firmware.
     for fprom in ['host', 'ec']:
@@ -284,9 +342,13 @@ def install_firmware(host):
              ignore_status=True)
 
     logging.info("Rebooting DUT in normal mode(non-dev).")
-    power_cycle_via_servo(host)
-    logging.info("Install firmware completed successfully.")
+    try:
+        host.reboot()
+    except Exception as e:
+        logging.debug('Failed to reboot from host side; %s', e)
+        try_reset_by_servo(host)
 
+    logging.info("Install firmware completed successfully.")
 
 
 def _start_firmware_update(host, result_file):

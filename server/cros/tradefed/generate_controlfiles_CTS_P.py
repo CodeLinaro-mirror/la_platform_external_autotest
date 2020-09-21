@@ -178,7 +178,9 @@ CONFIG['MEDIA_MODULES'] = [
     'CtsMediaBitstreamsTestCases',
 ]
 
-CONFIG['NEEDS_PUSH_MEDIA'] = CONFIG['MEDIA_MODULES']
+CONFIG['NEEDS_PUSH_MEDIA'] = CONFIG['MEDIA_MODULES'] + [
+    'CtsMediaTestCases.audio',
+]
 
 # See b/149889853. Non-media test basically does not require dynamic
 # config. To reduce the flakiness, let us suppress the config.
@@ -308,6 +310,12 @@ CONFIG['EXTRA_MODULES'] = {
             'CtsDeqpTestCases.dEQP-VK'
         ]),
         'SUITES': ['suite:arc-cts-deqp', 'suite:graphics_per-week'],
+    },
+    'CtsMediaTestCases': {
+        'SUBMODULES': set([
+            'CtsMediaTestCases.audio',
+        ]),
+        'SUITES': ['suite:arc-cts'],
     },
     _WM_PRESUBMIT: {
         'SUBMODULES': set([_WM_PRESUBMIT]),
@@ -553,6 +561,31 @@ CONFIG['EXTRA_COMMANDLINE'] = {
     'CtsDeqpTestCases.dEQP-VK.ycbcr': [
         '--include-filter', 'CtsDeqpTestCases', '--module', 'CtsDeqpTestCases',
         '--test', 'dEQP-VK.ycbcr.*'
+    ],
+    'CtsMediaTestCases.audio': [
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioAttributesTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioEffectTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioFocusTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioFormatTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioManagerTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioNativeTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioPlayRoutingNative',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioPlaybackConfigurationTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioPreProcessingTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioPresentationTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioRecordAppOpTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioRecordRoutingNative',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioRecordTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioRecord_BufferSizeTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioRecordingConfigurationTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioTrackLatencyTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioTrackSurroundTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioTrackTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.AudioTrack_ListenerTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.SoundPoolAacTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.SoundPoolMidiTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.SoundPoolOggTest',
+        '--include-filter', 'CtsMediaTestCases android.media.cts.VolumeShaperTest',
     ],
     _WM_PRESUBMIT: [
         '--include-filter', 'CtsActivityManagerDeviceSdk25TestCases',

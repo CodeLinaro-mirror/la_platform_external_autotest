@@ -8,7 +8,6 @@ import os
 import logging
 import time
 
-
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import chrome
 from autotest_lib.client.common_lib.cros import power_load_util
@@ -27,9 +26,8 @@ class power_MeetClient(power_test.power_Test):
 
     video_url = 'http://meet.google.com'
     doc_url = 'http://doc.new'
-    extra_browser_args = ['--use-fake-ui-for-media-stream']
 
-    def initialize(self, seconds_period=20., pdash_note='',
+    def initialize(self, seconds_period=5., pdash_note='',
                    force_discharge=False):
         """initialize method."""
         super(power_MeetClient, self).initialize(
@@ -46,12 +44,13 @@ class power_MeetClient(power_test.power_Test):
         @param duration: duration in seconds.
         @param layout: string of meet layout to use.
         """
+        extra_browser_args = self.get_extra_browser_args_for_camera_test()
         with keyboard.Keyboard() as keys,\
              chrome.Chrome(init_network_controller=True,
                            gaia_login=True,
                            username=self._username,
                            password=self._password,
-                           extra_browser_args=self.extra_browser_args,
+                           extra_browser_args=extra_browser_args,
                            autotest_ext=True) as cr:
 
             # Move existing window to left half and open video page
@@ -66,6 +65,11 @@ class power_MeetClient(power_test.power_Test):
             url = self.video_url + '/' + meet_code
             logging.info('Navigating left window to %s', url)
             tab.Navigate(url)
+
+            # Workaround when camera isn't init for some unknown reason.
+            time.sleep(10)
+            tab.EvaluateJavaScript('location.reload()')
+
             tab.WaitForDocumentReadyStateToBeComplete()
             logging.info(meet_code)
             self.keyvals['meet_code'] = meet_code

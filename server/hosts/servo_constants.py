@@ -27,12 +27,12 @@ SERVOD_QUICK_STARTUP_TIMEOUT = 20
 SERVOD_STARTUP_TIMEOUT = 60
 
 # pools that support dual v4. (go/cros-fw-lab-strategy)
-POOLS_SUPPORT_DUAL_V4 = {'faft-cr50',
-                         'faft-cr50-tot',
-                         'faft-cr50-debug',
-                         'faft_cr50_debug'
+POOLS_SUPPORT_DUAL_V4 = {'faft_cr50_debug'
                          'faft-pd-debug',
                          'faft_pd_debug'}
+
+# Prefix of pools that require servod cr50 config.
+CR50_CONFIG_POOL_PREFIX = 'faft-cr50'
 
 ENABLE_SSH_TUNNEL_FOR_SERVO = _CONFIG.get_config_value(
         'CROS', 'enable_ssh_tunnel_for_servo', type=bool, default=False)
@@ -51,6 +51,7 @@ SERVO_STATE_CCD_TESTLAB_ISSUE = 'CCD_TESTLAB_ISSUE'
 SERVO_STATE_SERVOD_ISSUE = 'SERVOD_ISSUE'
 SERVO_STATE_LID_OPEN_FAILED = 'LID_OPEN_FAILED'
 SERVO_STATE_BAD_RIBBON_CABLE = 'BAD_RIBBON_CABLE'
+SERVO_STATE_DUT_NOT_CONNECTED = 'DUT_NOT_CONNECTED'
 SERVO_STATE_EC_BROKEN = 'EC_BROKEN'
 SERVO_STATE_BROKEN = 'BROKEN'
 SERVO_STATE_WORKING = 'WORKING'

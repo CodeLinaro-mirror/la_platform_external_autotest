@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 AUTHOR = "Chrome OS Team"
-NAME = "kASLR"
+NAME = "security_kASLR"
 TIME = "LONG"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "security"

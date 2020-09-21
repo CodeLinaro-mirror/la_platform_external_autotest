@@ -84,10 +84,10 @@ def _set_power(args_tuple, timeout_mins=RPM_CALL_TIMEOUT_MINS):
     except Exception as e:
         logging.exception(e)
         raise RemotePowerException(
-                'Client call exception: ' + str(e))
+                'Client call exception (%s): %s' % (RPM_FRONTEND_URI, e))
     if timeout:
         raise RemotePowerException(
-                'Call to RPM Infrastructure timed out.')
+                'Call to RPM Infrastructure timed out (%s).' % RPM_FRONTEND_URI)
     if not result:
         error_msg = ('Failed to change outlet status for host: %s to '
                      'state: %s.' % (args_tuple[0], args_tuple[-1]))

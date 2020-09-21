@@ -67,7 +67,9 @@ CONFIG['QUAL_TIMEOUT'] = 24
 
 CONFIG['QUAL_BOOKMARKS'] = sorted([
     'A',  # A bookend to simplify partition algorithm.
-    'GtsCameraTestCases',  # b/144659061 requires it separated from GtsAssistant
+    'GtsExoPlayerTestCases',
+    'GtsMediaTestCases',
+    'GtsMediaTestCasesz',  # runs the biggest module in a single job.
     'zzzzz'  # A bookend to simplify algorithm.
 ])
 
@@ -110,6 +112,7 @@ CONFIG['PUBLIC_DEPENDENCIES'] = {}
 # partner moblabs.
 CONFIG['PUBLIC_MODULE_RETRY_COUNT'] = {
   _ALL: 2,
+  'GtsExoPlayerTestCases': 5,  # TODO(b/149376356, b/164230246)
   'GtsMediaTestCases': 5,  # TODO(b/140841434)
   'GtsYouTubeTestCases': 5,  # TODO(b/149376356)
 }
@@ -145,6 +148,7 @@ CONFIG['EXTRA_ARTIFACTS'] = {}
 CONFIG['PREREQUISITES'] = {
     'GtsGmscoreHostTestCases': ['bluetooth'],
 }
+CONFIG['USE_JDK9'] = True
 
 from generate_controlfiles_common import main
 

@@ -249,8 +249,11 @@ class FindMostSpecificConfigTestCase(_MockConfigTestCaseBaseClass):
     def runTest(self):
         cfg = config.Config('samus-kernelnext')
         self.assertEqual(config.Config('samus-kernelnext').platform, 'samus')
+        self.assertEqual(config.Config('samus-arc-r').platform, 'samus')
         self.assertEqual(config.Config('veyron_minnie').platform, 'minnie')
         self.assertEqual(config.Config('veyron_monroe').platform, 'veyron')
+        self.assertEqual(config.Config('veyron_minnie-arc-r').platform, 'minnie')
+        self.assertEqual(config.Config('veyron_monroe-arc-r').platform, 'veyron')
 
 
 if __name__ == '__main__':

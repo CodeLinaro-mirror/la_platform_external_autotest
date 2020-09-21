@@ -16,6 +16,13 @@ class firmware_TPMExtend(FirmwareTest):
         super(firmware_TPMExtend, self).initialize(host, cmdline_args)
         self.switcher.setup_mode('normal')
         self.setup_usbkey(usbkey=True, host=False)
+        fwver = self.faft_client.system.run_shell_command_get_output(
+                'crossystem fwid')[0]
+        try:
+            fwver_major = int(fwver.split('.')[1])
+        except ValueError:
+            raise error.TestFail('Could not determine firmware version')
+        self.disable_hwid_check = fwver_major < 6425
 
     def _tpm1_check_pcr(self, num, hash_obj):
         pcrs_file = '/sys/class/*/tpm0/device/pcrs'
@@ -45,12 +52,17 @@ class firmware_TPMExtend(FirmwareTest):
 
     def run_once(self):
         """Runs a single iteration of the test."""
-        logging.info('Verifying HWID digest in PCR1')
-        hwid = self.faft_client.system.run_shell_command_get_output(
-                'crossystem hwid')[0]
-        logging.debug('HWID reported by device is: %s', hwid)
-        if not self._check_pcr(1, hashlib.sha256(hwid)):
-            raise error.TestFail('PCR1 was not extended with SHA256 of HWID!')
+        if self.disable_hwid_check:
+            logging.info(
+                'Skip testing HWID digest in PCR1 due to firmware version')
+        else:
+            logging.info('Verifying HWID digest in PCR1')
+            hwid = self.faft_client.system.run_shell_command_get_output(
+                    'crossystem hwid')[0]
+            logging.debug('HWID reported by device is: %s', hwid)
+            if not self._check_pcr(1, hashlib.sha256(hwid)):
+                raise error.TestFail(
+                    'PCR1 was not extended with SHA256 of HWID!')
 
         logging.info('Verifying bootmode digest in PCR0 in normal mode')
         self.check_state((self.checkers.crossystem_checker, {

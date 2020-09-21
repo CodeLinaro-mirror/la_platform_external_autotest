@@ -5,7 +5,10 @@
 import common
 import logging
 from autotest_lib.client.common_lib import hosts
+from autotest_lib.server.hosts import cros_constants
 from autotest_lib.server.hosts import repair_utils
+
+from chromite.lib import timeout_util
 
 # There are some labstations we don't want they receive auto-update,
 # e.g. labstations that used for image qualification purpose
@@ -21,6 +24,7 @@ class _LabstationUpdateVerifier(hosts.Verifier):
     up-to-date.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         """First, only run this verifier if the host is in the physical lab.
         Secondly, skip if the test is being run by test_that, because subnet
@@ -36,10 +40,7 @@ class _LabstationUpdateVerifier(hosts.Verifier):
 
             stable_version = info.stable_versions.get('cros')
             if stable_version:
-                host.update_image(
-                    wait_for_update=False,
-                    stable_version=stable_version
-                )
+                host.update_image(stable_version=stable_version)
             else:
                 raise hosts.AutoservVerifyError('Failed to check/update'
                                                 ' labstation due to no stable'
@@ -55,6 +56,8 @@ class _LabstationRebootVerifier(hosts.Verifier):
     """Check if reboot is need for the labstation and perform a reboot if it's
     not currently using by any tests.
     """
+
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if host.is_reboot_requested():
             host.try_reboot()

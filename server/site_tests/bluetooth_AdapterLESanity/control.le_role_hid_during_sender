@@ -9,7 +9,7 @@ AUTHOR = 'chromeos-bluetooth'
 NAME = 'bluetooth_AdapterLESanity.le_role_hid_during_sender'
 PURPOSE = ('Tests controller can accept HID connection during Sender role')
 CRITERIA = 'Pass the test'
-ATTRIBUTES = 'suite:bluetooth_flaky'
+ATTRIBUTES = 'suite:bluetooth, suite:bluetooth_e2e'
 TIME = 'SHORT'
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'bluetooth'
@@ -20,7 +20,7 @@ DOC = """Tests HID capability during Sender role
 
       A device in Sender role will need to connect to a device in Receiver role.
       This test checks that while connected, it can also initiate a connection
-      to a HID device. Both connections will be as master.
+      to a HID device. Both connections will be in primary role.
       """
 
 args_dict = utils.args_to_dict(args)

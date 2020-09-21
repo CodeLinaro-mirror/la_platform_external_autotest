@@ -16,6 +16,7 @@ from autotest_lib.client.cros.audio import audio_test_data
 from autotest_lib.client.cros.audio import check_quality
 from autotest_lib.client.cros.audio import cmd_utils
 from autotest_lib.client.cros.audio import cras_utils
+from autotest_lib.client.cros.audio import sox_utils
 from autotest_lib.client.cros.multimedia import audio_facade_native
 
 
@@ -34,6 +35,7 @@ class audio_AudioInputGain(audio_helper.cras_rms_test):
     HIGH_GAIN = 75
     EXPECTED_GAIN = 100
     FREQ_TOLERANCE = 1
+    SECOND_PEAK_RATIO_TOLERANCE = 0.05
     GAIN_TOLERANCE = 10
 
     def run_once(self):
@@ -111,10 +113,27 @@ class audio_AudioInputGain(audio_helper.cras_rms_test):
                     primary_freq = float(spectra[0][0][0])
                     if abs(primary_freq - 440.0) > self.FREQ_TOLERANCE:
                         raise error.TestFail(
-                                'Primary feq is beyond the expectation: '
+                                'Primary freq is beyond the expectation: '
                                 'got %.2f, expected 440.00, tolerance %f' %
                                         (primary_freq, self.FREQ_TOLERANCE))
-                    rms_value.append(float(spectra[0][0][1]))
+
+                    if len(spectra[0]) > 1:
+                        peak_ratio = (float(spectra[0][1][1]) /
+                                float(spectra[0][0][1]))
+                        if peak_ratio > self.SECOND_PEAK_RATIO_TOLERANCE:
+                            raise error.TestFail(
+                                    'The second peak is not negligible: '
+                                    'f %.2f, peak_ratio %f (tolerance %f)' %
+                                            (float(spectra[0][1][0]),
+                                             peak_ratio,
+                                             self.SECOND_PEAK_RATIO_TOLERANCE))
+
+                    sox_stat = sox_utils.get_stat(input=recorded_file,
+                                                  channels=1,
+                                                  bits=16,
+                                                  rate=48000)
+                    rms_value.append(float(sox_stat.rms))
+                    logging.debug('signal RMS from sox = %f', rms_value[-1])
 
                 gain = rms_value[1] / rms_value[0]
                 if abs(gain - self.EXPECTED_GAIN) > self.GAIN_TOLERANCE:

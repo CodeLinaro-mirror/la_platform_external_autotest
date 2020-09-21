@@ -1,8 +1,13 @@
+# Lint as: python2, python3
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """This class defines the CrosHost Label class."""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import collections
 import logging
@@ -20,6 +25,7 @@ from autotest_lib.server.hosts import servo_constants
 from autotest_lib.site_utils import hwid_lib
 from autotest_lib.site_utils.admin_audit import verifiers as audit_verify
 from autotest_lib.site_utils.admin_audit import constants as audit_const
+from six.moves import zip
 
 # pylint: disable=missing-docstring
 LsbOutput = collections.namedtuple('LsbOutput', ['unibuild', 'board'])
@@ -63,9 +69,8 @@ class DeviceSkuLabel(base_label.StringPrefixLabel):
         return []
 
     def update_for_task(self, task_name):
-        # This label is stored in the lab config, so only deploy tasks update it
-        # or when no task name is mentioned.
-        return task_name in (DEPLOY_TASK_NAME, '')
+        # This label is stored in the lab config.
+        return task_name in (DEPLOY_TASK_NAME, REPAIR_TASK_NAME, '')
 
 
 class BrandCodeLabel(base_label.StringPrefixLabel):
@@ -516,9 +521,9 @@ class DutStorageLabel(base_label.StringPrefixLabel):
         return [state]
 
     def update_for_task(self, task_name):
-        # This label is part of audit task, so updating it during deploy tasks
-        # update it or when no task name is mentioned.
-        return task_name in (DEPLOY_TASK_NAME, '')
+        # This label is part of audit task, so updating it only during
+        # deploy tasks to update it for new deployments.
+        return task_name == DEPLOY_TASK_NAME
 
 
 CROS_LABELS = [

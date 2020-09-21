@@ -1667,7 +1667,7 @@ class Job(dbmodels.Model, model_logic.ModelExtensions):
     @classmethod
     @contextlib.contextmanager
     def _readonly_job_query_context(cls):
-        #TODO(jkop): Get rid of this kludge when we update Django to >=1.7
+        #TODO: Get rid of this kludge if/when we update Django to >=1.7
         #correct usage would be .raw(..., using='readonly')
         old_db = Job.objects._db
         try:

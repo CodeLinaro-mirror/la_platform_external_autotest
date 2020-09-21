@@ -51,8 +51,8 @@ def __get_token_slot_by_path(token_path):
 def __verify_tokenname(token_path):
     """Verify that the TPM token name is correct."""
     # The token path is expected to be of the form:
-    # /home/root/<obfuscated_user_id>/chaps
-    match = re.search(r'/home/root/(.*)/chaps', token_path)
+    # /run/daemon-store/chaps/<obfuscated_user_id>
+    match = re.search(r'/run/daemon-store/chaps/(.*)', token_path)
     if not match:
         return False
     obfuscated_user = match.group(1)

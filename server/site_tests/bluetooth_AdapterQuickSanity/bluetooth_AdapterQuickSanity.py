@@ -4,6 +4,8 @@
 
 """This class implements a Bluetooth quick sanity package"""
 
+from autotest_lib.server.site_tests.bluetooth_AdapterAUSanity import\
+     bluetooth_AdapterAUSanity
 from autotest_lib.server.site_tests.bluetooth_AdapterCLSanity import\
      bluetooth_AdapterCLSanity
 from autotest_lib.server.site_tests.bluetooth_AdapterLESanity import\
@@ -14,6 +16,7 @@ from autotest_lib.server.site_tests.bluetooth_AdapterSRSanity import\
      bluetooth_AdapterSRSanity
 
 class bluetooth_AdapterQuickSanity(
+        bluetooth_AdapterAUSanity.bluetooth_AdapterAUSanity,
         bluetooth_AdapterCLSanity.bluetooth_AdapterCLSanity,
         bluetooth_AdapterLESanity.bluetooth_AdapterLESanity,
         bluetooth_AdapterSASanity.bluetooth_AdapterSASanity,
@@ -46,6 +49,7 @@ class bluetooth_AdapterQuickSanity(
             self.cl_sanity_batch_run()
             self.le_sanity_batch_run()
             self.sr_sanity_batch_run()
+            self.au_sanity_batch_run()
             self.quick_test_print_summary()
 
         # End and cleanup test package

@@ -7,9 +7,7 @@ NAME = 'network_WiFi_UpdateRouter.pcap'
 TIME = 'SHORT'
 TEST_TYPE = 'Server'
 DEPENDENCIES = 'wificell'
-# TODO(crbug.com/1098024, crbug.com/1005443): re-enable this when either the
-# updater is fixed to handle old OS, or when we've updated OS images.
-#ATTRIBUTES = 'suite:wifi_update_router'
+ATTRIBUTES = 'suite:wifi_update_router'
 
 DOC = """
 This test updates the packet capture in a WiFi cell to the latest stable

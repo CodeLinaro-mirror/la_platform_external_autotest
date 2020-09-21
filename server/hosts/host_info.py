@@ -1,6 +1,11 @@
+# Lint as: python2, python3
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import abc
 import copy
@@ -9,6 +14,7 @@ import logging
 
 import common
 from autotest_lib.server.cros import provision
+import six
 
 
 class HostInfo(object):
@@ -253,7 +259,7 @@ class StoreError(Exception):
     """Raised when a CachingHostInfoStore operation fails."""
 
 
-class CachingHostInfoStore(object):
+class CachingHostInfoStore(six.with_metaclass(abc.ABCMeta, object)):
     """Abstract class to obtain and update host information from the infra.
 
     This class describes the API used to retrieve host information from the
@@ -268,8 +274,6 @@ class CachingHostInfoStore(object):
     An extra store is provided for unittests:
         InMemoryHostInfoStore: Just store labels / attributes in-memory.
     """
-
-    __metaclass__ = abc.ABCMeta
 
     def __init__(self):
         self._private_cached_info = None

@@ -101,12 +101,11 @@ class touch_WakeupSource(touch_playback_test_base.touch_playback_test_base):
         raise error.TestError('Wakeup file for %s said "%s".' %
                               (input_type, result))
 
-    # TODO(crbug.com/1096844): make source a mandatory argument.
-    def run_once(self, source=None):
+    def run_once(self, source):
         """Entry point of this test."""
 
         # Check that touchpad is a wake source for all but the excepted boards.
-        if source is None or source == 'touchpad':
+        if source == 'touchpad':
             if (self._has_touchpad and
                 self._platform not in self._INVALID_TOUCHPADS):
                 if self._platform.replace('-kernelnext', '') in \
@@ -119,7 +118,7 @@ class touch_WakeupSource(touch_playback_test_base.touch_playback_test_base):
 
         # Check that touchscreen is not a wake source (if present).
         # Devices without a touchpad should have touchscreen as wake source.
-        if source is None or source == 'touchscreen':
+        if source == 'touchscreen':
             if (self._has_touchscreen and
                 self._platform not in self._INVALID_TOUCHSCREENS):
                 touchscreen_wake = self._is_wake_source('touchscreen')

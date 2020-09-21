@@ -177,9 +177,9 @@ def update_peers(host, latest_commit):
         status[peer]['update_needed'] = is_update_needed(peer,latest_commit)
 
     logging.debug(status)
-    # If none of the peer need update raise TestNA
     if not any([v['update_needed'] for v in status.values()]):
-        raise error.TestNAError('Update not needed')
+        logging.info("Update not needed on any of the peers")
+        return
     for peer in peer_list:
         if status[peer]['update_needed']:
             status[peer]['updated'], status[peer]['reason'] = \

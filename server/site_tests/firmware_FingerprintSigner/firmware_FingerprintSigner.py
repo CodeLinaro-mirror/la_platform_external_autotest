@@ -11,6 +11,9 @@ class firmware_FingerprintSigner(FingerprintTest):
     """
     version = 1
 
-    def run_once(self):
-        """Run the test: verify that the key is MP, not Pre-MP"""
-        self.validate_build_fw_file(allowed_types=[self._KEY_TYPE_MP])
+    def run_once(self, fsi=False):
+        """Run the test: verify that the key is MP (or pre-MP, if not FSI)"""
+        allowed_types = [self._KEY_TYPE_MP]
+        if not fsi:
+            allowed_types += [self._KEY_TYPE_PRE_MP]
+        self.validate_build_fw_file(allowed_types=allowed_types)

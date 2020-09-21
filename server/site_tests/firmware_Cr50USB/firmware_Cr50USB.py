@@ -60,7 +60,7 @@ class firmware_Cr50USB(FirmwareTest):
             try:
                 # Run usb_updater command.
                 result = self.host.run("usb_updater -f")
-            except Exception, e:
+            except Exception as e:
                 failed_runs.append(str(i))
                 fail_count += 1
                 logging.debug(e)

@@ -32,6 +32,7 @@ class firmware_ECWakeSource(FirmwareTest):
         super(firmware_ECWakeSource, self).initialize(host, cmdline_args)
         # Only run in normal mode
         self.switcher.setup_mode('normal')
+        self.has_internal_display = host.has_internal_display()
 
     def cleanup(self):
         # Restore the lid_open switch in case the test failed in the middle.
@@ -96,8 +97,11 @@ class firmware_ECWakeSource(FirmwareTest):
                                  exit_without_logout=True)
         original_boot_id = host.get_boot_id()
 
-        logging.info('Suspend and wake by power button.')
-        self.suspend_and_wake(self.suspend, self.servo.power_normal_press)
+        # With no display connected, pressing the power button in suspend mode
+        # would lead to shutdown.
+        if self.has_internal_display:
+            logging.info('Suspend and wake by power button.')
+            self.suspend_and_wake(self.suspend, self.servo.power_normal_press)
 
         if not self.check_ec_capability(['keyboard']):
             logging.info('The device has no internal keyboard. '
@@ -140,9 +144,13 @@ class firmware_ECWakeSource(FirmwareTest):
             raise error.TestFail('Different boot_id. Unexpected reboot.')
 
         if self.servo.main_device_is_ccd():
-            logging.info('Using CCD, ignore waking by power button.')
+            logging.info('With CCD, we can\'t wake up the DUT from hibernate '
+                         'by power button. Skip hibernate test.')
         elif not self.faft_config.ec_has_hibernate_cmd:
-            logging.info('EC does not support hibernate, skipping hibernate test.')
+            logging.info('EC does not support hibernate. Skip hibernate test.')
+        elif not self.has_internal_display:
+            logging.info('For the form factors without internal display, '
+                         'hibernate is not useful. Skip hibernate test.')
         else:
             logging.info('EC hibernate and wake by power button.')
             self.hibernate_and_wake_by_power_button(host)

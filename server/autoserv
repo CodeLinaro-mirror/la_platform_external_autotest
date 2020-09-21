@@ -18,7 +18,7 @@ import socket
 import sys
 import traceback
 import time
-import urllib2
+from six.moves import urllib
 
 import common
 from autotest_lib.client.bin.result_tools import utils as result_utils
@@ -29,6 +29,7 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import host_queue_entry_states
 from autotest_lib.client.common_lib import host_states
+from autotest_lib.client.common_lib import seven
 from autotest_lib.server.cros.dynamic_suite import suite
 
 try:
@@ -140,7 +141,12 @@ def _stage_ssp(parser, resultsdir):
                  'isolate_hash': parser.options.isolate,
                  'image': parser.options.test_source_build}
     script_locals = {}
-    execfile(STAGE_SERVER_SIDE_PACKAGE_CONTROL_FILE, namespace, script_locals)
+
+    seven.exec_file(
+        STAGE_SERVER_SIDE_PACKAGE_CONTROL_FILE,
+        globals_=namespace,
+        locals_=script_locals,
+    )
     ssp_url = script_locals['ssp_url']
     if not ssp_url:
         logging.error('Failed to stage SSP package: %s',
@@ -283,7 +289,7 @@ def _start_servod(machine):
             logging.warn('Starting servod is aborted. The dut\'s servo_host '
                          'attribute is not set to localhost.')
             return
-    except (urllib2.HTTPError, urllib2.URLError):
+    except (urllib.error.HTTPError, urllib.error.URLError):
         # Ignore error if RPC failed to get board
         logging.error('Failed to get board name from AFE. Start servod is '
                       'aborted')

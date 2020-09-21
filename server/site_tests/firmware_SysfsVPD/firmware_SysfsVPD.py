@@ -45,6 +45,24 @@ class firmware_SysfsVPD(FirmwareTest):
     def initialize(self, host, cmdline_args, dev_mode=False):
         """Initialize the test"""
         super(firmware_SysfsVPD, self).initialize(host, cmdline_args)
+
+        fwver = self.faft_client.system.run_shell_command_get_output(
+                'crossystem fwid')[0]
+        try:
+            fwver_major = int(fwver.split('.')[1])
+        except ValueError:
+            raise error.TestFail('Could not determine firmware version')
+        # Only run this test for 8846 or newer because previous firmware
+        # versions don't add the pointer to ACPI that Linux uses to look up
+        # cbmem which is then used to get the VPD.
+        # See b:156407743 for details.
+        self.disable_test = fwver_major < 8846
+
+        # Backup and mode switching is expensive so skip if we won't be
+        # doing anything anyway.
+        if self.disable_test:
+            raise error.TestNAError("Firmware too old for SysfsVPD")
+
         self.host = host
         self.backup_firmware()
         self.switcher.setup_mode('dev' if dev_mode else 'normal')

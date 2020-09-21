@@ -853,11 +853,12 @@ def get_internal_mic_node(host):
 
     @returns: The name of the expected internal microphone nodes.
     """
+    board_type = host.get_board_type()
     board = get_board_name(host)
     model = host.get_platform()
     sku = host.host_info_store.get().device_sku
 
-    return audio_spec.get_internal_mic_node(board, model, sku)
+    return audio_spec.get_internal_mic_node(board_type, board, model, sku)
 
 
 def get_plugged_internal_mics(host):
@@ -867,11 +868,12 @@ def get_plugged_internal_mics(host):
 
     @returns: A list of all the plugged internal microphone nodes.
     """
+    board_type = host.get_board_type()
     board = get_board_name(host)
     model = host.get_platform()
     sku = host.host_info_store.get().device_sku
 
-    return audio_spec.get_plugged_internal_mics(board, model, sku)
+    return audio_spec.get_plugged_internal_mics(board_type, board, model, sku)
 
 def get_headphone_node(host):
     """Return the expected headphone node.

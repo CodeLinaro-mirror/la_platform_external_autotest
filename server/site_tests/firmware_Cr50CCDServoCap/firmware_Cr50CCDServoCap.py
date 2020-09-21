@@ -112,7 +112,10 @@ class firmware_Cr50CCDServoCap(Cr50Test):
         if not self.cr50.servo_dts_mode_is_valid():
             raise error.TestNAError('Need working servo v4 DTS control')
 
-        self.check_servo_monitor()
+        if not self.cr50.check_servo_monitor():
+            raise error.TestNAError('Cannot run on device that does not '
+                                    'support servo dectection with '
+                                    'ec_uart_en:off/on')
         # Make sure cr50 is open with testlab enabled.
         self.fast_ccd_open(enable_testlab=True)
         if not self.cr50.testlab_is_on():
@@ -145,20 +148,6 @@ class firmware_Cr50CCDServoCap(Cr50Test):
         if isinstance(valid_state, list):
             return current_state in valid_state
         return current_state == valid_state
-
-
-    def check_servo_monitor(self):
-        """Make sure cr50 can detect servo connect and disconnect"""
-        # Detach ccd so EC uart won't interfere with servo detection
-        self.rdd('detach')
-        servo_detect_error = error.TestNAError("Cannot run on device that does "
-                "not support servo dectection with ec_uart_en:off/on")
-        self.fake_servo('off')
-        if not self.state_matches(self.cr50.get_ccdstate(), 'Servo', self.OFF):
-            raise servo_detect_error
-        self.fake_servo('on')
-        if not self.state_matches(self.cr50.get_ccdstate(), 'Servo', self.ON):
-            raise servo_detect_error
 
 
     def state_is_on(self, ccdstate, state_name):

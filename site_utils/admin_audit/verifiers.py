@@ -66,6 +66,9 @@ class VerifyDutStorage(base._BaseDUTVerifier):
             if state and set_label:
                 self._set_host_info_state(constants.DUT_STORAGE_STATE_PREFIX,
                                           state)
+                if state == constants.HW_STATE_NEED_REPLACEMENT:
+                    self.get_host().set_device_needs_replacement(
+                        resultdir=self.get_result_dir())
             self._state = state
         except Exception as e:
             raise base.AuditError('Exception during getting state of'
@@ -106,23 +109,27 @@ class VerifyServoUsb(base._BaseServoVerifier):
         if not self.servo_is_up():
             logging.info('Servo not initialized; Skipping the verification')
             return
-        servo = self.get_host().get_servo()
-        usb = servo.probe_host_usb_dev()
+        try:
+            usb = self.get_host()._probe_and_validate_usb_dev()
+            logging.debug('USB path: %s', usb)
+        except Exception as e:
+            usb = ''
+            logging.debug('(Not critical) %s', e)
         if not usb:
-            logging.error('Usb not detected')
-            metrics.Counter(
-                'chromeos/autotest/servo/usb/not_detected'
-                ).increment(fields={'host': self._dut_host.hostname})
-            self._set_state(constants.HW_STATE_NEED_REPLACEMENT)
+            self._set_state(constants.HW_STATE_NOT_DETECTED)
             return
 
+        servo = self.get_host().get_servo()
         state = None
         try:
             # The USB will be format during checking to the bad blocks.
             command = 'badblocks -sw -e 1 -t 0xff %s' % usb
             logging.info('Running command: %s', command)
             # The response is the list of bad block on USB.
-            result = servo.system_output(command)
+            # Extended time for 2 hour to run USB verification.
+            # TODO (otabek@) (b:153661014#comment2) bring F3 to run
+            # check faster if badblocks cannot finish in 2 hours.
+            result = servo.system_output(command, timeout=7200)
             logging.info("Check result: '%s'", result)
             if result:
                 # So has result is Bad and empty is Good.

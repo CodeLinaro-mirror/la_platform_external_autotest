@@ -35,7 +35,10 @@ class firmware_Cr50TpmManufactured(FirmwareTest):
         # We want to make this as accessible as possible and checking the
         # captured uart is the best way to do that.
         self._record_uart_capture()
-        with open(self.cr50_uart_file, 'r') as f:
+        cr50_uart_file = self.servo.get_uart_logfile('cr50')
+        if not cr50_uart_file:
+            raise error.TestNAError('No saved uart file')
+        with open(cr50_uart_file, 'r') as f:
             contents = f.read()
         logging.debug('Cr50 reset logs:\n%s', contents)
 

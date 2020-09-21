@@ -27,8 +27,13 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros import constants
 from autotest_lib.client.cros.udev_helpers import UdevadmInfo, UdevadmTrigger
 from autotest_lib.client.cros import xmlrpc_server
+from autotest_lib.client.cros.audio import (
+        audio_test_data as audio_test_data_module)
 from autotest_lib.client.cros.audio import check_quality
 from autotest_lib.client.cros.audio import cras_utils
+from autotest_lib.client.cros.audio.sox_utils import (
+        convert_format, convert_raw_file, get_file_length,
+        trim_silence_from_wav_file)
 from autotest_lib.client.cros.bluetooth import advertisement
 from autotest_lib.client.cros.bluetooth import output_recorder
 from autotest_lib.client.cros.power import sys_power
@@ -1672,20 +1677,6 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         @returns: True on success. False otherwise.
 
         """
-        device = self._find_device(address)
-        if not device:
-            logging.error('Device not found')
-            return False
-        if self._is_paired(device):
-            logging.info('Device is already paired')
-            return True
-
-        device_path = device.object_path
-        logging.info('Device %s is found.', device.object_path)
-
-        self._setup_pairing_agent(pin)
-        mainloop = gobject.MainLoop()
-
         def connect_reply():
             """Handler when connect succeeded."""
             logging.info('Device connected: %s', device_path)
@@ -1732,14 +1723,33 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             finally:
                 mainloop.quit()
 
+        device = self._find_device(address)
+        if not device:
+            logging.error('Device not found')
+            return False
+
+        device_path = device.object_path
+        logging.info('Device %s is found.', device.object_path)
+
+        self._setup_pairing_agent(pin)
+        mainloop = gobject.MainLoop()
+
         try:
-            # On success, this will also connect
-            device.Pair(reply_handler=pair_reply, error_handler=pair_error,
-                        timeout=timeout * 1000)
+            if not self._is_paired(device):
+                logging.info('Device is not paired. Pair and Connect.')
+                device.Pair(reply_handler=pair_reply, error_handler=pair_error,
+                            timeout=timeout * 1000)
+                mainloop.run()
+            elif not self._is_connected(device):
+                logging.info('Device is already paired. Connect.')
+                device.Connect(reply_handler=connect_reply,
+                               reply_error=connect_error,
+                               timeout=timeout * 1000)
+                mainloop.run()
         except Exception as e:
             logging.error('Exception %s in pair_legacy_device', e)
             return False
-        mainloop.run()
+
         return self._is_paired(device) and self._is_connected(device)
 
 
@@ -2053,6 +2063,23 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                     'reset_advertising: failed: %s', str(error)))
 
 
+    def create_audio_record_directory(self, audio_record_dir):
+        """Create the audio recording directory.
+
+        @param audio_record_dir: the audio recording directory
+
+        @returns: True on success. False otherwise.
+        """
+        try:
+            if not os.path.exists(audio_record_dir):
+                os.makedirs(audio_record_dir)
+            return True
+        except Exception as e:
+            logging.error('Failed to create %s on the DUT: %s',
+                          audio_record_dir, e)
+            return False
+
+
     def start_capturing_audio_subprocess(self, audio_data, recording_device):
         """Start capturing audio in a subprocess.
 
@@ -2079,6 +2106,30 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         return self._cras_test_client.stop_capturing_subprocess()
 
 
+    def _generate_playback_file(self, audio_data):
+        """Generate the playback file if it does not exist yet.
+
+        Some audio test files may be large. Generate them on the fly
+        to save the storage of the source tree.
+
+        @param audio_data: the audio test data
+        """
+        if not os.path.exists(audio_data['file']):
+            data_format = dict(file_type='raw', sample_format='S16_LE',
+                               channel=audio_data['channels'],
+                               rate=audio_data['rate'])
+
+            # Make the audio file a bit longer to handle any delay
+            # issue in capturing.
+            duration = audio_data['duration'] + 3
+            audio_test_data_module.GenerateAudioTestData(
+                    data_format=data_format,
+                    path=audio_data['file'],
+                    duration_secs=duration,
+                    frequencies=audio_data['frequencies'])
+            logging.debug("Raw file generated: %s", audio_data['file'])
+
+
     def start_playing_audio_subprocess(self, audio_data):
         """Start playing audio in a subprocess.
 
@@ -2087,6 +2138,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         @returns: True on success. False otherwise.
         """
         audio_data = json.loads(audio_data)
+        self._generate_playback_file(audio_data)
         try:
             return self._cras_test_client.start_playing_subprocess(
                     audio_data['file'],
@@ -2116,23 +2168,30 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         @returns: True on success. False otherwise.
         """
         audio_data = json.loads(audio_data)
+        self._generate_playback_file(audio_data)
         return self._cras_test_client.play(audio_data['file'],
                                            channels=audio_data['channels'],
                                            rate=audio_data['rate'],
                                            duration=audio_data['duration'])
 
 
-    def check_audio_frames_legitimacy(self, audio_test_data, recording_device):
+    def check_audio_frames_legitimacy(self, audio_test_data, recording_device,
+                                      recorded_file):
         """Get the number of frames in the recorded audio file.
 
         @param audio_test_data: the audio test data
         @param recording_device: which device recorded the audio,
                 possible values are 'recorded_by_dut' or 'recorded_by_peer'
+        @param recorded_file: the recorded file name
 
         @returns: True if audio frames are legitimate.
         """
-        audio_test_data = json.loads(audio_test_data)
-        recorded_filename = audio_test_data[recording_device]
+        if bool(recorded_file):
+            recorded_filename = recorded_file
+        else:
+            audio_test_data = json.loads(audio_test_data)
+            recorded_filename = audio_test_data[recording_device]
+
         if recorded_filename.endswith('.raw'):
             # Make sure that the recorded file does not contain all zeros.
             filesize = os.path.getsize(recorded_filename)
@@ -2146,21 +2205,120 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                 return False
         else:
             # The recorded wav file should not be empty.
-            wav_file = check_quality.WaveFile(audio_test_data[recording_device])
+            wav_file = check_quality.WaveFile(recorded_filename)
             return wav_file.get_number_frames() > 0
 
 
-    def get_primary_frequencies(self, audio_test_data, recording_device):
+    def convert_audio_sample_rate(self, input_file, out_file, test_data,
+                                  new_rate):
+        """Convert audio file to new sample rate.
+
+        @param input_file: Path to file to upsample.
+        @param out_file: Path to create upsampled file.
+        @param test_data: Dictionary with information about file.
+        @param new_rate: New rate to upsample file to.
+
+        @returns: True if upsampling succeeded, False otherwise.
+        """
+        test_data = json.loads(test_data)
+        logging.debug('Resampling file {} to new rate {}'.format(
+                      input_file, new_rate))
+
+        convert_format(input_file, test_data['channels'],
+                       test_data['bit_width'], test_data['rate'], out_file,
+                       test_data['channels'], test_data['bit_width'], new_rate,
+                       1.0, use_src_header=True, use_dst_header=True)
+
+        return os.path.isfile(out_file)
+
+
+    def trim_wav_file(self, in_file, out_file, new_duration, test_data,
+                      tolerance=0.1):
+        """Trim long file to desired length.
+
+        Trims audio file to length by cutting out silence from beginning and
+        end.
+
+        @param in_file: Path to audio file to be trimmed.
+        @param out_file: Path to trimmed audio file to create.
+        @param new_duration: A float representing the desired duration of
+                the resulting trimmed file.
+        @param test_data: Dictionary containing information about the test file.
+        @param tolerance: (optional) A float representing the allowable
+                difference between trimmed file length and desired duration
+
+        @returns: True if file was trimmed successfully, False otherwise.
+        """
+        test_data = json.loads(test_data)
+        trim_silence_from_wav_file(in_file, out_file, new_duration)
+        measured_length = get_file_length(out_file, test_data['channels'],
+                                     test_data['bit_width'], test_data['rate'])
+        return abs(measured_length - new_duration) <= tolerance
+
+
+    def unzip_audio_test_data(self, tar_path, data_dir):
+        """Unzip audio test data files.
+
+        @param tar_path: Path to audio test data tarball on DUT.
+        @oaram data_dir: Path to directory where to extract test data directory.
+
+        @returns: True if audio test data folder exists, False otherwise.
+        """
+        logging.debug('Downloading audio test data on DUT')
+        # creates path to dir to extract test data to by taking name of the
+        # tarball without the extension eg. <dir>/file.ext to data_dir/file/
+        audio_test_dir = os.path.join(
+                data_dir, os.path.split(tar_path)[1].split('.', 1)[0])
+
+        unzip_cmd = 'tar -xf {0} -C {1}'.format(tar_path, data_dir)
+
+        unzip_proc = subprocess.Popen(unzip_cmd.split(), stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE)
+        _, stderr = unzip_proc.communicate()
+
+        if stderr:
+            logging.error('Error occurred in unzipping audio data: {}'.format(
+                    str(stderr)))
+            return False
+
+        return unzip_proc.returncode == 0 and os.path.isdir(audio_test_dir)
+
+
+    def convert_raw_to_wav(self, input_file, output_file, test_data):
+        """Convert raw audio file to wav file.
+
+        @oaram input_file: the location of the raw file
+        @param output_file: the location to place the resulting wav file
+        @param test_data: the data for the file being converted
+
+        @returns: True if conversion was successful otherwise false
+        """
+        test_data = json.loads(test_data)
+        convert_raw_file(input_file, test_data['channels'],
+                         test_data['bit_width'], test_data['rate'], output_file)
+
+        return os.path.isfile(output_file)
+
+
+    def get_primary_frequencies(self, audio_test_data, recording_device,
+                                recorded_file):
         """Get primary frequencies of the audio test file.
 
         @param audio_test_data: the audio test data
         @param recording_device: which device recorded the audio,
                 possible values are 'recorded_by_dut' or 'recorded_by_peer'
+        @param recorded_file: the recorded file name
 
         @returns: a list of primary frequencies of channels in the audio file
         """
         audio_test_data = json.loads(audio_test_data)
-        args = CheckQualityArgsClass(filename=audio_test_data[recording_device],
+
+        if bool(recorded_file):
+            recorded_filename = recorded_file
+        else:
+            recorded_filename = audio_test_data[recording_device]
+
+        args = CheckQualityArgsClass(filename=recorded_filename,
                                      rate=audio_test_data['rate'],
                                      channel=audio_test_data['channels'],
                                      bit_width=16)
@@ -2244,6 +2402,26 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
 
 
     @xmlrpc_server.dbus_safe(None)
+    def select_output_node(self, node_type):
+        """Select the audio output node.
+
+        @param node_type: the node type of the Bluetooth peer device
+
+        @returns: True if the operation succeeds.
+        """
+        return cras_utils.set_single_selected_output_node(node_type)
+
+
+    @xmlrpc_server.dbus_safe(None)
+    def get_selected_output_device_type(self):
+        """Get the selected audio output node type.
+
+        @returns: the node type of the selected output device.
+        """
+        # Note: should convert the dbus.String to the regular string.
+        return str(cras_utils.get_selected_output_device_type())
+
+
     def get_gatt_attributes_map(self, address):
         """Return a JSON formatted string of the GATT attributes of a device,
         keyed by UUID
@@ -2884,13 +3062,71 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         if not expect_bt_wake and bt_caused_wake:
             raise sys_power.SuspendFailure('BT woke us unexpectedly')
 
-        if expect_bt_wake and not bt_caused_wake:
-            raise sys_power.SuspendFailure('BT should have woken us')
-
-        if bt_caused_wake and not early_wake:
-            raise sys_power.SuspendFailure('BT wake did not come early')
+        # TODO(b/160803597) - Uncomment when BT wake reason is correctly
+        # captured in powerd log.
+        #
+        # if expect_bt_wake and not bt_caused_wake:
+        #   raise sys_power.SuspendFailure('BT should have woken us')
+        #
+        # if bt_caused_wake and not early_wake:
+        #   raise sys_power.SuspendFailure('BT wake did not come early')
 
         return True
+
+
+    def get_wlan_vid_pid(self):
+        """ Return vendor id and product id of the wlan chip on BT/WiFi module
+
+        @returns: (vid,pid) on success; (None,None) on failure
+        """
+        vid = None
+        pid = None
+        path_template = '/sys/class/net/%s/device/'
+        for dev_name in ['wlan0', 'mlan0']:
+            if os.path.exists(path_template % dev_name):
+                path_v = path_template % dev_name + 'vendor'
+                path_d = path_template % dev_name + 'device'
+                logging.debug('Paths are %s %s', path_v, path_d)
+                try:
+                    vid = open(path_v).read().strip('\n')
+                    pid = open(path_d).read().strip('\n')
+                    break
+                except Exception as e:
+                    logging.error('Exception %s while reading vid/pid', str(e))
+        logging.debug('returning vid:%s pid:%s', vid, pid)
+        return (vid, pid)
+
+
+    def get_bt_module_name(self):
+        """ Return bluetooth module name for non-USB devices
+
+        @returns '' on failure. On success return chipset name, if found in
+                 dict.Otherwise it returns the raw string read.
+        """
+        # map the string read from device to chipset name
+        chipset_string_dict  = { 'qcom,wcn3991-bt\x00' : 'WCN3991'}
+
+        hci_device  = '/sys/class/bluetooth/hci0'
+        real_path = os.path.realpath(hci_device)
+
+        logging.debug('real path is %s', real_path)
+        if 'usb' in  real_path:
+            return ''
+
+        device_path = os.path.join(real_path, 'device', 'of_node', 'compatible')
+        try:
+            chipset_string = open(device_path).read()
+            logging.debug('read string %s from %s', chipset_string, device_path)
+        except Exception as e:
+            logging.error('Exception %s while reading from file', str(e),
+                          device_path)
+            return ''
+
+        if chipset_string in chipset_string_dict:
+            return chipset_string_dict[chipset_string]
+        else:
+            logging.debug("Chipset not known. Returning %s", chipset_string)
+            return chipset_string
 
 
 if __name__ == '__main__':

@@ -50,8 +50,6 @@ class firmware_Cr50OpenWhileAPOff(Cr50Test):
         self.cr50.send_command('ccd reset')
         # Set GscFullConsole to Always, so we can always use gpioset.
         self.cr50.set_cap('GscFullConsole', 'Always')
-
-        self.cr50.get_ccd_info()
         # You can only open cr50 from the console if a password is set. Set
         # a password, so we can use it to open cr50 while the AP is off.
         self.set_ccd_password(self.CCD_PASSWORD)

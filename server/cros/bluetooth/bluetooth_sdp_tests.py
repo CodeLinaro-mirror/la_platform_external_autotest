@@ -447,7 +447,7 @@ class bluetooth_SDP_ServiceAttributeRequest(bluetooth_SDP_Test,
 
         # Setup the tester as a generic computer.
         if not self.tester.setup('computer'):
-            raise error.TestFail('Tester could not be initialized')
+            raise error.TestNAError('Tester could not be initialized')
 
         self.correct_request_att_request_test()
 
@@ -633,7 +633,7 @@ class bluetooth_SDP_ServiceBrowse(bluetooth_SDP_Test,
 
         # Setup the tester as a generic computer.
         if not self.tester.setup('computer'):
-            raise error.TestFail('Tester could not be initialized')
+            raise error.TestNAError('Tester could not be initialized')
 
         # Since radio is involved, this test is not 100% reliable; instead we
         # repeat a few times until it succeeds.
@@ -1034,7 +1034,7 @@ class bluetooth_SDP_ServiceSearchAttributeRequest(bluetooth_SDP_Test,
 
         # Setup the tester as a generic computer.
         if not self.tester.setup('computer'):
-            raise error.TestFail('Tester could not be initialized')
+            raise error.TestNAError('Tester could not be initialized')
 
         # Since radio is involved, this test is not 100% reliable; instead we
         # repeat a few times until it succeeds.
@@ -1142,7 +1142,7 @@ class bluetooth_SDP_ServiceSearchRequestBasic(
 
         # Setup the tester as a generic computer.
         if not self.tester.setup('computer'):
-            raise error.TestFail('Tester could not be initialized')
+            raise error.TestNAError('Tester could not be initialized')
 
         # Create many fake services with the same Class ID
         for num in range(0, self.FAKE_SERVICES_CNT):

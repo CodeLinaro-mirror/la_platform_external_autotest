@@ -7,6 +7,8 @@ import time
 
 from autotest_lib.client.common_lib import error
 
+DEBOUNCE_STATE = 'debouncing'
+
 class ConnectionError(Exception):
     """Raised on an error of connecting DUT."""
     pass
@@ -529,46 +531,43 @@ class _BaseModeSwitcher(object):
         logging.info('-[ModeSwitcher]-[ start reboot_to_mode(%r, %r, %r) ]-',
                      to_mode, from_mode, wait_for_dut_up)
 
+        if from_mode:
+            note = 'reboot_to_mode: to=%s, from=%s' % (from_mode, to_mode)
+        else:
+            note = 'reboot_to_mode: to=%s' % to_mode
         if sync_before_boot:
-            self.faft_framework.blocking_sync(True)
+            lines = self.faft_client.system.run_shell_command_get_output(
+                'crossystem')
+            logging.debug('-[ModeSwitcher]- crossystem output:\n%s',
+                          '\n'.join(lines))
+            devsw_cur = self.faft_client.system.get_crossystem_value(
+                'devsw_cur')
+            note += ', devsw_cur=%s' % devsw_cur
+            self.faft_framework.blocking_sync(freeze_for_reset=True)
+        note += '.'
+
         if to_mode == 'rec':
             self.enable_rec_mode_and_reboot(usb_state='dut')
-            if wait_for_dut_up:
-                self.wait_for_client()
 
         elif to_mode == 'rec_force_mrc':
             self._enable_rec_mode_force_mrc_and_reboot(usb_state='dut')
-            if wait_for_dut_up:
-                self.wait_for_client()
 
         elif to_mode == 'dev':
-            if sync_before_boot:
-                lines = self.faft_client.system.run_shell_command_get_output(
-                        'crossystem')
-                logging.debug('-[ModeSwitcher]- crossystem output:\n%s',
-                              '\n'.join(lines))
-                devsw_cur = self.faft_client.system.get_crossystem_value(
-                        'devsw_cur')
-            else:
-                devsw_cur = 'N/A'
             self._enable_dev_mode_and_reboot()
             if wait_for_dut_up:
                 self.bypass_dev_mode()
-                try:
-                    self.wait_for_client()
-                except ConnectionError as e:
-                    raise ConnectionError('{} devsw_cur: {}'.format(e,
-                                                                    devsw_cur))
 
         elif to_mode == 'normal':
             self._enable_normal_mode_and_reboot()
-            if wait_for_dut_up:
-                self.wait_for_client()
 
         else:
             raise NotImplementedError(
                     'Not supported mode switching from %s to %s' %
                      (str(from_mode), to_mode))
+
+        if wait_for_dut_up:
+            self.wait_for_client(retry_power_on=True, note=note)
+
         logging.info('-[ModeSwitcher]-[ end reboot_to_mode(%r, %r, %r) ]-',
                      to_mode, from_mode, wait_for_dut_up)
 
@@ -593,7 +592,7 @@ class _BaseModeSwitcher(object):
                                       reboot_type)
         if sync_before_boot:
             boot_id = self.faft_framework.get_bootid()
-            self.faft_framework.blocking_sync(True)
+            self.faft_framework.blocking_sync(freeze_for_reset=True)
         logging.info("-[ModeSwitcher]-[ start simple_reboot(%r) ]-",
                      reboot_type)
         reboot_method()
@@ -752,16 +751,69 @@ class _BaseModeSwitcher(object):
         self.bypasser.trigger_dev_to_normal()
 
 
-    def wait_for_client(self, timeout=180):
+    def wait_for_client(self, timeout=180, retry_power_on=False,
+                        debounce_power_state=True, note=''):
         """Wait for the client to come back online.
 
         New remote processes will be launched if their used flags are enabled.
 
         @param timeout: Time in seconds to wait for the client SSH daemon to
                         come up.
+        @param retry_power_on: Try to power on the DUT if it isn't in S0.
+        @param debounce_power_state: Wait until power_state is the same two
+                                     times in a row to determine the actual
+                                     power_state.
+        @param note: Extra note to add to the end of the error text
         @raise ConnectionError: Failed to connect DUT.
         """
-        logging.info("-[FAFT]-[ start wait_for_client ]---")
+        logging.info("-[FAFT]-[ start wait_for_client(%ds) ]---",
+                     timeout if retry_power_on else 0)
+        # Wait for the system to be powered on before trying the network
+        # Skip "None" result because that indicates lack of EC or problem
+        # querying the power state.
+        current_timer = 0
+        self.faft_framework.wait_for('delay_powerinfo_stable',
+                                     'checking power state')
+        power_state = self.faft_framework.get_power_state()
+
+        # The device may transition between states. Wait until the power state
+        # is stable for two seconds before determining the state.
+        if debounce_power_state:
+            last_state = power_state
+            power_state = DEBOUNCE_STATE
+
+        while (timeout > current_timer and
+               power_state not in (self.faft_framework.POWER_STATE_S0, None)):
+                time.sleep(2)
+                current_timer += 2
+                power_state = self.faft_framework.get_power_state()
+
+                # If the state changed, debounce it.
+                if debounce_power_state and power_state != last_state:
+                    last_state = power_state
+                    power_state = DEBOUNCE_STATE
+
+                logging.info('power state: %s', power_state)
+
+                # Only power-on the device if it has been consistently out of
+                # S0.
+                if (retry_power_on and
+                    power_state not in (self.faft_framework.POWER_STATE_S0,
+                                        None, DEBOUNCE_STATE)):
+                    logging.info("-[FAFT]-[ retry powering on the DUT ]---")
+                    psc = self.servo.get_power_state_controller()
+                    psc.retry_power_on()
+
+        # Use the last state if the device didn't reach a stable state in
+        # timeout seconds.
+        if power_state == DEBOUNCE_STATE:
+            power_state = last_state
+        if power_state not in (self.faft_framework.POWER_STATE_S0, None):
+            msg = 'DUT unexpectedly down, power state is %s.' % power_state
+            if note:
+                msg += ' %s' % note
+            raise ConnectionError(msg)
+
         # Wait for the system to respond to ping before attempting ssh
         if not self.client_host.ping_wait_up(timeout):
             logging.warning("-[FAFT]-[ system did not respond to ping ]")
@@ -773,11 +825,12 @@ class _BaseModeSwitcher(object):
         else:
             logging.error('wait_for_client() timed out.')
             power_state = self.faft_framework.get_power_state()
+            msg = 'DUT is still down unexpectedly.'
             if power_state:
-                raise ConnectionError('DUT is still down unexpectedly.'
-                                      ' Power state: %s' % power_state)
-            else:
-                raise ConnectionError('DUT is still down unexpectedly')
+                msg += ' Power state: %s.' % power_state
+            if note:
+                msg += ' %s' % note
+            raise ConnectionError(msg)
         logging.info("-[FAFT]-[ end wait_for_client ]-----")
 
 
