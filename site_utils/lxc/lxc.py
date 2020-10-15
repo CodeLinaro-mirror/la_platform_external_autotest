@@ -41,6 +41,8 @@ def get_container_info(container_path, **filters):
     output = common_utils.run(cmd).stdout
     info_collection = []
 
+    logging.info('cmd [%s] output:\n%s', cmd, output)
+
     for line in output.splitlines()[1:]:
         # Only LXC 1.x has the second line of '-' as a separator.
         if line.startswith('------'):

@@ -161,7 +161,7 @@ class FlashromProgrammer(_BaseProgrammer):
             else:
                 preserved_sections = ro_vpd_section + rw_vpd_section
 
-            servo_v2_programmer = 'ft2232_spi:type=servo-v2'
+            servo_v2_programmer = 'ft2232_spi:type=google-servo-v2'
             servo_v3_programmer = 'linux_spi'
             servo_v4_with_micro_programmer = 'raiden_debug_spi'
             servo_v4_with_ccd_programmer = 'raiden_debug_spi:target=AP'

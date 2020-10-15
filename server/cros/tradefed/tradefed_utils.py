@@ -44,13 +44,18 @@ def lock(filename):
                 # team, break the lock and report a failure. This should fix
                 # the lock for following tests. If the failure affects more than
                 # one job look for a deadlock or dev server overload.
-                logging.error('Permanent lock failure. Trying to break lock.')
-                # TODO(ihf): Think how to do this cleaner without having a
-                # recursive lock breaking problem. We may have to kill every
-                # job that is currently waiting. The main goal though really is
-                # to have a cache that does not corrupt. And cache updates
-                # only happen once a month or so, everything else are reads.
-                filelock.break_lock()
+                age = filelock.age_of_lock()
+                logging.error('Permanent lock failure. Lock age = %d.', age)
+                # Breaking a lock is a destructive operation that causes
+                # abort of locking jobs, cleanup and redowloading of cache
+                # contents. When the error was due to overloaded server,
+                # it cause even more cascade of lock errors. Wait 4 hours
+                # before breaking the lock. Tasks inside the critical section
+                # is about downloading a few gigabytes of files. Taking 4 hours
+                # strongly implies the job had went wrong.
+                if age > 4 * 60 * 60:
+                    logging.error('Trying to break lock.')
+                    filelock.break_lock()
                 raise error.TestFail('Error: permanent cache lock failure.')
         else:
             logging.info('Acquired cache lock after %d attempts.', attempts)

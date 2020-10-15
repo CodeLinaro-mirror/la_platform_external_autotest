@@ -19,7 +19,7 @@ import socket
 import errno
 
 import common
-from autotest_lib.client.common_lib import enum
+from autotest_lib.client.common_lib import autotest_enum
 from autotest_lib.client.common_lib import logging_manager
 from autotest_lib.server import server_logging_config
 from autotest_lib.server.hosts import factory
@@ -27,7 +27,7 @@ from autotest_lib.server.hosts import servo_host
 
 import verifiers
 
-RETURN_CODES = enum.Enum(
+RETURN_CODES = autotest_enum.AutotestEnum(
         'OK',
         'VERIFY_FAILURE',
         'OTHER_FAILURES'

@@ -2,11 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import os
 import re
 
-import throttler_lib
-import utils_lib
+from . import throttler_lib
+from . import utils_lib
 
 
 # File extensions that can not be shrunk., as partial content will corrupt the
@@ -40,7 +44,7 @@ UNSHRINKABLE_PATH_PATTERNS = [
         # and trimming them further would be detrimental to debugging. If
         # they're too large, let other throttlers (e.g., zip_file_ or
         # delete_file_) deal with them.
-        # Only blacklist a few known-useful log_diff's.
+        # Only blocklist a few known-useful log_diff's.
         '/log_diff/messages$',
         '/log_diff/net\.log$',
         # Ramoops files are small but relatively important.

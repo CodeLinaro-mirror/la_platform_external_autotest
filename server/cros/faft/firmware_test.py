@@ -49,8 +49,9 @@ class FirmwareTest(test.test):
     """
     version = 1
 
-    # Set this to False in test classes that don't need working servo USB disk
-    needs_servo_usb = True
+    # Set this to True in test classes that need to boot from the USB stick.
+    # When True, initialize() will raise TestWarn if USB stick is marked bad.
+    NEEDS_SERVO_USB = False
 
     # Mapping of partition number of kernel and rootfs.
     KERNEL_MAP = {'a':'2', 'b':'4', '2':'2', '4':'4', '3':'2', '5':'4'}
@@ -101,6 +102,8 @@ class FirmwareTest(test.test):
 
     # CCD password used by tests.
     CCD_PASSWORD = 'Password'
+
+    RESPONSE_TIMEOUT = 180
 
     @classmethod
     def check_setup_done(cls, label):
@@ -169,8 +172,6 @@ class FirmwareTest(test.test):
 
         self._use_sync_script = global_config.global_config.get_config_value(
                 'CROS', 'enable_fs_sync_script', type=bool, default=False)
-        self._use_fsfreeze = global_config.global_config.get_config_value(
-                'CROS', 'enable_fs_sync_fsfreeze', type=bool, default=False)
 
         self.servo.initialize_dut()
         self.faft_client = RPCProxy(host)
@@ -213,7 +214,7 @@ class FirmwareTest(test.test):
                                       % (host.POWER_CONTROL_VALID_ARGS,
                                          self.power_control))
 
-        if self.needs_servo_usb and not host.is_servo_usb_usable():
+        if self.NEEDS_SERVO_USB and not host.is_servo_usb_usable():
             usb_state = host.get_servo_usb_state()
             raise error.TestWarn(
                     "Servo USB disk unusable (%s); canceling test." %
@@ -1227,13 +1228,6 @@ class FirmwareTest(test.test):
         self.clear_set_gbb_flags(0xffffffff, flags_to_set)
         self.mark_setup_done('gbb_flags')
 
-    def drop_backup_gbb_flags(self):
-        """Drops the backup GBB flags.
-
-        This can be used when a test intends to permanently change GBB flags.
-        """
-        self._backup_gbb_flags = None
-
     def _restore_gbb_flags(self):
         """Restore GBB flags to their original state."""
         if self._backup_gbb_flags is None:
@@ -1376,22 +1370,10 @@ class FirmwareTest(test.test):
         """
 
         if self._use_sync_script:
-            if freeze_for_reset and self._use_fsfreeze:
+            if freeze_for_reset:
                 self.faft_client.quit()
-                logging.info('Blocking sync and freeze')
-            elif freeze_for_reset:
-                self.faft_client.quit()
-                logging.info('Blocking sync for reset')
-            else:
-                logging.info('Blocking sync')
-
             try:
-                # client/bin is installed on the DUT as /usr/local/autotest/bin
-                sync_cmd = '/usr/local/autotest/bin/fs_sync.py'
-                if freeze_for_reset and self._use_fsfreeze:
-                    sync_cmd += ' --freeze'
-                self._client.run(sync_cmd)
-                return
+                return self._client.blocking_sync(freeze_for_reset)
             except (AttributeError, ImportError, error.AutoservRunError) as e:
                 logging.warn(
                         'Falling back to old sync method due to error: %s', e)
@@ -1701,7 +1683,6 @@ class FirmwareTest(test.test):
         @return: Current firmware checksums and fwids, as a dict
         """
 
-        # TODO(dgoyette): add a way to avoid hardcoding the keys (section names)
         current_checksums = {
             'VBOOTA': self.faft_client.bios.get_sig_sha('a'),
             'FVMAINA': self.faft_client.bios.get_body_sha('a'),
@@ -1777,15 +1758,13 @@ class FirmwareTest(test.test):
         """
         return bool(self._backup_firmware_identity)
 
-    def clear_saved_firmware(self):
-        """Clear the firmware saved by the method backup_firmware."""
-        self._backup_firmware_identity = {}
-
-    def restore_firmware(self, suffix='.original', restore_ec=True):
+    def restore_firmware(self, suffix='.original', restore_ec=True,
+                         reboot_ec=False):
         """Restore firmware from host in resultsdir.
 
         @param suffix: a string appended to backup file name
         @param restore_ec: True to restore the ec firmware; False not to do.
+        @param reboot_ec: True to reboot EC after restore (if it was restored)
         @return: True if firmware needed to be restored
         """
         if not self.is_firmware_changed():
@@ -1816,8 +1795,13 @@ class FirmwareTest(test.test):
             except error.GenericHostRunError:
                 logging.warn("DUT command failed during EC restore")
                 logging.debug("Full exception:", exc_info=True)
-
-        self.switcher.mode_aware_reboot()
+            if reboot_ec:
+                self.switcher.mode_aware_reboot(
+                        'custom', lambda: self.sync_and_ec_reboot('hard'))
+            else:
+                self.switcher.mode_aware_reboot()
+        else:
+            self.switcher.mode_aware_reboot()
         logging.info('Successfully restored firmware.')
         return True
 
@@ -1897,10 +1881,6 @@ class FirmwareTest(test.test):
         @return: True if the kernel is saved; otherwise, False.
         """
         return len(self._backup_kernel_sha) != 0
-
-    def clear_saved_kernel(self):
-        """Clear the kernel saved by backup_kernel()."""
-        self._backup_kernel_sha = dict()
 
     def restore_kernel(self, suffix='.original'):
         """Restore kernel from host in resultsdir.

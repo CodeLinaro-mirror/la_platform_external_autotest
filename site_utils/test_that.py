@@ -44,6 +44,24 @@ def _get_board_from_host(remote):
     return board
 
 
+def _get_model_from_host(remote):
+    """Get the model of the remote host.
+
+    @param remote: string representing the IP of the remote host.
+
+    @return: A string representing the board of the remote host.
+   """
+    logging.info('Model unspecified, attempting to determine model from host.')
+    host = factory.create_host(remote)
+    try:
+        model = host.get_platform()
+    except error.AutoservRunError:
+        raise test_runner_utils.TestThatRunError(
+                'Cannot determine model, please specify a --model option.')
+    logging.info('Detected host model: %s', model)
+    return model
+
+
 def validate_arguments(arguments):
     """
     Validates parsed arguments.
@@ -107,9 +125,11 @@ def _parse_arguments_internal(argv):
                         action='store',
                         help='Board for which the test will run. '
                              'Default: %(default)s')
-    parser.add_argument('-m', '--model', metavar='MODEL', default='',
+    parser.add_argument('-m',
+                        '--model',
+                        metavar='MODEL',
                         help='Specific model the test will run against. '
-                             'Matches the model:FAKE_MODEL label for the host.')
+                        'Matches the model:FAKE_MODEL label for the host.')
     parser.add_argument('-i', '--build', metavar='BUILD',
                         default=test_runner_utils.NO_BUILD,
                         help='Build to test. Device will be reimaged if '
@@ -242,13 +262,17 @@ def _main_for_local_run(argv, arguments):
                                        arguments.ssh_private_key)
     arguments.results_dir = results_directory
 
-    # If the board has not been specified through --board, and is not set in the
-    # default_board file, determine the board by ssh-ing into the host. Also
-    # prepend it to argv so we can re-use it when we run test_that from the
-    # sysroot.
+    # If the board and/or model is not specified through --board and/or
+    # --model, and is not set in the default_board file, determine the board by
+    # ssh-ing into the host. Also prepend it to argv so we can re-use it when we
+    # run test_that from the sysroot.
     if arguments.board is None:
         arguments.board = _get_board_from_host(arguments.remote)
         argv = ['--board=%s' % (arguments.board,)] + argv
+
+    if arguments.model is None:
+        arguments.model = _get_model_from_host(arguments.remote)
+        argv = ['--model=%s' % (arguments.model, )] + argv
 
     if arguments.autotest_dir:
         autotest_path = arguments.autotest_dir
@@ -290,6 +314,7 @@ def _main_for_local_run(argv, arguments):
                 arguments.remote,
                 build=arguments.build,
                 board=arguments.board,
+                model=arguments.model,
                 args=arguments.args,
                 ignore_deps=not arguments.enforce_deps,
                 results_directory=results_directory,

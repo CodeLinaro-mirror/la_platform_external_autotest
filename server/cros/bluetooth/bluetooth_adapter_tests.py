@@ -1,15 +1,18 @@
+# Lint as: python2, python3
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Server side bluetooth adapter subtests."""
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 from datetime import datetime, timedelta
 import errno
 import functools
-import httplib
+import six.moves.http_client
 import inspect
 import logging
 import multiprocessing
@@ -19,14 +22,14 @@ from socket import error as SocketError
 import threading
 import time
 
-import bluetooth_peer_update
-import bluetooth_test_utils
-
+import common
 from autotest_lib.client.bin import utils
 from autotest_lib.client.bin.input import input_event_recorder as recorder
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros.bluetooth import bluetooth_socket
 from autotest_lib.client.cros.chameleon import chameleon
+from autotest_lib.server.cros.bluetooth import bluetooth_peer_update
+from autotest_lib.server.cros.bluetooth import bluetooth_test_utils
 from autotest_lib.server import test
 
 from autotest_lib.client.bin.input.linux_input import (
@@ -36,6 +39,10 @@ from autotest_lib.client.bin.input.linux_input import (
 from autotest_lib.server.cros.bluetooth.bluetooth_gatt_client_utils import (
         GATT_ClientFacade, GATT_Application, GATT_HIDApplication)
 from autotest_lib.server.cros.multimedia import remote_facade_factory
+import six
+from six.moves import map
+from six.moves import range
+from six.moves import zip
 
 
 Event = recorder.Event
@@ -56,6 +63,12 @@ CHIPSET_TO_VIDPID = { 'BRCM-4354':[('0x002d','0x4354')],
                       'Intel-AC7265':[('0x8086','0x095a'),  # StP2
                                       ('0x8086','0x095b')],
                       'Realtek-RTL8822C-USB':[('0x10ec','0xc822')] }
+
+# We have a number of chipsets that are no longer supported. Known issues
+# related to firmware will be ignored on these devices (b/169328792).
+UNSUPPORTED_CHIPSETS = [
+        'BRCM-4354', 'MVL-8897', 'MVL-8997', 'Intel-AC7260', 'Intel-AC7265'
+]
 
 # Location of data traces relative to this (bluetooth_adapter_tests.py) file
 BT_ADAPTER_TEST_PATH = os.path.dirname(__file__)
@@ -526,6 +539,9 @@ def test_retry_and_log(test_method_or_retry_flag):
                             test_method.__name__, str(instance.results))
                     logging.error(fail_msg)
                     instance.fails.append(fail_msg)
+            # Do not catch TestError or TestNA since those are intended to skip
+            # out of the testcase entirely (and shouldn't indicate a single
+            # expression failed)
             except error.TestFail as e:
                 fail_msg = '[--- failed {} ({})]'.format(
                         test_method.__name__, str(e))
@@ -642,7 +658,10 @@ class BluetoothAdapterTests(test.test):
             'GAP_UUID': '00001800-0000-1000-8000-00805f9b34fb'}
 
     # Board list for name/ID test check. These devices don't need to be tested
-    REFERENCE_BOARDS = ['rambi', 'nyan', 'oak', 'reef', 'yorp', 'bip']
+    REFERENCE_BOARDS = [
+            'rambi', 'nyan', 'oak', 'reef', 'yorp', 'bip', 'volteer',
+            'volteer2'
+    ]
 
     # Path for btmon logs
     BTMON_DIR_LOG_PATH = '/var/log/btmon'
@@ -788,7 +807,7 @@ class BluetoothAdapterTests(test.test):
             if str(errno.ECONNRESET) not in str(e):
                 raise
 
-        except httplib.BadStatusLine as e:
+        except six.moves.http_client.BadStatusLine as e:
             # BadStatusLine occurs occasionally when chameleon
             # is restarted. We ignore it here
             logging.error('Ignoring badstatusline exception')
@@ -1331,6 +1350,28 @@ class BluetoothAdapterTests(test.test):
         return any(self.results.values())
 
     @test_retry_and_log(False)
+    def test_device_wake_allowed(self, device_address):
+        """Test that given device can wake the system."""
+        self.results = {
+                'Wake allowed':
+                self.bluetooth_facade.get_device_property(
+                        device_address, 'WakeAllowed')
+        }
+
+        return all(self.results.values())
+
+    @test_retry_and_log(False)
+    def test_device_wake_not_allowed(self, device_address):
+        """Test that given device cannot wake the system."""
+        self.results = {
+                'Wake not allowed':
+                not self.bluetooth_facade.get_device_property(
+                        device_address, 'WakeAllowed')
+        }
+
+        return all(self.results.values())
+
+    @test_retry_and_log(False)
     def test_adapter_set_wake_disabled(self):
         """Disable wake and verify it was written. """
         success = self.bluetooth_facade.set_wake_enabled(False)
@@ -1419,6 +1460,38 @@ class BluetoothAdapterTests(test.test):
         }
         return all(self.results.values())
 
+
+    @test_retry_and_log(False)
+    def test_is_adapter_valid(self):
+        """Verify the bluetooth adapter is retrievable at test start
+
+        @raises: error.TestNAError if we fail to retrieve the adapter on
+                    an unsupported chipset
+                 error.TestFail if we fail to retrieve the adapter on any other
+                    platform
+
+        @returns: True if the adapter was located properly
+        """
+
+        if not self.bluetooth_facade.has_adapter():
+            logging.error('No adapter available, rebooting to recover')
+
+            self.reboot()
+
+            chipset = self.get_chipset_name()
+
+            if not chipset:
+                raise error.TestFail('Unknown adapter is missing')
+
+            # A missing adapter is a rare but known issue on several platforms
+            # that have no vendor support (b/169328792). Since there is no fix
+            # possible, we forgive these failures by raising a TestNA.
+            if chipset in UNSUPPORTED_CHIPSETS:
+                raise error.TestNAError('Unsupported adapter is missing')
+
+            raise error.TestFail('Adapter is missing')
+
+        return True
 
     @test_retry_and_log
     def test_UUIDs(self):
@@ -2540,11 +2613,11 @@ class BluetoothAdapterTests(test.test):
         expected_timespan = duration * number_advertisements
 
         check_duration = True
-        for manufacturer_id, values in adv_timestamps.iteritems():
+        for manufacturer_id, values in six.iteritems(adv_timestamps):
             logging.debug('manufacturer_id %s: %s', manufacturer_id, values)
             timespans = [values[i] - values[i - 1]
-                         for i in xrange(1, len(values))]
-            errors = [timespans[i] for i in xrange(len(timespans))
+                         for i in range(1, len(values))]
+            errors = [timespans[i] for i in range(len(timespans))
                       if not within_tolerance(expected_timespan, timespans[i])]
             logging.debug('timespans: %s', timespans)
             logging.debug('errors: %s', errors)
@@ -2616,6 +2689,64 @@ class BluetoothAdapterTests(test.test):
         return min_adv_interval_ms_found, max_adv_interval_ms_found
 
 
+    def _verify_scan_response_data(self, adv_data):
+        """Verify advertisement's scan response data is correct
+
+        Unlike the other fixed advertising fields, Scan Response Data is set
+        in a tag-value data format. This function helps verify the data format
+        for specific tag values to ensure scan response was propagated correctly
+
+        @param adv_data: Dictionary defining advertising fields to be registered
+                with bluetoothd daemon's RegisterAdvertisement interface
+
+        @returns: True if all Registered Scan Response tags were located in
+                btmon trace, False otherwise
+        """
+
+        scan_rsp = adv_data.get('ScanResponseData')
+        if not scan_rsp:
+            return True
+
+        for tag, data in scan_rsp.items():
+            # Validate 16 bit Service Data tag
+            if int(tag, 16) == 0x16:
+                # First two bytes of data are endian-corrected UUID, followed
+                # by service data
+                uuid = '%x%x' % (data[1], data[0])
+                data_str = ''.join(
+                        ['%02x' % data[i] for i in range(2, len(data))])
+
+                # Service data has the following format in btmon trace:
+                # Service Data (UUID 0xfef3): 01020304
+                search_str = 'Service Data (UUID 0x{}): {}'.format(
+                        uuid, data_str)
+
+                # Fail if data can't be located in btmon trace
+                if not self.bluetooth_le_facade.btmon_find(search_str):
+                    return False
+
+        return True
+
+    def test_advertising_flags(self, flag_strs=[]):
+        """Verify that advertising flags are set in registered advertisement
+
+        Each flag has a specific descriptor that appears in btmon trace. This
+        simple checker validates that the desired flag descriptors appear in
+        btmon trace when the advertisement was registered.
+
+        @param flag_strs: Flag string descriptors expected in btmon trace
+
+        #returns: True if all flag descriptors were located, False otherwise
+        """
+
+        for flag_str in flag_strs:
+            if not self.bluetooth_le_facade.btmon_find(flag_str):
+                logging.info(
+                        'Flag descriptor not located: {}'.format(flag_str))
+                return False
+
+        return True
+
     def ext_adv_enabled(self):
         """ Check if platform supports extended advertising
 
@@ -2665,6 +2796,7 @@ class BluetoothAdapterTests(test.test):
 
         # Verify that the manufacturer data could be found.
         manufacturer_data = advertisement_data.get('ManufacturerData', '')
+        manufacturer_data_found = True
         for manufacturer_id in manufacturer_data:
             # The 'not assigned' text below means the manufacturer id
             # is not actually assigned to any real manufacturer.
@@ -2691,7 +2823,7 @@ class BluetoothAdapterTests(test.test):
             # A service data looks like
             #   Service Data (UUID 0x9999): 0001020304
             # while uuid is '9999' and data is [0x00, 0x01, 0x02, 0x03, 0x04]
-            data_str = ''.join(map(lambda n: '%02x' % n, data))
+            data_str = ''.join(['%02x' % n for n in data])
             if not self.bluetooth_le_facade.btmon_find(
                     'Service Data (UUID 0x%s): %s' % (uuid, data_str)):
                 service_data_found = False
@@ -2701,6 +2833,8 @@ class BluetoothAdapterTests(test.test):
         min_adv_interval_ms_found, max_adv_interval_ms_found = (
                 self._verify_advertising_intervals(min_adv_interval_ms,
                                                    max_adv_interval_ms))
+
+        scan_rsp_correct = self._verify_scan_response_data(advertisement_data)
 
         # Verify advertising is enabled.
         advertising_enabled = self.bluetooth_le_facade.btmon_find(
@@ -2713,6 +2847,7 @@ class BluetoothAdapterTests(test.test):
                 'service_data_found': service_data_found,
                 'min_adv_interval_ms_found': min_adv_interval_ms_found,
                 'max_adv_interval_ms_found': max_adv_interval_ms_found,
+                'scan_rsp_correct': scan_rsp_correct,
                 'advertising_enabled': advertising_enabled,
         }
         return all(self.results.values())
@@ -3257,7 +3392,7 @@ class BluetoothAdapterTests(test.test):
         return True
 
 
-    def _record_input_events(self, device, gesture):
+    def _record_input_events(self, device, gesture, address=None):
         """Record the input events.
 
         @param device: the bluetooth HID device.
@@ -3266,8 +3401,7 @@ class BluetoothAdapterTests(test.test):
         @returns: the input events received on the DUT.
 
         """
-        self.input_facade.initialize_input_recorder(device.name,
-                                                    uniq=device.address)
+        self.input_facade.initialize_input_recorder(device.name, uniq=address)
         self.input_facade.start_input_recorder(device.name)
         time.sleep(self.HID_REPORT_SLEEP_SECS)
         gesture()
@@ -3301,7 +3435,9 @@ class BluetoothAdapterTests(test.test):
         else:
             raise error.TestError('Button (%s) is not valid.' % button)
 
-        actual_events = self._record_input_events(device, gesture)
+        actual_events = self._record_input_events(device,
+                                                  gesture,
+                                                  address=device.address)
 
         linux_input_button = {'LEFT': BTN_LEFT, 'RIGHT': BTN_RIGHT}
         expected_events = [
@@ -3315,8 +3451,8 @@ class BluetoothAdapterTests(test.test):
                 recorder.SYN_EVENT]
 
         self.results = {
-                'actual_events': map(str, actual_events),
-                'expected_events': map(str, expected_events)}
+                'actual_events': list(map(str, actual_events)),
+                'expected_events': list(map(str, expected_events))}
         return actual_events == expected_events
 
 
@@ -3358,15 +3494,17 @@ class BluetoothAdapterTests(test.test):
 
         """
         gesture = lambda: device.Move(delta_x, delta_y)
-        actual_events = self._record_input_events(device, gesture)
+        actual_events = self._record_input_events(device,
+                                                  gesture,
+                                                  address=device.address)
 
         events_x = [Event(EV_REL, REL_X, delta_x)] if delta_x else []
         events_y = [Event(EV_REL, REL_Y, delta_y)] if delta_y else []
         expected_events = events_x + events_y + [recorder.SYN_EVENT]
 
         self.results = {
-                'actual_events': map(str, actual_events),
-                'expected_events': map(str, expected_events)}
+                'actual_events': list(map(str, actual_events)),
+                'expected_events': list(map(str, expected_events))}
         return actual_events == expected_events
 
 
@@ -3424,7 +3562,9 @@ class BluetoothAdapterTests(test.test):
 
         """
         gesture = lambda: device.Scroll(units)
-        recorded_events = self._record_input_events(device, gesture)
+        recorded_events = self._record_input_events(device,
+                                                    gesture,
+                                                    address=device.address)
 
         # Since high-speed scrolling events are inserted after they are passed
         # through bluetooth module, we ignore these events since they are
@@ -3434,8 +3574,8 @@ class BluetoothAdapterTests(test.test):
 
         expected_events = [Event(EV_REL, REL_WHEEL, units), recorder.SYN_EVENT]
         self.results = {
-                'scroll_events': map(str, scroll_events),
-                'expected_events': map(str, expected_events)}
+                'scroll_events': list(map(str, scroll_events)),
+                'expected_events': list(map(str, expected_events))}
         return scroll_events == expected_events
 
 
@@ -3491,7 +3631,9 @@ class BluetoothAdapterTests(test.test):
 
         """
         gesture = lambda: device.ClickAndDrag(delta_x, delta_y)
-        actual_events = self._record_input_events(device, gesture)
+        actual_events = self._record_input_events(device,
+                                                  gesture,
+                                                  address=device.address)
 
         button = 'LEFT'
         expected_events = (
@@ -3509,8 +3651,8 @@ class BluetoothAdapterTests(test.test):
                  recorder.SYN_EVENT])
 
         self.results = {
-                'actual_events': map(str, actual_events),
-                'expected_events': map(str, expected_events)}
+                'actual_events': list(map(str, actual_events)),
+                'expected_events': list(map(str, expected_events))}
         return actual_events == expected_events
 
 
@@ -3533,7 +3675,9 @@ class BluetoothAdapterTests(test.test):
 
         gesture = lambda: device.KeyboardSendString(string_to_send)
 
-        actual_events = self._record_input_events(device, gesture)
+        actual_events = self._record_input_events(device,
+                                                  gesture,
+                                                  address=device.address)
 
         resulting_string = bluetooth_test_utils.reconstruct_string(
                            actual_events)
@@ -3571,7 +3715,9 @@ class BluetoothAdapterTests(test.test):
 
         # Create and run this trace as a gesture
         gesture = lambda: device.KeyboardSendTrace(input_scan_codes)
-        rec_events = self._record_input_events(device, gesture)
+        rec_events = self._record_input_events(device,
+                                               gesture,
+                                               address=device.address)
 
         # Filter out any input events that were not from the keyboard
         rec_key_events = [ev for ev in rec_events if ev.type == EV_KEY]
@@ -3709,6 +3855,10 @@ class BluetoothAdapterTests(test.test):
         @returns: The test results.
 
         """
+        if object_path is None:
+            logging.error('Invalid object path')
+            return False
+
         start_notify = self.bluetooth_facade.start_notify(
             object_path, cccd_value)
         is_notifying = self._wait_for_condition(
@@ -3731,6 +3881,10 @@ class BluetoothAdapterTests(test.test):
         @returns: The test results.
 
         """
+        if object_path is None:
+            logging.error('Invalid object path')
+            return False
+
         stop_notify = self.bluetooth_facade.stop_notify(object_path)
         is_not_notifying = self._wait_for_condition(
             lambda: not self.bluetooth_facade.is_notifying(
@@ -3800,21 +3954,28 @@ class BluetoothAdapterTests(test.test):
 
 
     @test_retry_and_log(False)
-    def test_wait_for_resume(
-        self, boot_id, suspend, resume_timeout, fail_on_timeout=False):
+    def test_wait_for_resume(self,
+                             boot_id,
+                             suspend,
+                             resume_timeout,
+                             resume_slack=RESUME_DELTA,
+                             fail_on_timeout=False,
+                             fail_early_wake=False):
         """ Wait for device to resume from suspend.
 
         @param boot_id: Current boot id
         @param suspend: Sub-process that does actual suspend call.
         @param resume_timeout: Expect device to resume in given timeout.
+        @param resume_slack: Allow some slack on resume timeout.
         @param fail_on_timeout: Fails if timeout is reached
+        @param fail_early_wake: Fails if timeout isn't reached
 
         @return True if suspend sub-process completed without error.
         """
         success = True
 
         # Sometimes it takes longer to resume from suspend; give some leeway
-        resume_timeout = resume_timeout + RESUME_DELTA
+        resume_timeout = resume_timeout + resume_slack
         try:
             start = datetime.now()
 
@@ -3827,7 +3988,9 @@ class BluetoothAdapterTests(test.test):
             # a failure here instead by checking against the start time.
             delta = datetime.now() - start
             if delta > timedelta(seconds=resume_timeout):
-                success = False if fail_on_timeout else True
+                success = not fail_on_timeout
+            else:
+                success = not fail_early_wake
         except error.TestFail as e:
             success = False
             logging.error('wait_for_resume: %s', e)
@@ -3865,8 +4028,12 @@ class BluetoothAdapterTests(test.test):
         return proc
 
 
-    def device_connect_async(self, device_type, device, adapter_address,
-                             delay_wake=1):
+    def device_connect_async(self,
+                             device_type,
+                             device,
+                             adapter_address,
+                             delay_wake=1,
+                             should_wake=True):
         """ Connects peer device asynchronously with DUT.
 
         This function uses a thread instead of a subprocess so that the test
@@ -3877,6 +4044,7 @@ class BluetoothAdapterTests(test.test):
         @param device: the meta device with the peer device
         @param adapter_address: the address of the adapter
         @param delay_wake: delay wakeup by this many seconds
+        @param should_wake: Should this cause a wakeup?
 
         @returns threading.Thread object with device connect task
         """
@@ -3890,7 +4058,13 @@ class BluetoothAdapterTests(test.test):
             else:
                 # Classic requires peer to initiate a connection to wake up the
                 # dut
-                self.test_connection_by_device_only(device, adapter_address)
+                connect_func = self.test_connection_by_device_only
+                if should_wake:
+                    connect_func(device, adapter_address)
+                else:
+                    # If we're not expecting wake, this connect attempt will
+                    # probably fail.
+                    self.ignore_failure(connect_func, device, adapter_address)
 
         thread = threading.Thread(target=_action_device_connect)
         return thread
@@ -3902,7 +4076,8 @@ class BluetoothAdapterTests(test.test):
 
         @param device_address: Address of peripheral device
         """
-        device_found = self.bluetooth_facade.wait_for_uhid_device(device_address)
+        device_found = self.bluetooth_facade.wait_for_hid_device(
+                device_address)
         self.results = {
                 'device_found': device_found
         }

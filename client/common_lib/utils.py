@@ -122,7 +122,7 @@ def _join_with_nickname(base_string, nickname):
 
 
 # TODO: Cleanup and possibly eliminate |unjoinable|, which is only used in our
-# master-ssh connection process, while fixing underlying
+# ssh connection process, while fixing underlying
 # semantics problem in BgJob. See crbug.com/279312
 class BgJob(object):
     def __init__(self, command, stdout_tee=None, stderr_tee=None, verbose=True,
@@ -173,7 +173,7 @@ class BgJob(object):
         @param unjoinable: Optional bool, default False.
                            This should be True for BgJobs running in background
                            and will never be joined with join_bg_jobs(), such
-                           as the master-ssh connection. Instead, it is
+                           as the ssh connection. Instead, it is
                            caller's responsibility to terminate the subprocess
                            correctly, e.g. by calling nuke_subprocess().
                            This will lead that, calling join_bg_jobs(),
@@ -226,6 +226,12 @@ class BgJob(object):
             executable = '/bin/bash'
 
         with open('/dev/null', 'w') as devnull:
+            # TODO b/169678884. close_fds was reverted to False, as there is a
+            # large performance hit due to a docker + python2 bug. Eventually
+            # update (everything) to python3. Moving this call to subprocess32
+            # is also an option, but will require new packages to the drone/lxc
+            # containers.
+
             self.sp = subprocess.Popen(
                 command,
                 stdin=stdin,
@@ -233,8 +239,7 @@ class BgJob(object):
                 stderr=devnull if stderr_tee == DEVNULL else subprocess.PIPE,
                 preexec_fn=self._reset_sigpipe,
                 shell=shell, executable=executable,
-                env=env, close_fds=True)
-
+                env=env, close_fds=False)
         self._cleanup_called = False
         self._stdout_file = (
             None if stdout_tee == DEVNULL else StringIO.StringIO())
@@ -1986,6 +1991,16 @@ def ping(host,
                  ignore_timeout=ignore_timeout,
                  stderr_tee=TEE_TO_LOGS)
 
+    # Sometimes the ping process times out even though a deadline is set. If
+    # ignore_timeout is set, it will fall through to here instead of raising.
+    if result is None:
+        logging.debug('Unusual ping result (timeout)')
+        # From man ping: If a packet count and deadline are both specified, and
+        # fewer than count packets are received by the time the deadline has
+        # arrived, it will also exit with code 1. On other error it exits with
+        # code 2.
+        return 1 if deadline and tries else 2
+
     rc = result.exit_status
     lines = result.stdout.splitlines()
 
@@ -3134,6 +3149,8 @@ def get_mount_info(process='self', mount_point=None):
     """
     with open('/proc/{}/mountinfo'.format(process)) as f:
         for line in f.readlines():
+            # TODO b:169251326 terms below are set outside of this codebase
+            # and should be updated when possible. ("master" -> "main")
             # These lines are formatted according to the proc(5) manpage.
             # Sample line:
             # 36 35 98:0 /mnt1 /mnt2 rw,noatime master:1 - ext3 /dev/root \

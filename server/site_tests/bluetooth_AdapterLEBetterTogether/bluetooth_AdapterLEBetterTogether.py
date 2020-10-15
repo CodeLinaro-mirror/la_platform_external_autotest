@@ -48,7 +48,11 @@ class bluetooth_AdapterLEBetterTogether(BluetoothAdapterBetterTogether):
         self.smart_unlock_test()
 
 
-    def run_once(self, host, num_iterations=1, test_name=None,
+    def run_once(self,
+                 host,
+                 num_iterations=1,
+                 btpeer_args=[],
+                 test_name=None,
                  flag='Quick Sanity'):
         """Run the batch of Bluetooth LE tests for Better Together
 
@@ -58,6 +62,9 @@ class bluetooth_AdapterLEBetterTogether(BluetoothAdapterBetterTogether):
         """
 
         # Initialize and run the test batch or the requested specific test
-        self.quick_test_init(host, use_btpeer=True, flag=flag)
+        self.quick_test_init(host,
+                             use_btpeer=True,
+                             flag=flag,
+                             btpeer_args=btpeer_args)
         self.better_together_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

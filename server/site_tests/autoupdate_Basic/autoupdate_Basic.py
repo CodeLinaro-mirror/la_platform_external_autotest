@@ -10,7 +10,7 @@ class autoupdate_Basic(update_engine_test.UpdateEngineTest):
     """Performs a simple AU using Nebraska."""
     version = 1
 
-    def run_once(self, job_repo_url=None):
+    def run_once(self, full_payload, job_repo_url=None):
         """
         Performs a N-to-N autoupdate with Nebraska.
 
@@ -20,7 +20,7 @@ class autoupdate_Basic(update_engine_test.UpdateEngineTest):
         """
         # Get a payload to use for the test.
         payload_url = self.get_payload_for_nebraska(job_repo_url,
-                                                    full_payload=False)
+                                                    full_payload=full_payload)
 
         # Record DUT state before the update.
         active, inactive = kernel_utils.get_kernel_state(self._host)

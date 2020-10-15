@@ -15,6 +15,8 @@ tast.py server test. It:
 - performs actions specified by the config file.
 """
 
+from __future__ import print_function
+
 import argparse
 import json
 import os

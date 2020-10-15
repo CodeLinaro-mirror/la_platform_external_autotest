@@ -1,13 +1,18 @@
+# Lint as: python2, python3
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 import functools
 import logging
 import pprint
 import re
+import six
+from six.moves import range
 import time
 
 from autotest_lib.client.bin import utils
@@ -25,7 +30,7 @@ def dts_control_command(func):
         if instance._servo.dts_mode_is_valid():
             return func(instance, *args, **kwargs)
         logging.info('Servo setup does not support DTS mode. ignoring %s',
-                     func.func_name)
+                     func.__name__)
     return wrapper
 
 
@@ -220,10 +225,10 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         @param cap_dict: A dictionary with the capability as key and the desired
                          setting as values
         """
-        for cap, config in cap_dict.iteritems():
+        for cap, config in six.iteritems(cap_dict):
             self.send_command('ccd set %s %s' % (cap, config))
         current_cap_settings = self.get_cap_dict(info=self.CAP_SETTING)
-        for cap, config in cap_dict.iteritems():
+        for cap, config in six.iteritems(cap_dict):
             if (current_cap_settings[cap].lower() !=
                 config.lower()):
                 raise error.TestFail('Failed to set %s to %s' % (cap, config))
@@ -240,7 +245,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         """
         in_factory_mode = True
         is_reset = True
-        for cap, cap_info in cap_dict.iteritems():
+        for cap, cap_info in six.iteritems(cap_dict):
             cap_setting = cap_info[self.CAP_SETTING]
             if cap_setting != 'Always':
                 in_factory_mode = False

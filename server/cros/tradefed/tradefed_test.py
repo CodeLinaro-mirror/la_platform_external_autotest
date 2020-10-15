@@ -142,14 +142,19 @@ class TradefedTest(test.test):
 
         # If use_jdk9 is set true, use jdk9 than default jdk8.
         if use_jdk9:
-            logging.info('Using JDK9')
-            try:
-                os.environ['JAVA_HOME'] = '/usr/lib/jvm/jdk-9.0.4'
-                os.environ['PATH'] = os.environ['JAVA_HOME']\
-                                  + '/bin:' + os.environ['PATH']
-                logging.info(subprocess.check_output(['java', '-version'], stderr=subprocess.STDOUT))
-            except OSError:
-                logging.error('Can\'t change current PATH directory')
+            if utils.is_in_container() and not client_utils.is_moblab():
+                logging.info('Lab: switching to JDK9')
+                try:
+                    os.environ['JAVA_HOME'] = '/usr/lib/jvm/jdk-9.0.4'
+                    os.environ['PATH'] = os.environ['JAVA_HOME']\
+                                      + '/bin:' + os.environ['PATH']
+                    logging.info(
+                            subprocess.check_output(['java', '-version'],
+                                                    stderr=subprocess.STDOUT))
+                except OSError:
+                    logging.error('Can\'t change current PATH directory')
+            else:
+                logging.info('Non-lab environment: should be using JDK9+')
 
         # Install the tradefed bundle.
         bundle_install_path = self._install_bundle(
@@ -639,7 +644,13 @@ class TradefedTest(test.test):
             logging.info('Not in lab. Downloading %s directly to %s.',
                          uri, output)
             # b/17445576: gsutil rsync of individual files is not implemented.
-            utils.run('gsutil', args=('cp', uri, output), verbose=True)
+            res = utils.run('gsutil',
+                            args=('cp', uri, output),
+                            verbose=True,
+                            ignore_status=True)
+            if not res or res.exit_status != 0:
+                logging.warning('Retrying download...')
+                utils.run('gsutil', args=('cp', uri, output), verbose=True)
             return output
 
         # We are in the moblab. Because the machine cannot access the storage
@@ -1230,6 +1241,15 @@ class TradefedTest(test.test):
             steps += 1
             keep_media = media_asset and media_asset.uri and steps >= 1
             self._run_commands(login_precondition_commands, ignore_status=True)
+            # TODO(kinaba): Make it a general config (per-model choice
+            # of tablet,clamshell,default) if the code below works.
+            if utils.is_in_container() and not client_utils.is_moblab():
+                # Force all hatch devices run the test in laptop mode,
+                # regardless of their physical placement.
+                if board == 'hatch' or board == 'hatch-arc-r':
+                    self._run_commands(
+                        ['inject_powerd_input_event --code=tablet --value=0'],
+                        ignore_status=True)
             with login.login_chrome(
                     hosts=self._hosts,
                     board=board,

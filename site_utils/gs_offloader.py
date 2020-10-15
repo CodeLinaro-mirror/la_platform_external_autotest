@@ -419,11 +419,12 @@ def _upload_cts_testresult(dir_entry, multiprocessing):
                             (gts_v2_path, CTS_V2_RESULT_PATTERN)]:
             for path in glob.glob(result_path):
                 try:
-                    # CTS results from bvt-arc suites need to be only uploaded
-                    # to APFE from its designated gs bucket for early EDI
-                    # entries in APFE. These results need to copied only into
-                    # APFE bucket. Copying to results bucket is not required.
-                    if 'bvt-arc' in path:
+                    # CTS results from bvt-arc and bvt-perbuild suites need
+                    # to be only uploaded to APFE from its designated gs bucket
+                    # for early EDI entries in APFE. These results need to
+                    # copied only into APFE bucket. Copying to results bucket
+                    # is not required.
+                    if 'bvt-arc' in path or 'bvt-perbuild' in path:
                         _upload_files(host, path, result_pattern,
                                       multiprocessing,
                                       None,
@@ -463,6 +464,7 @@ def _is_valid_result(build, result_pattern, suite):
             suite.startswith('arc-cts') or
             suite.startswith('arc-gts') or
             suite.startswith('bvt-arc') or
+            suite.startswith('bvt-perbuild') or
             suite.startswith('cros_test_platform') or
             suite.startswith('test_that_wrapper')):
         return False

@@ -5,9 +5,6 @@
 """This file provides core logic for labstation verify/repair process."""
 
 import logging
-import sys
-
-import six
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.server import afe_utils
@@ -240,8 +237,15 @@ class LabstationHost(base_servohost.BaseServoHost):
 
     def update_cros_version_label(self):
         """Update cros-version label on labstation"""
-        afe_utils.add_provision_labels(self, self.VERSION_PREFIX,
-                                       self.get_full_release_path())
+        image_name = self.get_full_release_path()
+        if not image_name:
+            logging.info('Could not get labstation version, it could be'
+                         ' the labstation is running a customized image.')
+            info = self.host_info_store.get()
+            info.clear_version_labels(version_prefix=self.VERSION_PREFIX)
+            self.host_info_store.commit(info)
+            return
+        afe_utils.add_provision_labels(self, self.VERSION_PREFIX, image_name)
 
 
     def _validate_uptime(self):

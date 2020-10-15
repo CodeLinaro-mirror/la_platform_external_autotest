@@ -4,6 +4,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import base64
 import collections
 from datetime import datetime
@@ -25,6 +29,7 @@ from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib.cros.bluetooth import bluetooth_socket
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros import constants
+from autotest_lib.client.cros import dbus_util
 from autotest_lib.client.cros.udev_helpers import UdevadmInfo, UdevadmTrigger
 from autotest_lib.client.cros import xmlrpc_server
 from autotest_lib.client.cros.audio import (
@@ -35,8 +40,12 @@ from autotest_lib.client.cros.audio.sox_utils import (
         convert_format, convert_raw_file, get_file_length,
         trim_silence_from_wav_file)
 from autotest_lib.client.cros.bluetooth import advertisement
+from autotest_lib.client.cros.bluetooth import adv_monitor_helper
 from autotest_lib.client.cros.bluetooth import output_recorder
 from autotest_lib.client.cros.power import sys_power
+import six
+from six.moves import map
+from six.moves import range
 
 
 CheckQualityArgsClass = collections.namedtuple(
@@ -168,6 +177,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
     BLUEZ_GATT_CHAR_IFACE = 'org.bluez.GattCharacteristic1'
     BLUEZ_GATT_DESC_IFACE = 'org.bluez.GattDescriptor1'
     BLUEZ_LE_ADVERTISING_MANAGER_IFACE = 'org.bluez.LEAdvertisingManager1'
+    BLUEZ_ADV_MONITOR_MANAGER_IFACE = 'org.bluez.AdvertisementMonitorManager1'
     BLUEZ_AGENT_MANAGER_PATH = '/org/bluez'
     BLUEZ_AGENT_MANAGER_IFACE = 'org.bluez.AgentManager1'
     BLUEZ_PROFILE_MANAGER_PATH = '/org/bluez'
@@ -184,9 +194,9 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
     # after reset.
     ADAPTER_TIMEOUT = 30
 
-    # How long to wait for uhid device
-    UHID_TIMEOUT = 15
-    UHID_CHECK_SECS = 2
+    # How long to wait for hid device
+    HID_TIMEOUT = 15
+    HID_CHECK_SECS = 2
 
     # How long we should wait for property update signal before we cancel it
     PROPERTY_UPDATE_TIMEOUT_MILLI_SECS = 5000
@@ -229,6 +239,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         self._update_bluez()
         self._update_adapter()
         self._update_advertising()
+        self._update_adv_monitor_manager()
 
         # The agent to handle pin code request, which will be
         # created when user calls pair_legacy_device method.
@@ -247,6 +258,12 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         self._timeout_id = 0
         self._signal_watch = None
         self._dbus_mainloop = gobject.MainLoop()
+
+        # Create an Advertisement Monitor Helper App Manager instance.
+        self.advmon_appmgr = adv_monitor_helper.AdvMonitorAppMgr(
+                self._system_bus,
+                self._dbus_mainloop,
+                self._adv_monitor_manager)
 
 
     @xmlrpc_server.dbus_safe(False)
@@ -304,11 +321,11 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             @returns : 'vid:pid' or None
             """
             try:
-                for i in output.split('\n'):
-                    if 'Network controller' in i:
+                for i in output.split(b'\n'):
+                    if 'Network controller' in i.decode('utf-8'):
                         logging.debug('Got line %s', i)
-                        if 'Intel Corporation' in i:
-                            return i.split('[')[2].split(']')[0]
+                        if 'Intel Corporation' in i.decode('utf-8'):
+                            return i.split(b'[')[2].split(b']')[0]
                 return None
             except Exception as e:
                 logging.debug('Exception in _get_lspci_vidpid %s', str(e))
@@ -320,7 +337,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             vid_pid = _get_lspci_vid_pid(output)
             logging.debug("got vid_pid %s", vid_pid)
             if vid_pid is not None:
-                if vid_pid in vid_pid_dict.values():
+                if vid_pid in list(vid_pid_dict.values()):
                     return True
         except Exception as e:
             logging.error('is_intel_adapter  failed with %s', cmd, str(e))
@@ -393,8 +410,9 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
               'hcitool 01 8C FC 00 28 01 ===> 58 <===='
 
            """
-            last_line  = [i for i in ddc_read_result.split('\n') if i != ''][-1]
-            last_byte = [i for i in last_line.split(' ') if i != ''][-1]
+            last_line  = [i for i in ddc_read_result.strip().split(b'\n')
+                          if i != ''][-1]
+            last_byte = [i for i in last_line.split(b' ') if i != ''][-1]
             processed_byte= hex(int(last_byte, 16) | 0x40).split('0x')[1]
             cmd = ddc_write_cmd_prefix + ' ' + processed_byte
             logging.debug('ddc_write_cmd is %s', cmd)
@@ -726,6 +744,33 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         return bool(self._advertising)
 
 
+    def _update_adv_monitor_manager(self):
+        """Store a D-Bus proxy for the local advertisement monitor manager.
+
+        This may be called repeatedly in a loop until True is returned;
+        otherwise we wait for bluetoothd to start. After bluetoothd starts, we
+        check the existence of a local adapter and proceed to get the
+        advertisement monitor manager interface.
+
+        Since not all devices will have adapters, this will also return True
+        in the case where there is no adapter.
+
+        @return True on success, including if there is no local adapter,
+                False otherwise.
+
+        """
+        self._adv_monitor_manager = None
+        if self._bluez is None:
+            logging.warning('Bluez not found!')
+            return False
+        if not self._has_adapter:
+            logging.debug('Device has no adapter; returning without '
+                          'advertisement monitor manager')
+            return True
+        self._adv_monitor_manager = self._get_adv_monitor_manager()
+        return bool(self._adv_monitor_manager)
+
+
     @xmlrpc_server.dbus_safe(False)
     def _get_adapter(self):
         """Get the D-Bus proxy for the local adapter.
@@ -735,8 +780,8 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         """
         objects = self._bluez.GetManagedObjects(
                 dbus_interface=self.BLUEZ_MANAGER_IFACE)
-        for path, ifaces in objects.iteritems():
-            logging.debug('%s -> %r', path, ifaces.keys())
+        for path, ifaces in six.iteritems(objects):
+            logging.debug('%s -> %r', path, list(ifaces.keys()))
             if self.BLUEZ_ADAPTER_IFACE in ifaces:
                 logging.debug('using adapter %s', path)
                 adapter = self._system_bus.get_object(
@@ -757,6 +802,17 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         """
         return dbus.Interface(self._adapter,
                               self.BLUEZ_LE_ADVERTISING_MANAGER_IFACE)
+
+
+    @xmlrpc_server.dbus_safe(False)
+    def _get_adv_monitor_manager(self):
+        """Get the D-Bus proxy for the local advertisement monitor manager.
+
+        @return the advertisement monitor manager interface object.
+
+        """
+        return dbus.Interface(self._adapter,
+                              self.BLUEZ_ADV_MONITOR_MANAGER_IFACE)
 
 
     @xmlrpc_server.dbus_safe(False)
@@ -819,37 +875,42 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         """
         return self._set_wake_enabled(value)
 
-    def wait_for_uhid_device(self, device_address):
-        """Waits for uhid device with given device address.
+    def wait_for_hid_device(self, device_address):
+        """Waits for hid device with given device address.
 
         Args:
             device_address: Peripheral address
         """
-        def match_uhid_to_device(uhidpath, device_address):
-            """Check if given uhid syspath is for the given device address """
+
+        def match_hid_to_device(hidpath, device_address):
+            """Check if given hid syspath is for the given device address """
             # If the syspath has a uniq property that matches the peripheral
             # device's address, then it has matched
-            props = UdevadmInfo.GetProperties(uhidpath)
+            props = UdevadmInfo.GetProperties(hidpath)
             if props.get('uniq', '').lower() == device_address.lower():
-                logging.info('Found uhid device for address {} at {}'.format(
-                        device_address, uhidpath))
+                logging.info('Found hid device for address {} at {}'.format(
+                        device_address, hidpath))
                 return True
+            else:
+                logging.info('Path {} is not right device.'.format(hidpath))
 
             return False
 
         start = datetime.now()
 
-        # Keep scanning udev for correct uhid device
-        while (datetime.now() - start).seconds <= self.UHID_TIMEOUT:
+        # Keep scanning udev for correct hid device
+        while (datetime.now() - start).seconds <= self.HID_TIMEOUT:
             existing_inputs = UdevadmTrigger(
                     subsystem_match=['input']).DryRun()
             for entry in existing_inputs:
-                logging.info('udevadm trigger entry: {}'.format(entry))
-                if 'uhid' in entry and match_uhid_to_device(
-                        entry, device_address):
+                bt_hid = any([t in entry for t in ['uhid', 'hci']])
+                logging.info('udevadm trigger entry is {}: {}'.format(
+                        bt_hid, entry))
+
+                if bt_hid and match_hid_to_device(entry, device_address):
                     return True
 
-            time.sleep(self.UHID_CHECK_SECS)
+            time.sleep(self.HID_CHECK_SECS)
 
         return False
 
@@ -875,7 +936,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                 dbus_interface=self.BLUEZ_MANAGER_IFACE, byte_arrays=True)
 
         devices = []
-        for path, ifaces in objects.iteritems():
+        for path, ifaces in six.iteritems(objects):
             if self.BLUEZ_DEVICE_IFACE in ifaces:
                 devices.append(objects[path][self.BLUEZ_DEVICE_IFACE])
 
@@ -1036,7 +1097,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             the value False otherwise.
 
         """
-        if self._bluez:
+        if self._bluez and self._adapter:
             objects = self._bluez.GetManagedObjects(
                     dbus_interface=self.BLUEZ_MANAGER_IFACE)
             props = objects[self._adapter.object_path][self.BLUEZ_ADAPTER_IFACE]
@@ -1067,7 +1128,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             return None
 
         # Walk up parents and try to find one with 'power/wakeup'
-        for _ in xrange(search_at.count('/') - 1):
+        for _ in range(search_at.count('/') - 1):
             search_at = os.path.normpath(os.path.join(search_at, '..'))
             try:
                 path = os.path.join(search_at, 'power', 'wakeup')
@@ -1213,7 +1274,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         objects = self._bluez.GetManagedObjects(
                 dbus_interface=self.BLUEZ_MANAGER_IFACE, byte_arrays=True)
         devices = []
-        for path, ifaces in objects.iteritems():
+        for path, ifaces in six.iteritems(objects):
             if self.BLUEZ_DEVICE_IFACE in ifaces:
                 devices.append(objects[path][self.BLUEZ_DEVICE_IFACE])
         return devices
@@ -1508,7 +1569,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                 logging.info('Device found at {}'.format(device_path))
                 return device_path
 
-        except dbus.exceptions.DBusException, e:
+        except dbus.exceptions.DBusException as e:
             log_msg = 'Couldn\'t reach device: {}'.format(str(e))
             logging.debug(log_msg)
 
@@ -1539,7 +1600,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                             self.AGENT_PATH)
             agent_manager.RegisterAgent(agent_obj,
                                         dbus.String(self._capability))
-        except dbus.exceptions.DBusException, e:
+        except dbus.exceptions.DBusException as e:
             if e.get_dbus_name() == self.BLUEZ_ERROR_ALREADY_EXISTS:
                 logging.info('Unregistering old agent and registering the new')
                 agent_manager.UnregisterAgent(agent_obj)
@@ -1948,6 +2009,140 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         self._dbus_mainloop.run()
 
         return self.dbus_cb_msg
+
+
+    def advmon_read_supported_types(self):
+        """Read the Advertisement Monitor supported monitor types.
+
+        Reads the value of 'SupportedMonitorTypes' property of the
+        AdvertisementMonitorManager1 interface on the adapter.
+
+        @returns: the list of the supported monitor types.
+
+        """
+        types = self._adapter.Get(self.BLUEZ_ADV_MONITOR_MANAGER_IFACE,
+                                  'SupportedMonitorTypes',
+                                  dbus_interface=self.DBUS_PROP_IFACE)
+        return dbus_util.dbus2primitive(types)
+
+
+    def advmon_read_supported_features(self):
+        """Read the Advertisement Monitor supported features.
+
+        Reads the value of 'SupportedFeatures' property of the
+        AdvertisementMonitorManager1 interface on the adapter.
+
+        @returns: the list of the supported features.
+
+        """
+        features = self._adapter.Get(self.BLUEZ_ADV_MONITOR_MANAGER_IFACE,
+                                     'SupportedFeatures',
+                                     dbus_interface=self.DBUS_PROP_IFACE)
+        return dbus_util.dbus2primitive(features)
+
+
+    def advmon_create_app(self):
+        """Create an advertisement monitor app.
+
+        @returns: app id, once the app is created.
+
+        """
+        return self.advmon_appmgr.create_app()
+
+
+    def advmon_exit_app(self, app_id):
+        """Exit an advertisement monitor app.
+
+        @param app_id: the app id.
+
+        @returns: True on success, False otherwise.
+
+        """
+        return self.advmon_appmgr.exit_app(app_id)
+
+
+    def advmon_kill_app(self, app_id):
+        """Kill an advertisement monitor app by sending SIGKILL.
+
+        @param app_id: the app id.
+
+        @returns: True on success, False otherwise.
+
+        """
+        return self.advmon_appmgr.kill_app(app_id)
+
+
+    def advmon_register_app(self, app_id):
+        """Register an advertisement monitor app.
+
+        @param app_id: the app id.
+
+        @returns: True on success, False otherwise.
+
+        """
+        return self.advmon_appmgr.register_app(app_id)
+
+
+    def advmon_unregister_app(self, app_id):
+        """Unregister an advertisement monitor app.
+
+        @param app_id: the app id.
+
+        @returns: True on success, False otherwise.
+
+        """
+        return self.advmon_appmgr.unregister_app(app_id)
+
+
+    def advmon_add_monitor(self, app_id, monitor_data):
+        """Create an Advertisement Monitor object.
+
+        @param app_id: the app id.
+        @param monitor_data: the list containing monitor type, RSSI filter
+                             values and patterns.
+
+        @returns: monitor id, once the monitor is created, None otherwise.
+
+        """
+        return self.advmon_appmgr.add_monitor(app_id, monitor_data)
+
+
+    def advmon_remove_monitor(self, app_id, monitor_id):
+        """Remove the Advertisement Monitor object.
+
+        @param app_id: the app id.
+        @param monitor_id: the monitor id.
+
+        @returns: True on success, False otherwise.
+
+        """
+        return self.advmon_appmgr.remove_monitor(app_id, monitor_id)
+
+
+    def advmon_get_event_count(self, app_id, monitor_id, event):
+        """Read the count of a particular event on the given monitor.
+
+        @param app_id: the app id.
+        @param monitor_id: the monitor id.
+        @param event: name of the specific event or 'All' for all events.
+
+        @returns: count of the specific event or dict of counts of all events.
+
+        """
+        return self.advmon_appmgr.get_event_count(app_id, monitor_id, event)
+
+
+    def advmon_reset_event_count(self, app_id, monitor_id, event):
+        """Reset the count of a particular event on the given monitor.
+
+        @param app_id: the app id.
+        @param monitor_id: the monitor id.
+        @param event: name of the specific event or 'All' for all events.
+
+        @returns: True on success, False otherwise.
+
+        """
+        return self.advmon_appmgr.reset_event_count(app_id, monitor_id, event)
 
 
     def register_advertisement(self, advertisement_data):
@@ -2600,7 +2795,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         attr_map = {}
 
         if object_path:
-            for path, ifaces in objects.iteritems():
+            for path, ifaces in six.iteritems(objects):
                 if (dbus_interface in ifaces and
                   path.startswith(object_path)):
                     uuid = ifaces[dbus_interface]['UUID'].lower()
@@ -2679,7 +2874,7 @@ class BluetoothDeviceXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
             objects = self._bluez.GetManagedObjects(
                 dbus_interface=self.BLUEZ_MANAGER_IFACE, byte_arrays=False)
 
-            for path, ifaces in objects.iteritems():
+            for path, ifaces in six.iteritems(objects):
                 if (self.BLUEZ_GATT_CHAR_IFACE in ifaces and
                     path.startswith(device_path)):
                     uuid = ifaces[self.BLUEZ_GATT_CHAR_IFACE]['UUID'].lower()

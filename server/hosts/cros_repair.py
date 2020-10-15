@@ -10,6 +10,7 @@ from __future__ import print_function
 import json
 import logging
 import time
+import math
 
 import common
 from autotest_lib.client.common_lib import error
@@ -34,12 +35,15 @@ try:
 except ImportError:
     metrics = utils.metrics_mock
 
-
 from chromite.lib import timeout_util
 
 MIN_BATTERY_LEVEL = 50.0
 
-DEFAULT_SERVO_RESET_TRIGGER = ('ssh', 'stop_start_ui')
+DEFAULT_SERVO_RESET_TRIGGER = (
+        'ssh',
+        'stop_start_ui',
+        'power',
+)
 
 
 # _DEV_MODE_ALLOW_POOLS - The set of pools that are allowed to be
@@ -92,6 +96,7 @@ _CROS_PROVISION_TRIGGERS = ('power', 'rwfw', 'python', 'cros',
 _CROS_POWERWASH_TRIGGERS = ('tpm', 'good_provision', 'ext4',)
 _CROS_USB_TRIGGERS = ('ssh', 'writable', 'stop_start_ui',)
 _JETSTREAM_USB_TRIGGERS = ('ssh', 'writable',)
+_CROS_FIRMWARE_TRIGGERS = ('ssh', )
 _CROS_USB_DEPENDENCIES = ('usb_drive', )
 
 
@@ -100,6 +105,9 @@ class ACPowerVerifier(hosts.Verifier):
 
     # Battery discharging state in power_supply_info file.
     BATTERY_DISCHARGING = 'Discharging'
+    # Power controller can discharge battery any time till 90% for any model.
+    # Setting level to 85% in case we have wearout of it.
+    BATTERY_DISCHARGE_MIN = 85
 
     @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
@@ -129,7 +137,21 @@ class ACPowerVerifier(hosts.Verifier):
     def _validate_battery(self, host, info):
         try:
             charging_state = info['Battery']['state']
-            if charging_state == self.BATTERY_DISCHARGING:
+            battery_level = float(info['Battery']['percentage'])
+
+            # Collect info to determine which battery level is better to call
+            # as MIN_BATTERY_LEVEL for DUTs in the lab.
+            battery_level_by_10 = int(math.floor(battery_level / 10.0)) * 10
+            metrics_data = {
+                    'model': host.host_info_store.get().model,
+                    'level': battery_level_by_10,
+                    'mode': charging_state
+            }
+            metrics.Counter('chromeos/autotest/battery/state').increment(
+                    fields=metrics_data)
+
+            if (charging_state == self.BATTERY_DISCHARGING
+                        and battery_level < self.BATTERY_DISCHARGE_MIN):
                 logging.debug('Try to fix discharging state of the battery. '
                               'Possible that a test left wrong state.')
                 # Here is the chance that battery is discharging because
@@ -137,19 +159,20 @@ class ACPowerVerifier(hosts.Verifier):
                 # We are going to try to fix it by set charging to normal.
                 host.run('ectool chargecontrol normal', ignore_status=True)
                 # wait to change state.
-                time.sleep(5)
+                time.sleep(10)
                 info = self._load_info(host)
                 charging_state = info['Battery']['state']
                 fixed = charging_state != self.BATTERY_DISCHARGING
                 # TODO (@otabek) remove metrics after research
-                metrics_data = {'host': host.hostname,
-                                'model': host.host_info_store.get().model,
-                                'fixed': fixed}
+                logging.debug('Fixed battery discharge mode.')
+                metrics_data = {
+                        'model': host.host_info_store.get().model,
+                        'fixed': fixed
+                }
                 metrics.Counter(
                     'chromeos/autotest/repair/chargecontrol_fixed'
                 ).increment(fields=metrics_data)
 
-            battery_level = float(info['Battery']['percentage'])
             if (battery_level < MIN_BATTERY_LEVEL and
                 charging_state == self.BATTERY_DISCHARGING):
                 # TODO(@xianuowang) remove metrics here once we have device
@@ -623,6 +646,7 @@ class ServoUSBDriveVerifier(hosts.Verifier):
     USB is not marked for replacement.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         # pylint: disable=missing-docstring
         usb_dev = ''
@@ -646,12 +670,11 @@ class ServoUSBDriveVerifier(hosts.Verifier):
             raise hosts.AutoservNonCriticalVerifyError(
                     'USB-drive marked for replacement')
 
-        if usb_state and usb_state == audit_const.HW_STATE_NOT_DETECTED:
-            # if previous state was NOT_DETECTED and now we can detect the USB
-            # then set state to UNKNOWN for future audit.
-            host_info.set_version_label(audit_const.SERVO_USB_STATE_PREFIX,
-                                        audit_const.HW_STATE_UNKNOWN)
-            host.host_info_store.commit(host_info)
+        # The USB-drive detected and was not mark for replacement.
+        # Set as normal for future audit.
+        host_info.set_version_label(audit_const.SERVO_USB_STATE_PREFIX,
+                                    audit_const.HW_STATE_NORMAL)
+        host.host_info_store.commit(host_info)
 
     def _is_applicable(self, host):
         if host.servo:
@@ -676,7 +699,12 @@ class _ResetRepairAction(hosts.RepairAction):
 
     def _check_reset_success(self, host):
         """Check whether reset succeeded, and gather logs if possible."""
+        # Waiting to boot device after repair action.
         if host.wait_up(host.BOOT_TIMEOUT):
+            if host.get_verifier_state('ssh') == hosts.VERIFY_SUCCESS:
+                logging.debug(
+                        'Skip collection logs due DUT was sshable before')
+                return
             try:
                 # Collect logs once we regain ssh access before
                 # clobbering them.
@@ -690,8 +718,8 @@ class _ResetRepairAction(hosts.RepairAction):
                                   self.tag)
             return
         raise hosts.AutoservRepairError(
-                'Host %s is still offline after %s.' %
-                (host.hostname, self.tag), 'failed_to_boot_after_' + self.tag)
+                'Host %s is offline after %s.' % (host.hostname, self.tag),
+                'failed_to_boot_after_' + self.tag)
 
 
 class ServoSysRqRepair(_ResetRepairAction):
@@ -703,6 +731,7 @@ class ServoSysRqRepair(_ResetRepairAction):
     the kernel logs in console ramoops.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # pylint: disable=missing-docstring
         repair_utils.require_servo(host, ignore_state=True)
@@ -729,6 +758,7 @@ class ServoSysRqRepair(_ResetRepairAction):
 class ServoResetRepair(_ResetRepairAction):
     """Repair a Chrome device by resetting it with servo."""
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # pylint: disable=missing-docstring
         repair_utils.require_servo(host, ignore_state=True)
@@ -748,6 +778,7 @@ class ServoCr50RebootRepair(_ResetRepairAction):
     Reset cr50 which is ec+ccd reset.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # pylint: disable=missing-docstring
         try:
@@ -775,6 +806,7 @@ class ServoCr50RebootRepair(_ResetRepairAction):
 class DevDefaultBootRepair(hosts.RepairAction):
     """Repair a CrOS target by setting dev_default_boot to 'disk'"""
 
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # pylint: disable=missing-docstring
         host.run('crossystem dev_default_boot=disk', ignore_status=True)
@@ -788,6 +820,7 @@ class DevDefaultBootRepair(hosts.RepairAction):
 class CrosRebootRepair(repair_utils.RebootRepair):
     """Repair a CrOS target by clearing dev mode and rebooting it."""
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # pylint: disable=missing-docstring
         # N.B. We need to reboot regardless of whether clearing
@@ -814,6 +847,8 @@ class LabelCleanupRepair(hosts.RepairAction):
     # cached result from it's trigger list. (example: trigger verifiers can
     # be access via self._trigger_list, and we can tell which verifier failed
     # by check Verifier._is_good() method.)
+
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         logging.info('Removing %s label from the host', host.VERSION_PREFIX)
         info = host.host_info_store.get()
@@ -829,6 +864,7 @@ class LabelCleanupRepair(hosts.RepairAction):
 class EnrollmentCleanupRepair(hosts.RepairAction):
     """Cleanup enrollment state on ChromeOS device"""
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # Reset VPD enrollment state.
         host.run('/usr/sbin/update_rw_vpd check_enrollment 0')
@@ -856,6 +892,7 @@ class ProvisionRepair(hosts.RepairAction):
     standard procedure for installing a new test image via quick provision.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.LONG_REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # pylint: disable=missing-docstring
         image_name = host.get_cros_repair_image_name()
@@ -880,6 +917,7 @@ class PowerWashRepair(ProvisionRepair):
     for `ProvisionRepair`.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.LONG_REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # pylint: disable=missing-docstring
         host.run('echo "fast safe" > '
@@ -901,6 +939,10 @@ class ServoInstallRepair(hosts.RepairAction):
     from servo-attached USB storage.
     """
 
+    # Timeout value for this repair action is specially configured as we need
+    # stage image to usb drive, install chromeos image and potentially run
+    # bad block check on usb drive.
+    @timeout_util.TimeoutDecorator(60 * 60)
     def repair(self, host):
         # pylint: disable=missing-docstring
         repair_utils.require_servo(host)
@@ -925,6 +967,7 @@ class ServoInstallRepair(hosts.RepairAction):
 class JetstreamTpmRepair(hosts.RepairAction):
     """Repair by resetting TPM and rebooting."""
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # pylint: disable=missing-docstring
         host.run('rm -f /var/cache/ap/setup-network', ignore_status=True)
@@ -943,6 +986,7 @@ class JetstreamTpmRepair(hosts.RepairAction):
 class JetstreamServiceRepair(hosts.RepairAction):
     """Repair by restarting Jetstream services."""
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         # pylint: disable=missing-docstring
         host.cleanup_services()
@@ -1054,10 +1098,20 @@ def _cros_extended_repair_actions(provision_triggers=_CROS_PROVISION_TRIGGERS,
     return repair_actions
 
 
+def _cros_dedicated_repair_actions(firmware_triggers=_CROS_FIRMWARE_TRIGGERS,
+                                   usb_dependencies=_CROS_USB_DEPENDENCIES):
+    """Return the repair actions that only works for `CrosHost`"""
+
+    repair_actions = ((cros_firmware.GeneralFirmwareRepair, 'general_firmware',
+                       usb_dependencies, firmware_triggers), )
+    return repair_actions
+
+
 def _cros_repair_actions():
     """Return the repair actions for a `CrosHost`."""
     repair_actions = (_cros_basic_repair_actions() +
-                      _cros_extended_repair_actions())
+                      _cros_extended_repair_actions() +
+                      _cros_dedicated_repair_actions())
     return repair_actions
 
 

@@ -1,10 +1,17 @@
+# Lint as: python2, python3
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import json
 import logging
 import uuid
 import xml.etree.ElementTree as ET
 
+import common
 from autotest_lib.client.common_lib import error
 from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
+from six.moves import range
 
 
 class bluetooth_SDP_Test(object):
@@ -93,7 +100,7 @@ class bluetooth_SDP_Test(object):
             sdp_record.append(attr)
 
         sdp_record_str = ('<?xml version="1.0" encoding="UTF-8"?>' +
-                          ET.tostring(sdp_record))
+                          ET.tostring(sdp_record).decode('utf-8'))
         return sdp_record_str
 
 

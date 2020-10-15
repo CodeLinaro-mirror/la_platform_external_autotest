@@ -23,13 +23,14 @@ class bluetooth_PeerUpdate(test.test):
 
     version = 1
 
-    def run_once(self, host):
+    def run_once(self, host, btpeer_args=[]):
         """ Update Bluetooth peer device
 
         @param host: the DUT, usually a chromebook
         """
         try:
             self.host = host
+            self.host.initialize_btpeer(btpeer_args=btpeer_args)
             commit = None
             (_, commit) = bluetooth_peer_update.get_latest_commit()
             if commit is None:

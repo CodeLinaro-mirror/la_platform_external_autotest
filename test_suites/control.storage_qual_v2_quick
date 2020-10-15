@@ -32,4 +32,3 @@ args_dict['timeout_mins'] = 720 # 12 hours
 args_dict['job'] = job
 
 dynamic_suite.reimage_and_run(**args_dict)
-

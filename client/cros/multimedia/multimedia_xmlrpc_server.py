@@ -9,7 +9,7 @@ import argparse
 import code
 import logging
 import os
-import xmlrpclib
+import six.moves.xmlrpc_client
 import traceback
 
 import common   # pylint: disable=unused-import
@@ -118,7 +118,7 @@ def main():
     pid = os.getpid()
 
     if args.debug:
-        s = xmlrpclib.ServerProxy('http://localhost:%d' %
+        s = six.moves.xmlrpc_client.ServerProxy('http://localhost:%d' %
                                   constants.MULTIMEDIA_XMLRPC_SERVER_PORT,
                                   allow_none=True)
         code.interact(local=locals())

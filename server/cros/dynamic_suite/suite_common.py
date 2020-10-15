@@ -1,9 +1,11 @@
+# Lint as: python2, python3
 # Copyright 2018 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Shared functions by dynamic_suite/suite.py & skylab_suite/cros_suite.py."""
 
+from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
@@ -11,6 +13,8 @@ import datetime
 import logging
 import multiprocessing
 import re
+import six
+from six.moves import zip
 
 import common
 
@@ -210,7 +214,7 @@ def _get_cf_texts_for_suite_batched(cf_getter, suite_name):
     See get_cf_texts_for_suite for params & returns.
     """
     suite_info = cf_getter.get_suite_info(suite_name=suite_name)
-    files = suite_info.keys()
+    files = list(suite_info.keys())
     filtered_files = _filter_cf_paths(files)
     for path in filtered_files:
         yield path, suite_info[path]
@@ -323,9 +327,9 @@ def parse_cf_text_many(control_file_texts,
     if control_file_texts_all:
         # Construct input data for worker processes. Each row contains the
         # path, text, forgiving_error configuration, and test arguments.
-        paths, texts = zip(*control_file_texts_all)
-        worker_data = zip(paths, texts, [forgiving_error] * len(paths),
-                          [test_args] * len(paths))
+        paths, texts = list(zip(*control_file_texts_all))
+        worker_data = list(zip(paths, texts, [forgiving_error] * len(paths),
+                          [test_args] * len(paths)))
         pool = multiprocessing.Pool(processes=get_process_limit())
         result_list = pool.map(parse_cf_text_process, worker_data)
         pool.close()
@@ -381,7 +385,7 @@ def filter_tests(tests, predicate=lambda t: True):
     @returns a list of ControlData objects as tests.
     """
     logging.info('Parsed %s child test control files.', len(tests))
-    tests = [test for test in tests.itervalues() if predicate(test)]
+    tests = [test for test in six.itervalues(tests) if predicate(test)]
     tests.sort(key=lambda t:
                control_data.ControlData.get_test_time_index(t.time),
                reverse=True)

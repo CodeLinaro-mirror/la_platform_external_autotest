@@ -7,14 +7,12 @@ DEVICE_STATE_NEEDS_REPLACEMENT = 'needs_replacement'
 # Device required manual attention to be fixed
 DEVICE_STATE_NEEDS_MANUAL_REPAIR = 'needs_manual_repair'
 
-# Default timeout for all verifiers
-# In order to avoid altering the behavior of the verifiers, set an extremely
-# large timeout. The number must be large, but still fit in a C int.
-VERIFY_TIMEOUT_SEC = 2**30
+# Timeout for verifiers.
+SHORT_VERIFY_TIMEOUT_SEC = 60
+VERIFY_TIMEOUT_SEC = 60 * 5
+LONG_VERIFY_TIMEOUT_SEC = 60 * 20
 
-# Default timeout for all repair actions
-# Default timeout for all verifiers
-# In order to avoid altering the behavior of the repair actions,
-# set an extremely large timeout. The number mut be large,
-# but still fit in a C int.
-REPAIR_TIMEOUT_SEC = 2**30
+# Timeout for repair actions.
+SHORT_REPAIR_TIMEOUT_SEC = 60
+REPAIR_TIMEOUT_SEC = 60 * 10
+LONG_REPAIR_TIMEOUT_SEC = 60 * 30

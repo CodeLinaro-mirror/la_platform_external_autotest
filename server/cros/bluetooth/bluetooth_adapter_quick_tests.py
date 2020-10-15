@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2019 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,6 +8,8 @@ This class provides wrapper functions for Bluetooth quick sanity test
 batches or packages
 """
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 import functools
@@ -15,11 +18,13 @@ import tempfile
 import threading
 import time
 
+import common
 from autotest_lib.client.common_lib import error
 from autotest_lib.server import site_utils
 from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
 from autotest_lib.server.cros.multimedia import remote_facade_factory
 from autotest_lib.client.bin import utils
+from six.moves import range
 
 class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
     """This class provide wrapper function for Bluetooth quick sanity test
@@ -97,7 +102,8 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
 
 
     def quick_test_init(self, host, use_btpeer=True, use_chameleon=False,
-                        flag='Quick Sanity', start_browser=False):
+                        flag='Quick Sanity', btpeer_args=[],
+                        start_browser=False):
         """Inits the test batch"""
         self.host = host
         self.start_browser = start_browser
@@ -106,22 +112,9 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
         #factory._proxy.__del__ will be invoked, which shutdown the xmlrpc
         # server, which log out the user.
 
-        try:
-            self.factory = remote_facade_factory.RemoteFacadeFactory(host,
-                    no_chrome=not self.start_browser,
-                    disable_arc=True)
-            self.bluetooth_facade = self.factory.create_bluetooth_hid_facade()
-
-        # For b:142276989, catch 'object_path' fault and reboot to prevent
-        # failures from continuing into future tests
-        except Exception as e:
-            if (e.__class__.__name__ == 'Fault' and
-                """object has no attribute 'object_path'""" in str(e)):
-
-                logging.error('Caught b/142276989, rebooting DUT')
-                self.reboot()
-            # Raise the original exception
-            raise
+        self.factory = remote_facade_factory.RemoteFacadeFactory(
+                host, no_chrome=not self.start_browser, disable_arc=True)
+        self.bluetooth_facade = self.factory.create_bluetooth_hid_facade()
 
         # Common list to track old/new Bluetooth peers
         # Adding chameleon to btpeer_list causes issue in cros_labels
@@ -131,6 +124,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
         # TODO(b:149637050) Remove use_chameleon
         self.use_btpeer = use_btpeer or use_chameleon
         if self.use_btpeer:
+            self.host.initialize_btpeer(btpeer_args=btpeer_args)
             self.input_facade = self.factory.create_input_facade()
             self.check_btpeer()
 
@@ -330,6 +324,9 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                                                shared_devices_count)
 
                     test_method(self)
+                except error.TestError as e:
+                    self.fails.append('[--- error {} ({})]'.format(
+                            test_method.__name__, str(e)))
                 except error.TestFail as e:
                     if not bool(self.fails):
                         self.fails.append('[--- failed {} ({})]'.format(
@@ -353,6 +350,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
         # Bluetoothd could have crashed behind the scenes; check to see if
         # everything is still ok and recover if needed.
         self.test_is_facade_valid()
+        self.test_is_adapter_valid()
 
         # Reset the adapter
         self.test_reset_on_adapter()
@@ -494,7 +492,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                 """
                 if test_name is not None:
                     single_test_method = getattr(self,  test_name)
-                    for iter in xrange(1,num_iterations+1):
+                    for iter in range(1,num_iterations+1):
                         self.test_iter = iter
                         single_test_method()
 
@@ -508,7 +506,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                         else:
                             raise error.TestFail(self.fails)
                 else:
-                    for iter in xrange(1,num_iterations+1):
+                    for iter in range(1,num_iterations+1):
                         self.quick_test_batch_start(batch_name, iter)
                         batch_method(self, num_iterations, test_name)
                         self.quick_test_batch_end()
@@ -651,6 +649,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                     timeout_mins * 60, self.mtbf_timeout)
                 mtbf_timer.start()
                 start_time = time.time()
+                board = self.host.get_board().split(':')[1]
                 model = self.host.get_model_from_cros_config()
                 build = self.host.get_release_version()
                 milestone = 'M' + self.host.get_chromeos_release_milestone()
@@ -661,7 +660,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                         if self.mtbf_end:
                             self.report_mtbf_result(
                                 True, start_time, test_name, model, build,
-                                milestone, in_lab)
+                                milestone, board, in_lab)
                             break
                     try:
                         batch_method(self, *args, **kwargs)
@@ -669,7 +668,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                         logging.info("Caught a failure: %r", e)
                         self.report_mtbf_result(
                             False, start_time, test_name, model, build,
-                            milestone, in_lab)
+                            milestone, board, in_lab)
                         # Don't report the test run as failed for MTBF
                         self.fails = []
                         break
@@ -688,7 +687,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
 
 
     def report_mtbf_result(self, success, start_time, test_name, model, build,
-        milestone, in_lab):
+        milestone, board, in_lab):
         """Report MTBF result by uploading it to GCS"""
         duration_secs = int(time.time() - start_time)
         start_time = int(start_time)
@@ -697,11 +696,11 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                            time.strftime('%Y-%m-%d/', gm_time_struct) + \
                            time.strftime('%H-%M-%S.csv', gm_time_struct)
 
-        mtbf_result = '{0},{1},{2},{3},{4},{5},{6}'.format(
+        mtbf_result = '{0},{1},{2},{3},{4},{5},{6},{7}'.format(
             model, build, milestone, start_time * 1000000, duration_secs,
-            success, test_name)
+            success, test_name, board)
         with tempfile.NamedTemporaryFile() as tmp_file:
-            tmp_file.write(mtbf_result)
+            tmp_file.write(mtbf_result.encode('utf-8'))
             tmp_file.flush()
             cmd = 'gsutil cp {0} {1}'.format(tmp_file.name, output_file_name)
             logging.info('Result to upload %s %s', mtbf_result, cmd)

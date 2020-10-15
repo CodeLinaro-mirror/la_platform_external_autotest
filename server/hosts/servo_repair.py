@@ -10,6 +10,7 @@ from __future__ import print_function
 import sys
 import functools
 import logging
+import math
 import time
 
 import common
@@ -20,6 +21,7 @@ from autotest_lib.server.cros.power import servo_charger
 from autotest_lib.server.cros.servo import servo
 from autotest_lib.server.hosts import cros_constants
 from autotest_lib.server.hosts import repair_utils
+from autotest_lib.server.hosts import servo_constants
 import six
 
 try:
@@ -63,7 +65,7 @@ class _UpdateVerifier(hosts.Verifier):
     up-to-date.
     """
 
-    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.LONG_VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         # First, only run this verifier if the host is in the physical lab.
         # Secondly, skip if the test is being run by test_that, because subnet
@@ -165,7 +167,7 @@ class _SerialConfigVerifier(_ConfigVerifier):
 
     ATTR = 'SERIAL'
 
-    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         """
         Test whether the `host` has a `SERIAL` setting configured.
@@ -203,7 +205,7 @@ class _BoardConfigVerifier(_ConfigVerifier):
 
     ATTR = 'BOARD'
 
-    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         """
         Test whether the `host` has a `BOARD` setting configured.
@@ -236,7 +238,7 @@ class _ServodJobVerifier(hosts.Verifier):
     Verifier to check that the `servod` upstart job is running.
     """
 
-    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if not host.is_cros_host():
             return
@@ -257,7 +259,7 @@ class _DiskSpaceVerifier(hosts.Verifier):
     Verifier to make sure there is enough disk space left on servohost.
     """
 
-    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         # Check available space of stateful is greater than threshold, in Gib.
         host.check_diskspace('/mnt/stateful_partition', 0.5)
@@ -437,6 +439,7 @@ class _DUTConnectionVerifier(hosts.Verifier):
     MIN_PPDUT5_MV_WHEN_CONNECTED = 4000
 
     @ignore_exception_for_non_cros_host
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if self._is_servo_v4_type_a(host):
             if not self._is_ribbon_cable_connected(host):
@@ -560,7 +563,7 @@ class _PowerButtonVerifier(hosts.Verifier):
     _BOARDS_WO_PWR_BUTTON = ['arkham', 'gale', 'mistral', 'storm', 'whirlwind']
 
     @ignore_exception_for_non_cros_host
-    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if host.servo_board in self._BOARDS_WO_PWR_BUTTON:
             return
@@ -574,10 +577,69 @@ class _PowerButtonVerifier(hosts.Verifier):
             raise hosts.AutoservNonCriticalVerifyError(
                 'Check ribbon cable: \'pwr_button\' is stuck')
 
+    def _is_applicable(self, host):
+        return host.get_servo().main_device_is_flex()
 
     @property
     def description(self):
         return 'pwr_button control is normal'
+
+
+class _BatteryVerifier(hosts.Verifier):
+    """Collect battery info for analysis."""
+
+    @ignore_exception_for_non_cros_host
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    def verify(self, host):
+        try:
+            servo = host.get_servo()
+            charging = False
+            if servo.has_control('battery_is_charging'):
+                charging = servo.get('battery_is_charging')
+            level = -1
+            if servo.has_control('battery_charge_percent'):
+                level = servo.get('battery_charge_percent')
+            design_mah = servo.get('battery_full_design_mah')
+            charge_mah = servo.get('battery_full_charge_mah')
+            logging.info('Charging: %s', charging)
+            logging.info('Percentage: %s', level)
+            logging.info('Full charge max: %s', charge_mah)
+            logging.info('Full design max: %s', design_mah)
+            # based on analysis of ratio we can find out what is
+            # the level when we can say that battery is dead
+            ratio = int(math.floor(charge_mah / design_mah * 100.0))
+            logging.info('Ratio: %s', ratio)
+            data = {
+                    'board': host.servo_board or 'unknown',
+                    'model': host.servo_model or 'unknown',
+                    'ratio': ratio
+            }
+            metrics.Counter('chromeos/autotest/battery/ratio').increment(
+                    fields=data)
+        except Exception as e:
+            # Keeping it with info level because we do not expect it.
+            logging.info('(Not critical) %s', e)
+
+    def _is_applicable(self, host):
+        if not host.is_ec_supported():
+            logging.info('The board not support EC')
+            return False
+        dut_info = host.get_dut_host_info()
+        if dut_info:
+            host_info = host.get_dut_host_info()
+            if host_info.get_label_value('power') != 'battery':
+                logging.info('The board does not have battery')
+                return False
+        servo = host.get_servo()
+        if (not servo.has_control('battery_full_design_mah')
+                    or not servo.has_control('battery_full_charge_mah')):
+            logging.info('The board is not supported battery controls...')
+            return False
+        return True
+
+    @property
+    def description(self):
+        return 'Logs battery levels'
 
 
 class _LidVerifier(hosts.Verifier):
@@ -586,7 +648,7 @@ class _LidVerifier(hosts.Verifier):
     """
 
     @ignore_exception_for_non_cros_host
-    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         try:
             lid_open = host.get_servo().get('lid_open')
@@ -609,7 +671,7 @@ class _EcBoardVerifier(hosts.Verifier):
     """
 
     @ignore_exception_for_non_cros_host
-    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if host.is_ec_supported():
             ec_board_name = ''
@@ -679,6 +741,72 @@ class _ServoRebootRepair(repair_utils.RebootRepair):
         return 'Reboot the servo host.'
 
 
+class _ToggleCCLineRepair(hosts.RepairAction):
+    """Try repair servod by toggle cc.
+
+    When cr50 is not enumerated we can try to recover it by toggle cc line.
+    Repair action running from servohost.
+    We using usb_console temporally witch required stop servod.
+
+    TODO(otabek@) review the logic when b/159755652 implemented
+    """
+
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
+    def repair(self, host):
+        host.stop_servod()
+        self._reset_usbc_pigtail_connection(host)
+        host.restart_servod()
+
+    def _is_applicable(self, host):
+        if host.is_localhost() or not host.is_labstation():
+            return False
+        if not host.servo_serial:
+            return False
+        return self._is_type_c(host)
+
+    def _is_type_c(self, host):
+        if host.get_dut_host_info():
+            servo_type = host.get_dut_host_info().get_label_value(
+                    servo_constants.SERVO_TYPE_LABEL_PREFIX)
+            return 'ccd_cr50' in servo_type
+        return False
+
+    def _reset_usbc_pigtail_connection(self, host):
+        """Reset USBC pigtail connection on servo board.
+
+        To reset need to run 'cc off' and then 'cc srcdts' in usb_console.
+        """
+        logging.debug('Starting reset USBC pigtail connection.')
+
+        def _run_command(cc_command):
+            """Run configuration channel commands.
+
+            @returns: True if pas successful and False if fail.
+            """
+            try:
+                cmd = (r"echo 'cc %s' | usb_console -d 18d1:501b -s %s" %
+                       (cc_command, host.servo_serial))
+                resp = host.run(cmd, timeout=host.DEFAULT_TERMINAL_TIMEOUT)
+                return True
+            except Exception as e:
+                logging.info('(Non-critical) %s.', e)
+            return False
+
+        logging.info('Turn off configuration channel. And wait 5 seconds.')
+        if _run_command('off'):
+            # wait till command will be effected
+            time.sleep(5)
+            logging.info('Turn on configuration channel. '
+                         'And wait 15 seconds.')
+            if _run_command('srcdts'):
+                # wait till command will be effected
+                time.sleep(15)
+
+    @property
+    def description(self):
+        return 'Toggle cc lines'
+
+
 class _ECRebootRepair(hosts.RepairAction):
     """
     Reboot EC on DUT from servo.
@@ -725,10 +853,13 @@ class _DiskCleanupRepair(hosts.RepairAction):
     """
     KEEP_LOGS_MAX_DAYS = 5
 
-    FILE_TO_REMOVE = ['/var/lib/metrics/uma-events',
-                      '/var/spool/crash/*']
+    FILE_TO_REMOVE = [
+            '/var/lib/metrics/uma-events', '/var/spool/crash/*',
+            '/var/log/chrome/*', '/var/log/ui/*',
+            '/home/chronos/BrowserMetrics/*'
+    ]
 
-    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.SHORT_REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         if host.is_localhost():
             # we don't want to remove anything from local testing.
@@ -762,10 +893,11 @@ def create_servo_repair_strategy():
             (_ServodConnectionVerifier, 'servod_connection', ['servod_job']),
             (_ServodControlVerifier, 'servod_control', ['servod_connection']),
             (_DUTConnectionVerifier, 'dut_connected', ['servod_connection']),
-            (_PowerButtonVerifier, 'pwr_button', ['servod_connection']),
-            (_LidVerifier, 'lid_open', ['servod_connection']),
-            (_EcBoardVerifier, 'ec_board', ['servod_connection']),
-            (_CCDTestlabVerifier, 'ccd_testlab', ['servod_connection']),
+            (_PowerButtonVerifier, 'pwr_button', ['dut_connected']),
+            (_BatteryVerifier, 'battery', ['dut_connected']),
+            (_LidVerifier, 'lid_open', ['dut_connected']),
+            (_EcBoardVerifier, 'ec_board', ['dut_connected']),
+            (_CCDTestlabVerifier, 'ccd_testlab', ['dut_connected']),
             (_CCDPowerDeliveryVerifier, 'power_delivery',
              ['servod_connection']),
     ]
@@ -775,16 +907,14 @@ def create_servo_repair_strategy():
             'dut_connected', 'pwr_button'
     ]
     repair_actions = [
-        (_DiskCleanupRepair, 'disk_cleanup', ['servo_ssh'], ['disk_space']),
-        (_RestartServod, 'restart', ['servo_ssh'], config + servod_deps),
-        (_ServoRebootRepair, 'servo_reboot', ['servo_ssh'], servod_deps),
-        (
-            _DutRebootRepair, 'dut_reboot', ['servod_connection'],
-            ['servod_control', 'lid_open', 'ec_board']
-        ),
-        (
-            _ECRebootRepair, 'ec_reboot', ['servod_connection'],
-            ['servod_control', 'lid_open', 'ec_board']
-        ),
+            (_DiskCleanupRepair, 'disk_cleanup', ['servo_ssh'], ['disk_space'
+                                                                 ]),
+            (_RestartServod, 'restart', ['servo_ssh'], config + servod_deps),
+            (_ServoRebootRepair, 'servo_reboot', ['servo_ssh'], servod_deps),
+            (_ToggleCCLineRepair, 'servo_cc', ['servo_ssh'], servod_deps),
+            (_DutRebootRepair, 'dut_reboot', ['servod_connection'],
+             ['servod_control', 'lid_open', 'ec_board']),
+            (_ECRebootRepair, 'ec_reboot', ['servod_connection'],
+             ['servod_control', 'lid_open', 'ec_board']),
     ]
     return hosts.RepairStrategy(verify_dag, repair_actions, 'servo')

@@ -44,32 +44,34 @@ class CrosDisksRenameTester(CrosDisksTester):
             image.unmount()
 
             device_file = image.loop_device
-            # Mount through API to assign appropriate group on block device that
-            # depends on file system type.
-            self.cros_disks.mount(device_file, filesystem_type,
-                                  mount_options)
-            expected_mount_completion = {
-                'status': config['expected_mount_status'],
-                'source_path': device_file,
-            }
+            self.cros_disks.add_loopback_to_allowlist(device_file)
+            try:
+                # Mount through API to assign appropriate group on block device
+                # that depends on file system type.
+                self.cros_disks.mount(device_file, filesystem_type,
+                                      mount_options)
+                expected_mount_completion = {
+                        'status': config['expected_mount_status'],
+                        'source_path': device_file,
+                }
 
-            if 'expected_mount_path' in config:
-                expected_mount_completion['mount_path'] = \
-                    config['expected_mount_path']
-            result = self.cros_disks.expect_mount_completion(
-                    expected_mount_completion)
-            self.cros_disks.unmount(device_file)
+                if 'expected_mount_path' in config:
+                    expected_mount_completion['mount_path'] = \
+                        config['expected_mount_path']
+                result = self.cros_disks.expect_mount_completion(
+                        expected_mount_completion)
+                self.cros_disks.unmount(device_file)
 
-            self.cros_disks.rename(device_file, volume_name)
-            expected_rename_completion = {
-                'path': device_file
-            }
+                self.cros_disks.rename(device_file, volume_name)
+                expected_rename_completion = {'path': device_file}
 
-            if 'expected_rename_status' in config:
-                expected_rename_completion['status'] = \
-                        config['expected_rename_status']
-            result = self.cros_disks.expect_rename_completion(
-                expected_rename_completion)
+                if 'expected_rename_status' in config:
+                    expected_rename_completion['status'] = \
+                            config['expected_rename_status']
+                result = self.cros_disks.expect_rename_completion(
+                        expected_rename_completion)
+            finally:
+                self.cros_disks.remove_loopback_from_allowlist(device_file)
 
             if result['status'] == 0:
                 # Test creating and verifying content of the renamed device.

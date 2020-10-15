@@ -17,6 +17,7 @@ class firmware_DevDefaultBoot(FirmwareTest):
     dev options, the device should boot whatever's selected by default.
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     def initialize(self, host, cmdline_args, ec_wp=None):
         """Initialize the test"""

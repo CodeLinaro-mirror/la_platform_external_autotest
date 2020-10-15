@@ -60,8 +60,10 @@ class gtest_parser(object):
             'Suppression \(error hash=#([0-9A-F]+)#\):')
         self._suppression_end = re.compile('^}\s*$')
 
-        self._master_name_re = re.compile('\[Running for master: "([^"]*)"')
-        self.master_name = ''
+        # TODO b:169251326 terms below are set outside of this codebase
+        # and should be updated when possible. ("master" -> "main")
+        self._main_name_re = re.compile('\[Running for master: "([^"]*)"')
+        self.main_name = ''
 
         self._error_logging_start_re = re.compile('=' * 70)
         self._error_logging_test_name_re = re.compile(
@@ -169,10 +171,10 @@ class gtest_parser(object):
         # Track line number for error messages.
         self._line_number += 1
 
-        if not self.master_name:
-            results = self._master_name_re.search(line)
+        if not self.main_name:
+            results = self._main_name_re.search(line)
             if results:
-                self.master_name = results.group(1)
+                self.main_name = results.group(1)
 
         # Is it a line reporting disabled tests?
         results = self._disabled.search(line)

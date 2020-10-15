@@ -183,8 +183,14 @@ class bluetooth_AdapterPowerMeasure(BluetoothAdapterQuickTests):
         self.pw_measurement_suspension_test()
 
 
-    def run_once(self, host, num_iterations=1, test_name=None,
-                 max_power_mw=3, suspend_time_secs=30, flag='Quick Sanity'):
+    def run_once(self,
+                 host,
+                 num_iterations=1,
+                 btpeer_args=[],
+                 test_name=None,
+                 max_power_mw=3,
+                 suspend_time_secs=30,
+                 flag='Quick Sanity'):
         """Running Bluetooth adapter power consumption autotest during system
         suspension.
 
@@ -199,6 +205,9 @@ class bluetooth_AdapterPowerMeasure(BluetoothAdapterQuickTests):
         self.max_power_mw = max_power_mw
         self.suspend_time_secs = suspend_time_secs
 
-        self.quick_test_init(host, use_btpeer=True, flag=flag)
+        self.quick_test_init(host,
+                             use_btpeer=True,
+                             flag=flag,
+                             btpeer_args=btpeer_args)
         self.pw_sanity_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

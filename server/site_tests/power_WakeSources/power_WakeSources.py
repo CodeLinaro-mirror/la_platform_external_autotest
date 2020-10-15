@@ -5,7 +5,7 @@
 import logging
 import time
 
-from autotest_lib.client.common_lib import enum, error
+from autotest_lib.client.common_lib import autotest_enum, error
 from autotest_lib.server import test
 from autotest_lib.server.cros import servo_keyboard_utils
 from autotest_lib.server.cros.dark_resume_utils import DarkResumeUtils
@@ -14,11 +14,11 @@ from autotest_lib.server.cros.servo import chrome_ec
 
 
 # Possible states base can be forced into.
-BASE_STATE = enum.Enum('ATTACH', 'DETACH', 'RESET')
+BASE_STATE = autotest_enum.AutotestEnum('ATTACH', 'DETACH', 'RESET')
 
 # Possible states for tablet mode as defined in common/tablet_mode.c via
 # crrev.com/c/1797370.
-TABLET_MODE = enum.Enum('ON', 'OFF', 'RESET')
+TABLET_MODE = autotest_enum.AutotestEnum('ON', 'OFF', 'RESET')
 
 # List of wake sources expected to cause a full resume.
 FULL_WAKE_SOURCES = [

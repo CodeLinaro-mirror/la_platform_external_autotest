@@ -31,9 +31,12 @@ class audio_AudioInputGain(audio_helper.cras_rms_test):
     ALOOP_CRAS_NODE_TYPE = 'ALSA_LOOPBACK'
     ALOOP_MODULE_NAME = 'snd-aloop'
     CAPTURE_DURATION = 1
+    # 25: -20 dB
+    # 75: 10 dB
+    # Expected gain: 10 * sqrt(10)
     LOW_GAIN = 25
     HIGH_GAIN = 75
-    EXPECTED_GAIN = 100
+    EXPECTED_GAIN = 31.62
     FREQ_TOLERANCE = 1
     SECOND_PEAK_RATIO_TOLERANCE = 0.05
     GAIN_TOLERANCE = 10

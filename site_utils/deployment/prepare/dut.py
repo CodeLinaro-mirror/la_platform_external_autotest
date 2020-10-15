@@ -119,13 +119,21 @@ def try_reset_by_servo(host):
             'DUT failed to come back after %d seconds' % host.BOOT_TIMEOUT)
 
 
-def power_cycle_via_servo(host):
+def power_cycle_via_servo(host, recover_src=False):
     """Power cycle a host though it's attached servo.
 
-    @param host   A server.hosts.Host object.
+    @param host: A server.hosts.Host object.
+    @param recover_src: Indicate if we need switch servo_v4_role
+           back to src mode.
     """
-    logging.info("Shutting down the host...")
-    host.halt()
+    try:
+        logging.info('Shutting down %s from via ssh.', host.hostname)
+        host.halt()
+    except Exception as e:
+        logging.info('Unable to shutdown DUT via ssh; %s', str(e))
+
+    if recover_src:
+        host.servo.set_servo_v4_role('src')
 
     logging.info('Power cycling DUT through servo...')
     host.servo.get_power_state_controller().power_off()
@@ -146,6 +154,30 @@ def power_cycle_via_servo(host):
     if not host.wait_up(timeout=host.BOOT_TIMEOUT):
         raise error.AutoservError('DUT failed to come back after %d seconds' %
                                   host.BOOT_TIMEOUT)
+
+
+def verify_battery_status(host):
+    """Verify that battery status.
+
+    If DUT battery still in the factory mode then DUT required re-work.
+
+    @param host server.hosts.CrosHost object.
+    @raise Exception: if status as unexpected value.
+    """
+    logging.info("Started to verify battery status")
+    host_info = host.host_info_store.get()
+    if host_info.get_label_value('power') != 'battery':
+        logging.info("Skepping due DUT does not have the battery")
+        return
+    power_info = host.get_power_supply_info()
+    battery_path = power_info['Battery']['path']
+    cmd = 'cat %s/status' % battery_path
+    status = host.run(cmd, timeout=30, ignore_status=True).stdout.strip()
+    if status not in ['Charging', 'Discharging', 'Full']:
+        raise Exception(
+                'Unexpected battery status. Please verify that DUT prepared '
+                'for deployment.')
+    logging.info("Battery status verification passed!")
 
 
 def verify_ccd_testlab_enable(host):
@@ -229,24 +261,38 @@ def verify_boot_into_rec_mode(host):
 
     @param host   servers.host.Host object.
     """
-    logging.info("Shutting down DUT...")
-    host.halt()
+    try:
+        # The DUT could be start with un-sshable state, so do shutdown from
+        # DUT side in a try block.
+        logging.info('Shutting down %s from via ssh.', host.hostname)
+        host.halt()
+    except Exception as e:
+        logging.info('Unable to shutdown DUT via ssh; %s', str(e))
+
     host.servo.get_power_state_controller().power_off()
     time.sleep(host.SHUTDOWN_TIMEOUT)
     logging.info("Booting DUT into recovery mode...")
-    host.servo.boot_in_recovery_mode()
-
-    if not host.wait_up(timeout=host.USB_BOOT_TIMEOUT):
-        raise Exception('DUT failed to boot into recovery mode.')
-
-    logging.info('Resetting the TPM status')
+    need_snk = host.require_snk_mode_in_recovery()
+    host.servo.boot_in_recovery_mode(snk_mode=need_snk)
     try:
-        host.run('chromeos-tpm-recovery')
-    except error.AutoservRunError:
-        logging.warn('chromeos-tpm-recovery is too old.')
+        if not host.wait_up(timeout=host.USB_BOOT_TIMEOUT):
+            raise Exception('DUT failed to boot into recovery mode.')
+
+        logging.info('Resetting the TPM status')
+        try:
+            host.run('chromeos-tpm-recovery')
+        except error.AutoservRunError:
+            logging.warn('chromeos-tpm-recovery is too old.')
+    except Exception:
+        # Restore the servo_v4 role to src if we called boot_in_recovery_mode
+        # method with snk_mode=True earlier. If no exception raise, recover
+        # src mode will be handled by power_cycle_via_servo() method.
+        if need_snk:
+            host.servo.set_servo_v4_role('src')
+        raise
 
     logging.info("Rebooting host into normal mode.")
-    power_cycle_via_servo(host)
+    power_cycle_via_servo(host, recover_src=need_snk)
     logging.info("Verify boot into recovery mode completed successfully.")
 
 

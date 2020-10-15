@@ -45,9 +45,6 @@ class firmware_FWupdate(FirmwareTest):
         self._orig_hw_wp = None
 
         dict_args = utils.args_to_dict(cmdline_args)
-        super(firmware_FWupdate, self).initialize(host, cmdline_args)
-
-        self._orig_sw_wp = self.faft_client.bios.get_write_protect_status()
 
         if dict_args.get('restore', '').lower() == 'false':
             self._want_restore = False
@@ -63,10 +60,14 @@ class firmware_FWupdate(FirmwareTest):
                 if arg_value:
                     logging.info('%s=%s', arg_name, arg_value)
                     image_path = os.path.expanduser(arg_value)
+                    if not os.path.isabs(image_path):
+                        raise error.TestError(
+                            'Specified path must be absolute: %s=%s'
+                            % (arg_name, arg_value))
                     if not os.path.isfile(image_path):
                         raise error.TestError(
-                                "Specified file does not exist: %s=%s"
-                                % (arg_name, image_path))
+                            'Specified file does not exist: %s=%s'
+                            % (arg_name, arg_value))
                     self.images[arg_name] = image_path
 
         self.old_bios = self.images.get('old_bios')
@@ -81,6 +82,10 @@ class firmware_FWupdate(FirmwareTest):
             raise error.TestError('Must specify at least new_bios=<path>'
                                   ' or new_bios_rw=<path>')
 
+        super(firmware_FWupdate, self).initialize(host, cmdline_args)
+
+        self._orig_sw_wp = self.faft_client.bios.get_write_protect_status()
+
         self.backup_firmware()
 
         if self.faft_config.ap_access_ec_flash:
@@ -94,6 +99,9 @@ class firmware_FWupdate(FirmwareTest):
 
     def cleanup(self):
         """Restore write protection, unless "restore" was false."""
+        if not hasattr(self, 'run_id'):
+            # Exited very early during initialize, so no cleanup needed
+            return
 
         self.set_hardware_write_protect(False)
         try:

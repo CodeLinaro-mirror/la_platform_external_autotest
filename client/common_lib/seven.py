@@ -9,6 +9,14 @@ to Python 3, but aren't present in the six library.
 """
 
 import six
+import socket
+
+if six.PY3:
+    import builtins
+    SOCKET_ERRORS = (builtins.ConnectionError, socket.timeout, socket.gaierror,
+                     socket.herror)
+else:
+    SOCKET_ERRORS = (socket.error, )
 
 
 def exec_file(filename, globals_, locals_):

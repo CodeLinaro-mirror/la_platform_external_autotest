@@ -11,6 +11,7 @@ from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
 class firmware_TPMExtend(FirmwareTest):
     """Test to ensure TPM PCRs are extended correctly."""
     version = 1
+    NEEDS_SERVO_USB = True
 
     def initialize(self, host, cmdline_args):
         super(firmware_TPMExtend, self).initialize(host, cmdline_args)

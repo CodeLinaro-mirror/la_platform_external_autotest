@@ -8,6 +8,8 @@ which downloads chameleond bundle from google cloud storage and updates
 peer device associated with a DUT
 """
 
+from __future__ import absolute_import
+
 import logging
 import os
 import sys
@@ -16,6 +18,7 @@ import time
 
 from datetime import datetime
 
+import common
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 

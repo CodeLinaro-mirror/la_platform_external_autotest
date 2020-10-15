@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -5,6 +6,10 @@
 
 # TODO (cychiang) Move test utilities from chameleon_audio_helpers
 # to this module.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import logging
 import multiprocessing
@@ -22,6 +27,7 @@ from autotest_lib.client.cros.audio import audio_data
 from autotest_lib.client.cros.audio import audio_helper
 from autotest_lib.client.cros.audio import audio_quality_measurement
 from autotest_lib.client.cros.chameleon import chameleon_audio_ids
+from six.moves import range
 
 CHAMELEON_AUDIO_IDS_TO_CRAS_NODE_TYPES = {
         chameleon_audio_ids.CrosIds.HDMI: 'HDMI',
@@ -503,7 +509,7 @@ def check_recorded_frequency(
     # Also ignore harmonics of ignore frequencies.
     ignore_frequencies_harmonics = []
     for ignore_freq in ignore_frequencies:
-        ignore_frequencies_harmonics += [ignore_freq * n for n in xrange(1, 4)]
+        ignore_frequencies_harmonics += [ignore_freq * n for n in range(1, 4)]
 
     data_format = recorder.data_format
     recorded_data = audio_data.AudioRawData(
@@ -637,7 +643,7 @@ def check_recorded_frequency(
                 if len(volume_changing) != len(volume_changes):
                     matched = False
                 else:
-                    for i in xrange(len(volume_changing)):
+                    for i in range(len(volume_changing)):
                         if volume_changing[i][1] != volume_changes[i]:
                             matched = False
                             break
@@ -650,7 +656,7 @@ def check_recorded_frequency(
 
         # Filter out the harmonics resulted from imperfect sin wave.
         # This list is different for different channels.
-        harmonics = [dominant_frequency * n for n in xrange(2, 10)]
+        harmonics = [dominant_frequency * n for n in range(2, 10)]
 
         def should_be_ignored(frequency):
             """Checks if frequency is close to any frequency in ignore list.
@@ -729,8 +735,8 @@ def longest_common_subsequence(list1, list2, equivalent_threshold):
     matching = [[0] * (length2 + 1)] * (length1 + 1)
     # matching[i][j] is the maximum number of matched pairs for first i items
     # in list1 and first j items in list2.
-    for i in xrange(length1):
-        for j in xrange(length2):
+    for i in range(length1):
+        for j in range(length2):
             # Maximum matched pairs may be obtained without
             # i-th item in list1 or without j-th item in list2
             matching[i + 1][j + 1] = max(matching[i + 1][j],

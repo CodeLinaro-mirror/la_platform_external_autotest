@@ -1,9 +1,15 @@
+# Lint as: python2, python3
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import re
 import logging
+from six.moves import range
 import time
 
 from autotest_lib.client.common_lib import error
@@ -471,7 +477,7 @@ class PDTesterDevice(PDConsoleDevice):
 
         @returns True when DRP mode is enabled, False if not successful
         """
-        for attempt in xrange(2):
+        for attempt in range(2):
             if self._toggle_pdtester_drp() == True:
                 logging.info('PDTester DRP mode enabled')
                 return True
@@ -688,7 +694,7 @@ class PDPortPartner(object):
         """
         MAX_PORTS = 2
         num_ports = 0
-        for port in xrange(MAX_PORTS):
+        for port in range(MAX_PORTS):
             if self._send_pd_state(port, console):
                 num_ports += 1
         return num_ports
@@ -830,7 +836,7 @@ class PDPortPartner(object):
                 num_ports = self._find_num_pd_ports(console)
                 # For each PD port that can be accessed via the console,
                 # instantiate either PDConsole or PDTester device.
-                for port in xrange(num_ports):
+                for port in range(num_ports):
                     if is_tester:
                         logging.info('PDTesterDevice on %s port %d',
                                      console.name, port)

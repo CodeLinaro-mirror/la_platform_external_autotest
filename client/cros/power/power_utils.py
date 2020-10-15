@@ -98,18 +98,6 @@ def has_powercap_support():
     return os.path.isdir('/sys/devices/virtual/powercap/intel-rapl/')
 
 
-def has_amd_rapl_support():
-    """Return True if CPU support AMD RAPL.
-
-    https://www.amd.com/system/files/TechDocs/56255_OSRR.pdf
-    """
-    cpuinfo = utils.get_cpuinfo()[0]
-    logging.info(repr(cpuinfo))
-    return (cpuinfo.get('vendor_id', '') == 'AuthenticAMD' and
-            int(cpuinfo.get('cpu family', 0)) == 0x17 and
-            0 <= int(cpuinfo.get('model', -1)) <= 0x2f)
-
-
 def has_lid():
     """
     Checks whether the device has lid.
@@ -814,7 +802,7 @@ class USBDevicePower(object):
     Public attributes:
         vid: string of USB Vendor ID
         pid: string of USB Product ID
-        whitelisted: Boolean if USB device is whitelisted for USB auto-suspend
+        allowlisted: Boolean if USB device is allowlisted for USB auto-suspend
 
     Private attributes:
        path: string to path of the USB devices in sysfs ( /sys/bus/usb/... )
@@ -823,10 +811,10 @@ class USBDevicePower(object):
     beneficial if it doesn't parse power/control
     """
 
-    def __init__(self, vid, pid, whitelisted, path):
+    def __init__(self, vid, pid, allowlisted, path):
         self.vid = vid
         self.pid = pid
-        self.whitelisted = whitelisted
+        self.allowlisted = allowlisted
         self._path = path
 
     def autosuspend(self):
@@ -845,65 +833,67 @@ class USBPower(object):
     """Class to expose USB related power functionality.
 
     Initially that includes the policy around USB auto-suspend and our
-    whitelisting of devices that are internal to CrOS system.
+    allowlisting of devices that are internal to CrOS system.
 
     Example code:
        usbdev_power = power_utils.USBPower()
        for device in usbdev_power.devices
-           if device.is_whitelisted()
+           if device.is_allowlisted()
                ...
 
     Public attributes:
         devices: list of USBDevicePower instances
 
     Private functions:
-        _is_whitelisted: Returns Boolean if USB device is whitelisted for USB
+        _is_allowlisted: Returns Boolean if USB device is allowlisted for USB
                          auto-suspend
-        _load_whitelist: Reads whitelist and stores int _whitelist attribute
+        _load_allowlist: Reads allowlist and stores int _allowlist attribute
 
     Private attributes:
-        _wlist_file: path to laptop-mode-tools (LMT) USB autosuspend
+        _alist_file: path to laptop-mode-tools (LMT) USB autosuspend
                          conf file.
-        _wlist_vname: string name of LMT USB autosuspend whitelist
+        _alist_vname: string name of LMT USB autosuspend allowlist
                           variable
-        _whitelisted: list of USB device vid:pid that are whitelisted.
+        _allowlisted: list of USB device vid:pid that are allowlisted.
                         May be regular expressions.  See LMT for details.
     """
 
     def __init__(self):
-        self._wlist_file = \
+        self._alist_file = \
             '/etc/laptop-mode/conf.d/board-specific/usb-autosuspend.conf'
-        self._wlist_vname = '$AUTOSUSPEND_USBID_WHITELIST'
-        self._whitelisted = None
+        # TODO b:169251326 terms below are set outside of this codebase
+        # and should be updated when possible. ("WHITELIST" -> "ALLOWLIST")
+        self._alist_vname = '$AUTOSUSPEND_USBID_WHITELIST'
+        self._allowlisted = None
         self.devices = []
 
-    def _load_whitelist(self):
-        """Load USB device whitelist for enabling USB autosuspend
+    def _load_allowlist(self):
+        """Load USB device allowlist for enabling USB autosuspend
 
-        CrOS whitelists only internal USB devices to enter USB auto-suspend mode
+        CrOS allowlist only internal USB devices to enter USB auto-suspend mode
         via laptop-mode tools.
         """
-        cmd = "source %s && echo %s" % (self._wlist_file,
-                                        self._wlist_vname)
+        cmd = "source %s && echo %s" % (self._alist_file,
+                                        self._alist_vname)
         out = utils.system_output(cmd, ignore_status=True)
-        logging.debug('USB whitelist = %s', out)
-        self._whitelisted = out.split()
+        logging.debug('USB allowlist = %s', out)
+        self._allowlisted = out.split()
 
-    def _is_whitelisted(self, vid, pid):
-        """Check to see if USB device vid:pid is whitelisted.
+    def _is_allowlisted(self, vid, pid):
+        """Check to see if USB device vid:pid is allowlisted.
 
         Args:
           vid: string of USB vendor ID
           pid: string of USB product ID
 
         Returns:
-          True if vid:pid in whitelist file else False
+          True if vid:pid in allowlist file else False
         """
-        if self._whitelisted is None:
-            self._load_whitelist()
+        if self._allowlisted is None:
+            self._load_allowlist()
 
         match_str = "%s:%s" % (vid, pid)
-        for re_str in self._whitelisted:
+        for re_str in self._allowlisted:
             if re.match(re_str, match_str):
                 return True
         return False
@@ -924,8 +914,8 @@ class USBPower(object):
                 continue
             vid = utils.read_one_line(vid_path)
             pid = utils.read_one_line(pid_path)
-            whitelisted = self._is_whitelisted(vid, pid)
-            self.devices.append(USBDevicePower(vid, pid, whitelisted, dirpath))
+            allowlisted = self._is_allowlisted(vid, pid)
+            self.devices.append(USBDevicePower(vid, pid, allowlisted, dirpath))
 
 
 class DisplayPanelSelfRefresh(object):

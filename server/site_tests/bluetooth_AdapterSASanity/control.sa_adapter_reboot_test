@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 
 from autotest_lib.server import utils
-from autotest_lib.server.cros.bluetooth import bluetooth_test
 
 AUTHOR = 'chromeos-bluetooth'
 NAME = 'bluetooth_AdapterSASanity.sa_adapter_reboot_test'

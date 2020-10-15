@@ -19,15 +19,18 @@ import threading
 import time
 
 from autotest_lib.client.bin import utils
-from autotest_lib.client.common_lib import enum
+from autotest_lib.client.common_lib import autotest_enum
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import retry
 from autotest_lib.client.common_lib.utils import poll_for_condition_ex
 from autotest_lib.client.cros import kernel_trace
 from autotest_lib.client.cros.power import power_utils
 
-BatteryDataReportType = enum.Enum('CHARGE', 'ENERGY')
+BatteryDataReportType = autotest_enum.AutotestEnum('CHARGE', 'ENERGY')
 
+# For devices whose full capacity is significantly lower than design full
+# capacity, scale down their design full capacity.
+BATTERY_DESIGN_FULL_SCALE = {'jinlon': 0.95}  # b/161307060
 # battery data reported at 1e6 scale
 BATTERY_DATA_SCALE = 1e6
 # number of times to retry reading the battery in the case of bad data
@@ -313,9 +316,19 @@ class BatteryStat(DevStat):
         if voltage_nominal == 0:
             raise error.TestError('Failed to determine battery voltage')
 
+        battery_design_full_scale = 1
+        model = utils.get_platform()
+        if model in BATTERY_DESIGN_FULL_SCALE:
+            battery_design_full_scale = BATTERY_DESIGN_FULL_SCALE.get(model)
+            logging.info(
+                    'Apply %f scale to design full battery capacity for model '
+                    '%s', battery_design_full_scale, model)
+
         # Since charge data is present, calculate parameters based upon
         # reported charge data.
         if battery_type == BatteryDataReportType.CHARGE:
+            self.charge_full_design *= battery_design_full_scale
+
             self.charge_full = self.charge_full / BATTERY_DATA_SCALE
             self.charge_full_design = self.charge_full_design / \
                                       BATTERY_DATA_SCALE
@@ -337,6 +350,8 @@ class BatteryStat(DevStat):
         # Charge data not present, so calculate parameters based upon
         # reported energy data.
         elif battery_type == BatteryDataReportType.ENERGY:
+            self.energy_full_design *= battery_design_full_scale
+
             self.charge_full = self.energy_full / voltage_nominal
             self.charge_full_design = self.energy_full_design / \
                                       voltage_nominal
@@ -2095,8 +2110,6 @@ class PowerLogger(MeasurementLogger):
             measurements += power_rapl.create_powercap()
         elif power_utils.has_rapl_support():
             measurements += power_rapl.create_rapl()
-        elif power_utils.has_amd_rapl_support():
-            measurements += power_rapl.create_amd_rapl()
         return measurements
 
     def save_results(self, resultsdir, fname_prefix=None):
@@ -2580,6 +2593,103 @@ class S0ixResidencyStats(object):
         @returns S0ix Residency since the class has been initialized.
         """
         return parse_pmc_s0ix_residency_info() - self._initial_residency
+
+
+class S2IdleStateStats(object):
+    """
+    Usage stats of an s2idle state.
+    """
+
+    def __init__(self, usage, time):
+        self.usage = usage
+        self.time = time
+
+
+def get_s2idle_path(cpu, state):
+    path = os.path.join(CPU_BASE_PATH,
+                        "cpu{}/cpuidle/{}/s2idle".format(cpu, state))
+    if not os.path.exists(path):
+        return None
+
+    return path
+
+
+def get_s2idle_stats_for_state(cpu, state):
+    """
+    Returns the s2idle stats for a given idle state of a CPU.
+    """
+    s2idle_path = get_s2idle_path(cpu, state)
+
+    path = os.path.join(s2idle_path, 'usage')
+    if not os.path.exists(path):
+        raise error.TestFail("File not found: {}" % path)
+
+    usage = int(utils.read_one_line(path))
+
+    path = os.path.join(s2idle_path, 'time')
+    if not os.path.exists(path):
+        raise error.TestFail("File not found: {}" % path)
+
+    time = int(utils.read_one_line(path))
+
+    return S2IdleStateStats(usage, time)
+
+
+def get_cpuidle_states(cpu):
+    """
+    Returns the cpuidle states of a CPU.
+    """
+    cpuidle_path = os.path.join(CPU_BASE_PATH, "cpu{}/cpuidle".format(cpu))
+
+    pattern = os.path.join(cpuidle_path, 'state*')
+    state_paths = glob.glob(pattern)
+
+    return [s.split('/')[-1] for s in state_paths]
+
+
+def get_s2idle_stats_for_cpu(cpu):
+    """
+    Returns the s2idle stats for a CPU.
+    """
+    return {s: get_s2idle_stats_for_state(cpu, s)
+            for s in get_cpuidle_states(cpu)
+            if get_s2idle_path(cpu, s) is not None}
+
+
+def get_s2idle_stats():
+    """
+    Returns the s2idle stats for all CPUs.
+    """
+    return {cpu: get_s2idle_stats_for_cpu(cpu) for cpu in get_online_cpus()}
+
+
+def get_s2idle_residency_total_usecs():
+    """
+    Get total s2idle residency time for all CPUs and states.
+    """
+    total_usecs = 0
+
+    all_stats = get_s2idle_stats()
+    for stats in all_stats.itervalues():
+        for st in stats.itervalues():
+            total_usecs += st.time
+
+    return total_usecs
+
+
+class S2IdleResidencyStats(object):
+    """
+    Measures the s2idle residency of a given board over time.
+    """
+
+    def __init__(self):
+        self._initial_residency = get_s2idle_residency_total_usecs()
+
+    def get_accumulated_residency_usecs(self):
+        """
+        @returns s2idle residency since the class has been initialized.
+        """
+        return get_s2idle_residency_total_usecs() - self._initial_residency
 
 
 class DMCFirmwareStats(object):

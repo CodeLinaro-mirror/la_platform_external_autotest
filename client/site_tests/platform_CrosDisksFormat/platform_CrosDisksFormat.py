@@ -33,16 +33,19 @@ class CrosDisksFormatTester(CrosDisksTester):
             # without actually formatting it.
             device_file = image.attach_to_loop_device()
 
-            # Format the virtual filesystem image via CrosDisks.
-            self.cros_disks.format(device_file, filesystem_type, format_options)
-            expected_format_completion = {
-                'path': device_file
-            }
-            if 'expected_format_status' in config:
-                expected_format_completion['status'] = \
-                        config['expected_format_status']
-            result = self.cros_disks.expect_format_completion(
-                expected_format_completion)
+            self.cros_disks.add_loopback_to_allowlist(device_file)
+            try:
+                # Format the virtual filesystem image via CrosDisks.
+                self.cros_disks.format(device_file, filesystem_type,
+                                       format_options)
+                expected_format_completion = {'path': device_file}
+                if 'expected_format_status' in config:
+                    expected_format_completion['status'] = \
+                            config['expected_format_status']
+                result = self.cros_disks.expect_format_completion(
+                        expected_format_completion)
+            finally:
+                self.cros_disks.remove_loopback_from_allowlist(device_file)
 
             if result['status'] == 0:
                 # Test creating and verifying content the formatted device.
@@ -55,11 +58,11 @@ class CrosDisksFormatTester(CrosDisksTester):
                     raise error.TestFail("Failed to verify test content")
 
                 try:
-                  label_idx = format_options.index("Label") + 1
-                  expected_label = format_options[label_idx]
+                    label_idx = format_options.index("Label") + 1
+                    expected_label = format_options[label_idx]
                 except ValueError:
-                  # Label option not found in format options
-                  expected_label = "UNTITLED"
+                    # Label option not found in format options
+                    expected_label = "UNTITLED"
                 if expected_label != image.get_volume_label():
                     raise error.TestFail("Failed to label the drive")
 

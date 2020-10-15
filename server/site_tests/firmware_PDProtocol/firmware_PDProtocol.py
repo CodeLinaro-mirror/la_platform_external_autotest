@@ -31,6 +31,7 @@ class firmware_PDProtocol(FirmwareTest):
 
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     PD_NOT_SUPPORTED_PATTERN = 'INVALID_COMMAND'
 

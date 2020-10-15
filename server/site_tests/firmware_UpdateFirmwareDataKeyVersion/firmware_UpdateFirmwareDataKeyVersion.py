@@ -18,6 +18,7 @@ class firmware_UpdateFirmwareDataKeyVersion(FirmwareTest):
     firmware B, and then recover firmware A and B to original shellball.
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     def resign_datakey_version(self, host):
         """Resigns the datakey version."""

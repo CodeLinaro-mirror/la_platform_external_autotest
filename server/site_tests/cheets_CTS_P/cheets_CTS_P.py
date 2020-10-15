@@ -33,7 +33,7 @@ _CTS_URI = {
     'arm': _PUBLIC_CTS + 'android-cts-9.0_r13-linux_x86-arm.zip',
     'x86': _PUBLIC_CTS + 'android-cts-9.0_r13-linux_x86-x86.zip',
 }
-_CTS_MEDIA_URI = _PUBLIC_CTS + 'android-cts-media-1.4.zip'
+_CTS_MEDIA_URI = _PUBLIC_CTS + 'android-cts-media-1.5.zip'
 _CTS_MEDIA_LOCALPATH = '/tmp/android-cts-media'
 
 

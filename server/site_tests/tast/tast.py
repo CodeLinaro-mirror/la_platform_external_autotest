@@ -112,11 +112,20 @@ class tast(test.test):
     # Status reason used when an individual Tast test doesn't finish running.
     _TEST_DID_NOT_FINISH_MSG = 'Test did not finish'
 
-    def initialize(self, host, test_exprs, ignore_test_failures=False,
-                   max_run_sec=3600, command_args=[], install_root='/',
-                   ssp=None, build=None, build_bundle='cros',
-                   run_private_tests=True, varsfiles=None,
-                   download_data_lazily=False, clear_tpm=False):
+    def initialize(self,
+                   host,
+                   test_exprs,
+                   ignore_test_failures=False,
+                   max_run_sec=3600,
+                   command_args=[],
+                   install_root='/',
+                   ssp=None,
+                   build=None,
+                   build_bundle='cros',
+                   run_private_tests=True,
+                   varsfiles=None,
+                   download_data_lazily=True,
+                   clear_tpm=False):
         """
         @param host: remote.RemoteHost instance representing DUT.
         @param test_exprs: Array of strings describing tests to run.
@@ -199,7 +208,7 @@ class tast(test.test):
 
         # Shortcut if no test belongs to the specified test_exprs.
         if not self._get_tests_to_run():
-          return
+            return
 
         run_failed = False
         try:

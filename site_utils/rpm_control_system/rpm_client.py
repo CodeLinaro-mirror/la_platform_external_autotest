@@ -100,7 +100,7 @@ def _set_power(args_tuple, timeout_mins=RPM_CALL_TIMEOUT_MINS):
 
 def _send_rpm_failure_metrics(rpm_host, outlet):
     metrics_fields = {'rpm_host': rpm_host, 'outlet': outlet}
-    metrics.Counter('chromeos/autotest/repair/rpm_failure').increment(
+    metrics.Counter('chromeos/autotest/rpm/rpm_failure').increment(
             fields=metrics_fields)
 
 

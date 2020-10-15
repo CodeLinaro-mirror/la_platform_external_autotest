@@ -11,6 +11,7 @@ from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
 class firmware_FAFTModeTransitions(FirmwareTest):
     """This test checks FAFT mode transitions work."""
     version = 1
+    NEEDS_SERVO_USB = True
 
     def _checked_reboot(self, to_mode):
         """Reboots DUT to mode and sanity checks that it has done so.

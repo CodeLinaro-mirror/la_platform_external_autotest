@@ -7,8 +7,8 @@ import os
 import time
 
 from autotest_lib.server import test
+from autotest_lib.server.cros import filesystem_util
 from autotest_lib.client.common_lib import error, utils
-from autotest_lib.server.cros import gsutil_wrapper
 
 
 class FingerprintTest(test.test):
@@ -17,6 +17,8 @@ class FingerprintTest(test.test):
 
     # Location of firmware from the build on the DUT
     _FINGERPRINT_BUILD_FW_DIR = '/opt/google/biod/fw'
+
+    _DISABLE_FP_UPDATER_FILE = '.disable_fp_updater'
 
     _GENIMAGES_SCRIPT_NAME = 'gen_test_images.sh'
     _GENIMAGES_OUTPUT_DIR_NAME = 'images'
@@ -81,10 +83,13 @@ class FingerprintTest(test.test):
     # RO versions that are flashed in the factory
     # (for eternity for a given board)
     _GOLDEN_RO_FIRMWARE_VERSION_MAP = {
-        _FP_BOARD_NAME_BLOONCHIPPER: 'bloonchipper_v2.0.4277-9f652bb3',
-        _FP_BOARD_NAME_DARTMONKEY: 'dartmonkey_v2.0.2887-311310808',
-        _FP_BOARD_NAME_NOCTURNE: 'nocturne_fp_v2.2.64-58cf5974e',
-        _FP_BOARD_NAME_NAMI: 'nami_fp_v2.2.144-7a08e07eb',
+            _FP_BOARD_NAME_BLOONCHIPPER: {
+                    'hatch': 'bloonchipper_v2.0.4277-9f652bb3',
+                    'zork': 'bloonchipper_v2.0.4478-22ad3ce2',
+            },
+            _FP_BOARD_NAME_DARTMONKEY: 'dartmonkey_v2.0.2887-311310808',
+            _FP_BOARD_NAME_NOCTURNE: 'nocturne_fp_v2.2.64-58cf5974e',
+            _FP_BOARD_NAME_NAMI: 'nami_fp_v2.2.144-7a08e07eb',
     }
 
     _FIRMWARE_VERSION_SHA256SUM = 'sha256sum'
@@ -106,10 +111,10 @@ class FingerprintTest(test.test):
                 _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.4277-9f652bb3',
                 _FIRMWARE_VERSION_KEY_ID: '1c590ef36399f6a2b2ef87079c135b69ef89eb60',
             },
-            'bloonchipper_v2.0.4478-22ad3ce2.bin': {
-                _FIRMWARE_VERSION_SHA256SUM: '9a0cd0d9dd44b0b9f1eacf4c381f3d6d2aa3d7c7bbd5a04f1f7ba708bc80015a',
+            'bloonchipper_v2.0.4478-22ad3ce2-RO_v2.0.5762-157d30f9-RW.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: '3e796aa11fb7dbe40a09a9327e359e75ef5b1fa1d7a7d94604a7fb7361f411cc',
                 _FIRMWARE_VERSION_RO_VERSION: 'bloonchipper_v2.0.4478-22ad3ce2',
-                _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.4478-22ad3ce2',
+                _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.5762-157d30f9',
                 _FIRMWARE_VERSION_KEY_ID: '1c590ef36399f6a2b2ef87079c135b69ef89eb60',
             },
         },
@@ -198,6 +203,17 @@ class FingerprintTest(test.test):
         self.fp_board = self.get_fp_board()
         self._build_fw_file = self.get_build_fw_file()
 
+        if filesystem_util.is_rootfs_writable(self.host):
+            if self.get_host_board() == 'zork':
+                logging.warning('rootfs is writable')
+            else:
+                raise error.TestFail('rootfs is writable')
+
+        if not self.fp_updater_is_enabled():
+            raise error.TestFail(
+                    'Fingerprint firmware updater is disabled at the beginning of test'
+            )
+
     def setup_test(self, test_dir, use_dev_signed_fw=False,
                    enable_hardware_write_protect=True,
                    enable_software_write_protect=True,
@@ -243,6 +259,7 @@ class FingerprintTest(test.test):
 
         self._initialize_running_fw_version(use_dev_signed_fw,
                                             force_firmware_flashing)
+
         if init_entropy:
             self._initialize_fw_entropy()
 
@@ -255,6 +272,9 @@ class FingerprintTest(test.test):
         # original firmware (not dev version) and potentially reset rollback.
         self._initialize_running_fw_version(use_dev_signed_fw=False,
                                             force_firmware_flashing=False)
+        if (self.get_host_board() == 'zork'
+                    and not self.fp_updater_is_enabled()):
+            self.enable_fp_updater()
         self._initialize_fw_entropy()
         self._initialize_hw_and_sw_write_protect(
             enable_hardware_write_protect=True,
@@ -395,6 +415,10 @@ class FingerprintTest(test.test):
             raise error.TestFail(
                 'Unable to get fingerprint board with cros_config')
         return result.stdout.rstrip()
+
+    def get_host_board(self):
+        """Returns name of the host board."""
+        return self.host.get_board().split(':')[-1]
 
     def get_build_fw_file(self):
         """Returns full path to build FW file on DUT."""
@@ -600,6 +624,8 @@ class FingerprintTest(test.test):
         """Returns RO firmware version used in factory."""
         board = self.get_fp_board()
         golden_version = self._GOLDEN_RO_FIRMWARE_VERSION_MAP.get(board)
+        if isinstance(golden_version, dict):
+            golden_version = golden_version.get(self.get_host_board())
         if golden_version is None:
             raise error.TestFail('Unable to get golden RO version for board: %s'
                                  % board)
@@ -671,35 +697,76 @@ class FingerprintTest(test.test):
                 self.get_rollback_rw_version() ==
                 self._ROLLBACK_INITIAL_RW_VERSION)
 
-    def _download_firmware(self, gs_path, dut_file_path):
-        """Downloads firmware from Google Storage bucket."""
-        bucket = os.path.dirname(gs_path)
-        filename = os.path.basename(gs_path)
-        logging.info('Downloading firmware, '
-                     'bucket: %s, filename: %s, dest: %s',
-                     bucket, filename, dut_file_path)
-        gsutil_wrapper.copy_private_bucket(host=self.host,
-                                           bucket=bucket,
-                                           filename=filename,
-                                           destination=dut_file_path)
-        return os.path.join(dut_file_path, filename)
+    def fp_updater_is_enabled(self):
+        """Returns whether the fingerprint firmware updater is disabled."""
+        cmd = 'test -f %s' % os.path.join(self._FINGERPRINT_BUILD_FW_DIR,
+                                          self._DISABLE_FP_UPDATER_FILE)
+        result = self.run_cmd(cmd)
+        # If the magic file isn't there, the updater is enabled.
+        if result.exit_status == 0:
+            logging.info('fp firmware updater is disabled')
+            return False
+        else:
+            logging.info('fp firmware updater is enabled')
+            return True
 
-    def flash_rw_firmware(self, fw_path):
-        """Flashes the RW (read-write) firmware."""
-        flash_cmd = os.path.join(self._dut_working_dir,
-                                 'flash_fp_rw.sh' + ' ' + fw_path)
-        result = self.run_cmd(flash_cmd)
+    def disable_fp_updater(self):
+        """Disable the fingerprint firmware updater."""
+        filesystem_util.make_rootfs_writable(self.host)
+        touch_cmd = 'touch %s' % os.path.join(self._FINGERPRINT_BUILD_FW_DIR,
+                                              self._DISABLE_FP_UPDATER_FILE)
+        logging.info('Disabling fp firmware updater')
+        result = self.run_cmd(touch_cmd)
         if result.exit_status != 0:
-            raise error.TestFail('Flashing RW firmware failed')
+            raise error.TestFail(
+                    'Unable to write file to disable fp updater:'
+                    ' command failed (rc=%s): %s' %
+                    (result.exit_status, result.stderr.strip() or touch_cmd))
+        self.run_cmd('sync')
+
+    def enable_fp_updater(self):
+        """
+        Enable the fingerprint firmware updater. Must be called only after
+        disable_fp_updater().
+        """
+        filesystem_util.make_rootfs_writable(self.host)
+        rm_cmd = 'rm %s' % os.path.join(self._FINGERPRINT_BUILD_FW_DIR,
+                                        self._DISABLE_FP_UPDATER_FILE)
+        logging.info('Enabling fp firmware updater')
+        result = self.run_cmd(rm_cmd)
+        if result.exit_status != 0:
+            raise error.TestFail(
+                    'Unable to rm .disable_fp_updater:'
+                    ' command failed (rc=%s): %s' %
+                    (result.exit_status, result.stderr.strip() or rm_cmd))
+        self.run_cmd('sync')
 
     def flash_rw_ro_firmware(self, fw_path):
         """Flashes *all* firmware (both RO and RW)."""
+        # Disabling the updater should happen before flash_fp_mcu because
+        # removing rootfs verification requires a reboot, which allows the
+        # updater to run.
+        if self.get_host_board() == 'zork' and self.fp_updater_is_enabled():
+            self.disable_fp_updater()
+
         self.set_hardware_write_protect(False)
         flash_cmd = 'flash_fp_mcu' + ' ' + fw_path
         logging.info('Running flash cmd: %s', flash_cmd)
-        result = self.run_cmd(flash_cmd)
+        flash_result = self.run_cmd(flash_cmd)
         self.set_hardware_write_protect(True)
-        if result.exit_status != 0:
+
+        # Zork cannot rebind cros-ec-uart after flashing, so an AP reboot is
+        # needed to talk to FPMCU. See b/170213489.
+        # We have to do this even if flashing failed.
+        if self.get_host_board() == 'zork':
+            self.host.reboot()
+            if self.fp_updater_is_enabled():
+                raise error.TestFail(
+                        'Fp updater was not disabled when firmware is flashed')
+            # If we just re-enable fp updater, it can still update (race
+            # condition), so do it later in cleanup.
+
+        if flash_result.exit_status != 0:
             raise error.TestFail('Flashing RW/RO firmware failed')
 
     def is_hardware_write_protect_enabled(self):

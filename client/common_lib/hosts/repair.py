@@ -38,6 +38,14 @@ except ImportError:
 _HOSTNAME_PATTERN = 'chromeos[0-9]-row[0-9]+[a-z]?-rack[0-9]+[a-z]?-host[0-9]+'
 _DISALLOWED_HOSTNAME = 'disallowed_hostname'
 
+# States of verifiers
+# True - verifier run and passed
+# False - verifier run and failed
+# None - verifier did not run or dependency failed
+VERIFY_SUCCESS = True
+VERIFY_FAILED = False
+VERIFY_NOT_RUN = None
+
 
 class AutoservVerifyError(error.AutoservError):
     """

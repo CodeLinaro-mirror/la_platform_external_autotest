@@ -32,9 +32,11 @@ def run(machine):
 
     with tempfile.NamedTemporaryFile(suffix='.yaml') as temp_file:
         # Writing test arguments to yaml file except for wrapper-related arguments.
-        test_args = args_dict.copy()
-        test_args.pop('test_exprs', None)
-        test_args.pop('max_run_sec', None)
+        test_args = dict()
+        tast_prefix = 'tast_'
+        for key, value in args_dict.items():
+            if key.startswith(tast_prefix):
+                test_args[key] = value.lstrip(tast_prefix)
         yaml.dump(test_args, stream=temp_file, default_flow_style=False)
 
         job.run_test('tast',

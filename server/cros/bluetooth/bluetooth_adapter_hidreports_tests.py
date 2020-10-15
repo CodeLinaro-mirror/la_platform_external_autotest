@@ -4,9 +4,12 @@
 
 """Server side bluetooth tests about sending bluetooth HID reports."""
 
+from __future__ import absolute_import
+
 import logging
 import time
 
+import common
 from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
 
 
@@ -58,12 +61,12 @@ class BluetoothAdapterHIDReportTests(
         self.test_pairable()
 
         # Let the adapter pair, and connect to the target device.
-        time.sleep(self.HID_TEST_SLEEP_SECS)
         self.test_discover_device(device.address)
-        time.sleep(self.HID_TEST_SLEEP_SECS)
         self.test_pairing(device.address, device.pin, trusted=True)
-        time.sleep(self.HID_TEST_SLEEP_SECS)
         self.test_connection_by_adapter(device.address)
+
+        # Run hid test to make sure profile is connected
+        check_connected_method(device)
 
         if suspend_resume:
             self.suspend_resume()
@@ -98,8 +101,9 @@ class BluetoothAdapterHIDReportTests(
             time.sleep(self.HID_TEST_SLEEP_SECS)
             self.test_device_name(device.address, device.name)
 
-        # Run HID test
-        check_connected_method(device)
+        # Run HID test after suspend/reboot as well.
+        if suspend_resume or reboot:
+            check_connected_method(device)
 
         # Disconnect the device, and remove the pairing.
         self.test_disconnection_by_adapter(device.address)

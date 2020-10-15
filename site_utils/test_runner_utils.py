@@ -39,6 +39,7 @@ _sigint_handler_lock = threading.Lock()
 _AUTOSERV_SIGINT_TIMEOUT_SECONDS = 5
 NO_BOARD = 'ad_hoc_board'
 NO_BUILD = 'ad_hoc_build'
+NO_MODEL = 'ad_hoc_model'
 _SUITE_REGEX = r'suite:(.*)'
 
 _TEST_KEY_FILENAME = 'testing_rsa'
@@ -507,11 +508,20 @@ def _auto_detect_labels(afe, remote):
     return labels_to_add_to_afe_host
 
 
-def perform_local_run(afe, autotest_path, tests, remote, fast_mode,
-                      build=NO_BUILD, board=NO_BOARD, args=None,
-                      pretend=False, no_experimental=False,
+def perform_local_run(afe,
+                      autotest_path,
+                      tests,
+                      remote,
+                      fast_mode,
+                      build=NO_BUILD,
+                      board=NO_BOARD,
+                      model=NO_MODEL,
+                      args=None,
+                      pretend=False,
+                      no_experimental=False,
                       ignore_deps=True,
-                      results_directory=None, ssh_verbosity=0,
+                      results_directory=None,
+                      ssh_verbosity=0,
                       ssh_options=None,
                       autoserv_verbose=False,
                       iterations=1,
@@ -530,7 +540,8 @@ def perform_local_run(afe, autotest_path, tests, remote, fast_mode,
     @param remote: Remote hostname.
     @param fast_mode: bool to use fast mode (disables slow autotest features).
     @param build: String specifying build for local run.
-    @param board: String specifyinb board for local run.
+    @param board: String specifying board for local run.
+    @param model: String specifying model for local run.
     @param args: String that should be passed as args parameter to autoserv,
                  and then ultimitely to test itself.
     @param pretend: If True, will print out autoserv commands rather than
@@ -558,7 +569,8 @@ def perform_local_run(afe, autotest_path, tests, remote, fast_mode,
 
     build_label = afe.create_label(cros_version_label)
     board_label = afe.create_label(constants.BOARD_PREFIX + board)
-    labels = [build_label.name, board_label.name]
+    model_label = afe.create_label(constants.MODEL_PREFIX + model)
+    labels = [build_label.name, board_label.name, model_label.name]
 
     new_host = afe.create_host(remote)
     new_host.add_labels(labels)
@@ -805,6 +817,7 @@ def perform_run_from_autotest_root(autotest_path,
                                    remote,
                                    build=NO_BUILD,
                                    board=NO_BOARD,
+                                   model=NO_MODEL,
                                    args=None,
                                    pretend=False,
                                    no_experimental=False,
@@ -832,6 +845,7 @@ def perform_run_from_autotest_root(autotest_path,
     @param remote: Remote hostname.
     @param build: String specifying build for local run.
     @param board: String specifying board for local run.
+    @param model: String specifying model for local run.
     @param args: String that should be passed as args parameter to autoserv,
                  and then ultimitely to test itself.
     @param pretend: If True, will print out autoserv commands rather than
@@ -872,19 +886,25 @@ def perform_run_from_autotest_root(autotest_path,
     signal.signal(signal.SIGTERM, sigint_handler)
 
     afe = setup_local_afe()
-    codes = perform_local_run(afe, autotest_path, tests, remote, fast_mode,
-                      build, board,
-                      args=args,
-                      pretend=pretend,
-                      no_experimental=no_experimental,
-                      ignore_deps=ignore_deps,
-                      results_directory=results_directory,
-                      ssh_verbosity=ssh_verbosity,
-                      ssh_options=ssh_options,
-                      autoserv_verbose=debug,
-                      iterations=iterations,
-                      host_attributes=host_attributes,
-                      job_retry=job_retry)
+    codes = perform_local_run(afe,
+                              autotest_path,
+                              tests,
+                              remote,
+                              fast_mode,
+                              build,
+                              board,
+                              model,
+                              args=args,
+                              pretend=pretend,
+                              no_experimental=no_experimental,
+                              ignore_deps=ignore_deps,
+                              results_directory=results_directory,
+                              ssh_verbosity=ssh_verbosity,
+                              ssh_options=ssh_options,
+                              autoserv_verbose=debug,
+                              iterations=iterations,
+                              host_attributes=host_attributes,
+                              job_retry=job_retry)
     if pretend:
         logging.info('Finished pretend run. Exiting.')
         return 0

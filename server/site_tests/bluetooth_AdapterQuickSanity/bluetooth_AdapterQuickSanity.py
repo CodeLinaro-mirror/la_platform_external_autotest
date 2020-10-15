@@ -1,19 +1,24 @@
+# Lint as: python2, python3
 # Copyright 2019 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """This class implements a Bluetooth quick sanity package"""
 
-from autotest_lib.server.site_tests.bluetooth_AdapterAUSanity import\
-     bluetooth_AdapterAUSanity
-from autotest_lib.server.site_tests.bluetooth_AdapterCLSanity import\
-     bluetooth_AdapterCLSanity
-from autotest_lib.server.site_tests.bluetooth_AdapterLESanity import\
-     bluetooth_AdapterLESanity
-from autotest_lib.server.site_tests.bluetooth_AdapterSASanity import\
-     bluetooth_AdapterSASanity
-from autotest_lib.server.site_tests.bluetooth_AdapterSRSanity import\
-     bluetooth_AdapterSRSanity
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from autotest_lib.server.site_tests.bluetooth_AdapterAUSanity import (
+        bluetooth_AdapterAUSanity)
+from autotest_lib.server.site_tests.bluetooth_AdapterCLSanity import (
+        bluetooth_AdapterCLSanity)
+from autotest_lib.server.site_tests.bluetooth_AdapterLESanity import (
+        bluetooth_AdapterLESanity)
+from autotest_lib.server.site_tests.bluetooth_AdapterSASanity import (
+        bluetooth_AdapterSASanity)
+from autotest_lib.server.site_tests.bluetooth_AdapterSRSanity import (
+        bluetooth_AdapterSRSanity)
+from six.moves import range
 
 class bluetooth_AdapterQuickSanity(
         bluetooth_AdapterAUSanity.bluetooth_AdapterAUSanity,
@@ -31,7 +36,11 @@ class bluetooth_AdapterQuickSanity(
     time of about 90-120 second per test.
     """
 
-    def run_once(self, host, num_iterations=1, flag='Quick Sanity'):
+    def run_once(self,
+                 host,
+                 num_iterations=1,
+                 btpeer_args=[],
+                 flag='Quick Sanity'):
         """Run the package of Bluetooth LE sanity tests
 
         @param host: the DUT, usually a chromebook
@@ -39,11 +48,14 @@ class bluetooth_AdapterQuickSanity(
         """
 
         # Init the quick test and start the package
-        self.quick_test_init(host, use_btpeer=True, flag=flag)
+        self.quick_test_init(host,
+                             use_btpeer=True,
+                             flag=flag,
+                             btpeer_args=btpeer_args)
         self.quick_test_package_start('BT Quick Sanity')
 
         # Run sanity package
-        for iter in xrange(1, num_iterations+1):
+        for iter in range(1, num_iterations+1):
             self.quick_test_package_update_iteration(iter)
             self.sa_sanity_batch_run()
             self.cl_sanity_batch_run()

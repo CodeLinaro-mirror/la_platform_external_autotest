@@ -14,22 +14,21 @@ SERVO_BOARD_ATTR = 'servo_board'
 # Model is inferred from host labels.
 SERVO_MODEL_ATTR = 'servo_model'
 SERVO_SERIAL_ATTR = 'servo_serial'
+# Indicates what type of servo setup, example value: REGULAR or DUAL_V4.
+SERVO_SETUP_ATTR = 'servo_setup'
+SERVO_SETUP_VALUE_DUAL_V4 = 'DUAL_V4'
 SERVO_ATTR_KEYS = (
         SERVO_BOARD_ATTR,
         SERVO_HOST_ATTR,
         SERVO_PORT_ATTR,
         SERVO_SERIAL_ATTR,
+        SERVO_SETUP_ATTR,
 )
 
 # Timeout value for stop/start servod process.
 SERVOD_TEARDOWN_TIMEOUT = 3
 SERVOD_QUICK_STARTUP_TIMEOUT = 20
 SERVOD_STARTUP_TIMEOUT = 60
-
-# pools that support dual v4. (go/cros-fw-lab-strategy)
-POOLS_SUPPORT_DUAL_V4 = {'faft_cr50_debug'
-                         'faft-pd-debug',
-                         'faft_pd_debug'}
 
 # Prefix of pools that require servod cr50 config.
 CR50_CONFIG_POOL_PREFIX = 'faft-cr50'

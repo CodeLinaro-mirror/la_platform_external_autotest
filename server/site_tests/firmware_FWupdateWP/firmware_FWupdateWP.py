@@ -26,7 +26,6 @@ class firmware_FWupdateWP(FirmwareTest):
 
         self._old_bios_wp = self.faft_client.bios.get_write_protect_status()
 
-        # TODO(dgoyette): move this into the general FirmwareTest init?
         stripped_bios = self.faft_client.bios.strip_modified_fwids()
         if stripped_bios:
             logging.warn(

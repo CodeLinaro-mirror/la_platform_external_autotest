@@ -60,8 +60,10 @@ class ps8751(generic_chip):
 
     chip_name = 'ps8751'
     fw_name = 'ps8751_a3'
-    cbfs_bin_name = fw_name + '.bin'
-    cbfs_hash_name = fw_name + '.hash'
+    extension = '.bin'
+    hash_extension = '.hash'
+    cbfs_bin_name = fw_name + extension
+    cbfs_hash_name = fw_name + hash_extension
 
     def fw_ver_from_hash(self, blob):
         """Return the firmware version encoded in the firmware hash."""
@@ -86,8 +88,10 @@ class anx3429(generic_chip):
 
     chip_name = 'anx3429'
     fw_name = 'anx3429_ocm'
-    cbfs_bin_name = fw_name + '.bin'
-    cbfs_hash_name = fw_name + '.hash'
+    extension = '.bin'
+    hash_extension = '.hash'
+    cbfs_bin_name = fw_name + extension
+    cbfs_hash_name = fw_name + hash_extension
 
     def fw_ver_from_hash(self, blob):
         """Return the firmware version encoded in the passed-in hash content."""
@@ -110,8 +114,10 @@ class ecrw(generic_chip):
 
     chip_name = 'ecrw'
     fw_name = 'ecrw'
+    extension = ''
+    hash_extension = '.hash'
     cbfs_bin_name = fw_name
-    cbfs_hash_name = fw_name + '.hash'
+    cbfs_hash_name = fw_name + hash_extension
 
     def compute_hash_bytes(self):
         """Generates the firmware blob hash."""

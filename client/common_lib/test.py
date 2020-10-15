@@ -662,7 +662,7 @@ class base_test(object):
         """
         dargs["profile_only"] = dargs.get("profile_only", False)
         test_basepath = self.outputdir[len(self.job.resultdir + "/"):]
-        return self.job.run_test(url, master_testpath=test_basepath,
+        return self.job.run_test(url, main_testpath=test_basepath,
                                  *args, **dargs)
 
 
@@ -800,7 +800,7 @@ def runtest(job, url, tag, args, dargs,
         if not bindir:
             raise error.TestError(testname + ': test does not exist')
 
-    subdir = os.path.join(dargs.pop('master_testpath', ""), testname)
+    subdir = os.path.join(dargs.pop('main_testpath', ""), testname)
     outputdir = os.path.join(job.resultdir, subdir)
     if tag:
         outputdir += '.' + tag

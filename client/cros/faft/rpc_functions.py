@@ -617,11 +617,19 @@ class KernelServicer(object):
         @type os_if: os_interface.OSInterface
         """
         self._os_if = os_if
-        self._kernel_handler = kernel_handler.KernelHandler()
-        self._kernel_handler.init(
-                self._os_if,
-                dev_key_path='/usr/share/vboot/devkeys',
-                internal_disk=True)
+        self._real_kernel_handler = kernel_handler.KernelHandler(self._os_if)
+
+    @property
+    def _kernel_handler(self):
+        """Return the kernel handler, after initializing it if necessary
+
+        @rtype: kernel_handler.KernelHandler
+        """
+        if not self._real_kernel_handler.initialized:
+            self._real_kernel_handler.init(
+                    dev_key_path='/usr/share/vboot/devkeys',
+                    internal_disk=True)
+        return self._real_kernel_handler
 
     def corrupt_sig(self, section):
         """Corrupt the requested kernel section.
@@ -716,8 +724,17 @@ class RootfsServicer(object):
         @type os_if: os_interface.OSInterface
         """
         self._os_if = os_if
-        self._rootfs_handler = rootfs_handler.RootfsHandler()
-        self._rootfs_handler.init(self._os_if)
+        self._real_rootfs_handler = rootfs_handler.RootfsHandler(self._os_if)
+
+    @property
+    def _rootfs_handler(self):
+        """Return the rootfs handler, after initializing it if necessary
+
+        @rtype: rootfs_handler.RootfsHandler
+        """
+        if not self._real_rootfs_handler.initialized:
+            self._real_rootfs_handler.init()
+        return self._real_rootfs_handler
 
     def verify_rootfs(self, section):
         """Verifies the integrity of the root FS.
@@ -1142,13 +1159,17 @@ class UpdaterServicer(object):
         """Sets up cbfstool work directory."""
         return self._updater.cbfs_setup_work_dir()
 
-    def cbfs_extract_chip(self, fw_name):
+    def cbfs_extract_chip(self,
+                          fw_name,
+                          extension='.bin',
+                          hash_extension='.hash'):
         """Runs cbfstool to extract chip firmware.
 
         @param fw_name: Name of chip firmware to extract.
         @return: Boolean success status.
         """
-        return self._updater.cbfs_extract_chip(fw_name)
+        return self._updater.cbfs_extract_chip(fw_name, extension,
+                                               hash_extension)
 
     def cbfs_extract_diagnostics(self, diag_name, local_filename):
         """Runs cbfstool to extract a diagnostics image.
@@ -1168,7 +1189,7 @@ class UpdaterServicer(object):
         """
         self._updater.cbfs_replace_diagnostics(diag_name, local_filename)
 
-    def cbfs_get_chip_hash(self, fw_name):
+    def cbfs_get_chip_hash(self, fw_name, hash_extension='.hash'):
         """Gets the chip firmware hash blob.
 
         The hash data is returned as a list of stringified two-byte pieces:
@@ -1177,15 +1198,20 @@ class UpdaterServicer(object):
         @param fw_name: Name of chip firmware whose hash blob to return.
         @return: Hex string of hash blob.
         """
-        return self._updater.cbfs_get_chip_hash(fw_name)
+        return self._updater.cbfs_get_chip_hash(fw_name, hash_extension)
 
-    def cbfs_replace_chip(self, fw_name):
+    def cbfs_replace_chip(self,
+                          fw_name,
+                          extension='.bin',
+                          hash_extension='.hash',
+                          regions=('a', 'b')):
         """Runs cbfstool to replace chip firmware.
 
         @param fw_name: Name of chip firmware to extract.
         @return: Boolean success status.
         """
-        return self._updater.cbfs_replace_chip(fw_name)
+        return self._updater.cbfs_replace_chip(fw_name, extension,
+                                               hash_extension, regions)
 
     def cbfs_sign_and_flash(self):
         """Runs cbfs signer and flash it.

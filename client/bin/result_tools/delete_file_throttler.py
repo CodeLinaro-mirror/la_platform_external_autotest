@@ -4,10 +4,14 @@
 
 """This throttler reduces result size by deleting files permanently."""
 
+from __future__ import print_function
+from __future__ import absolute_import
+from __future__ import division
+
 import os
 
-import throttler_lib
-import utils_lib
+from . import throttler_lib
+from . import utils_lib
 
 
 # Default threshold of file size in KB for a file to be qualified for deletion.

@@ -4,6 +4,8 @@
 This file generates all telemetry_Benchmarks control files from a master list.
 """
 
+from __future__ import print_function
+
 from datetime import datetime
 import os
 import re
@@ -154,7 +156,7 @@ def check_unmanaged_control_files():
             continue
         test = filename[len('control.'):]
         if test not in ALL_TESTS:
-            print 'warning, unmanaged control file:', test
+            print('warning, unmanaged control file:', test)
 
 
 def main():

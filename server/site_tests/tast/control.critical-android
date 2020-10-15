@@ -38,6 +38,7 @@ def run(machine):
                              '!informational && '
                              '"dep:android*"'
                              ')'],
+                 download_data_lazily=False,
                  ignore_test_failures=False, max_run_sec=3600,
                  command_args=args)
 

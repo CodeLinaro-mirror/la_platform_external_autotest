@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -29,13 +30,20 @@ if min advertising interval is set to an expected value" or
 
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import copy
 import logging
 import re
 import time
 
+import common
 from autotest_lib.server.cros.bluetooth import advertisements_data
 from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
+from six.moves import range
+from six.moves import zip
 
 test_case_log = bluetooth_adapter_tests.test_case_log
 test_retry_and_log = bluetooth_adapter_tests.test_retry_and_log
@@ -62,7 +70,7 @@ class bluetooth_AdapterLEAdvertising(
         @param advertisements: a list of advertisements.
 
         """
-        return range(1, len(advertisements) + 1)
+        return list(range(1, len(advertisements) + 1))
 
 
     def register_advertisements(self, advertisements, min_adv_interval_ms,
@@ -250,7 +258,7 @@ class bluetooth_AdapterLEAdvertising(
 
         # We locate the advertisement by searching for the ServiceData
         # attribute we configured.
-        data_to_match = advertisement['ServiceData'].keys()[0]
+        data_to_match = list(advertisement['ServiceData'].keys())[0]
 
         # TODO Reduce discovery time once b/153027105 is resolved
         advertising_wait_time = 120
@@ -1243,6 +1251,30 @@ class bluetooth_AdapterLEAdvertising(
 
         self.unregister_advertisements(advertisements)
 
+    @test_case_log
+    def test_case_nearby_mediums_fast(self):
+        """Verify minimal test case for nearby sharing"""
+        orig_min_adv_interval_ms = self.DAFAULT_MIN_ADVERTISEMENT_INTERVAL_MS
+        orig_max_adv_interval_ms = self.DAFAULT_MIN_ADVERTISEMENT_INTERVAL_MS
+
+        # We set a specific advertisement with fields required by Nearby
+        # sharing service
+        advertisements = [advertisements_data.NEARBY_MEDIUMS_FAST_ADV]
+
+        self.bluetooth_le_facade = self.bluetooth_facade
+        self.test_reset_advertising()
+
+        # Nearby share requires general discoverable advertising flag be set.
+        # Bluez sets this flag based on the adapter's Discoverable property,
+        # so we apply this setting here
+        self.bluetooth_facade.set_discoverable(True)
+
+        self.register_advertisements(advertisements, orig_min_adv_interval_ms,
+                                     orig_max_adv_interval_ms)
+
+        # Ensure that our discoverable flag is advertised
+        self.test_advertising_flags(['Advertise as Discoverable'])
+
     def run_le_advertising_test(self, host, advertisements, test_type, \
                                 num_iterations=1):
         """Running Bluetooth adapter LE advertising autotest.
@@ -1279,12 +1311,18 @@ class bluetooth_AdapterLEAdvertising(
             self.test_case_SI200_RA3_CD_RS()
             self.test_case_SI200_RA3_CD_UA1_CD_RS()
             self.test_case_SI200_RA3_CD_UA1_CD_RA2_CD_UA4()
-            self.test_case_SI200_RA5_CD_FRA1_CD_UA5()
+            # TODO (b/169603469) this test will fail on platforms supporting
+            # >5 advertising slots due to new advertising feature, so disable
+            # until test can be refactored.
+            # self.test_case_SI200_RA5_CD_FRA1_CD_UA5()
             self.test_case_RA3_CD_SI200_CD_UA3()
             self.test_case_RA3_CD_SI200_CD_RS()
             self.test_case_RA3_CD_SI200_CD_UA1_CD_RS()
             self.test_case_RA3_CD_SI200_CD_SI2000_CD_UA3()
-            self.test_case_RA5_CD_SI200_CD_FRA1_CD_UA5()
+            # TODO (b/169603469) this test will fail on platforms supporting
+            # >5 advertising slots due to new advertising feature, so disable
+            # until test can be refactored.
+            # self.test_case_RA5_CD_SI200_CD_FRA1_CD_UA5()
             self.test_case_RA3_CD_SI200_CD_FSI10_CD_FSI20000_CD_UA3()
             self.test_case_SI200_RA3_CD_SR_CD_UA3()
             self.test_case_RA3_CD_SI200_CD_SR_CD_UA3()
@@ -1309,7 +1347,7 @@ class bluetooth_AdapterLEAdvertising(
 
         elif test_type == 'suspend_resume':
             # Run all test cases for suspend resume stress testing.
-            for i in xrange(num_iterations):
+            for i in range(num_iterations):
                 logging.info('Starting suspend resume loop #%d', i+1)
                 self.test_case_SI200_RA3_CD_SR_CD_UA3()
                 self.test_case_RA3_CD_SI200_CD_SR_CD_UA3()
@@ -1318,7 +1356,7 @@ class bluetooth_AdapterLEAdvertising(
 
         elif test_type == 'reboot':
             # Run all test cases for reboot stress testing.
-            for i in xrange(num_iterations):
+            for i in range(num_iterations):
                 logging.info('Starting reboot loop #%d', i+1)
                 self.test_case_SI200_RA3_CD_PC_CD_UA3()
                 self.test_case_RA3_CD_SI200_CD_PC_CD_UA3()

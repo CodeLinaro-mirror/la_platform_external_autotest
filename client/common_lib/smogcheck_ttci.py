@@ -58,9 +58,9 @@ class TtciController(object):
 
             # Initialize INA219 module.
             self.ina_main_obj = smogcheck_ina219.InaController(
-                slave_addr=INA219_MPWR_SLV)
+                node_addr=INA219_MPWR_SLV)
             self.ina_backup_obj = smogcheck_ina219.InaController(
-                slave_addr=INA219_BPWR_SLV)
+                node_addr=INA219_BPWR_SLV)
         except smogcheck_pca9555.PcaError, e:
             raise TtciError('Error initialize PCA9555 module: %s' % e)
         except smogcheck_ina219.InaError, e:
