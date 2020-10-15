@@ -72,7 +72,7 @@ class bluetooth_AdapterCLSanity(BluetoothAdapterQuickTests,
                           self.run_keyboard_tests)
 
 
-    @test_wrapper('Pairing Suspend Resume Test', devices={"MOUSE":1})
+    @test_wrapper('Pairing Suspend Resume Test', devices={"MOUSE": 1})
     def cl_adapter_pairing_suspend_resume_test(self):
         """Performs pairing test over resume with mouse peripheral"""
         device = self.devices['MOUSE'][0]
@@ -110,7 +110,7 @@ class bluetooth_AdapterCLSanity(BluetoothAdapterQuickTests,
                           self.run_keyboard_tests)
 
 
-    @test_wrapper('HID Reports Suspend Resume Test', devices={"MOUSE":1})
+    @test_wrapper('HID Reports Suspend Resume Test', devices={"MOUSE": 1})
     def cl_HID_reports_suspend_resume_test(self):
         """Performs HID report test over resume with mouse peripheral"""
         device = self.devices['MOUSE'][0]

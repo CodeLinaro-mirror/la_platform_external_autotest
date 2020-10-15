@@ -474,21 +474,6 @@ def is_vault_mounted(user, regexes=None, allow_fail=False):
         if not re.match(device_regex, mount_info[0]):
             return False
 
-        if (re.match(constants.CRYPTOHOME_FS_REGEX_EXT4, mount_info[2])
-            and not(re.match(constants.CRYPTOHOME_DEV_REGEX_LOOP_DEVICE,
-                             mount_info[0]))):
-            # Ephemeral cryptohome uses ext4 mount from a loop device,
-            # otherwise it should be ext4 crypto. Check there is an encryption
-            # key for that directory.
-            find_key_cmd_list = ['e4crypt  get_policy %s' % (mount_info[1]),
-                                 'cut -d \' \' -f 2']
-            key = __run_cmd(' | ' .join(find_key_cmd_list))
-            cmd_list = ['keyctl show @s',
-                        'grep %s' % (key),
-                        'wc -l']
-            out = __run_cmd(' | '.join(cmd_list))
-            if int(out) != 1:
-                return False
     return True
 
 

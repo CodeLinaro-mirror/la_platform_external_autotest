@@ -696,9 +696,7 @@ class AbstractStats(object):
             results['wavg_%s' % (name)] = wavg
 
 
-    def __init__(self, name=None, incremental=True):
-        if not name:
-            raise error.TestFail("Need to name AbstractStats instance please.")
+    def __init__(self, name, incremental=True):
         self.name = name
         self.incremental = incremental
         self._stats = self._read_stats()
@@ -775,10 +773,9 @@ def count_all_cpus():
 
 def get_online_cpus():
     """
-    Return list of integer cpu numbers that are online.
+    Return frozenset of integer cpu numbers that are online.
     """
-    cpus = [int(f.split('/')[-1]) for f in glob.iglob('/dev/cpu/[0-9]*')]
-    return frozenset(cpus)
+    return frozenset(read_cpu_set('/sys/devices/system/cpu/online'))
 
 def get_cpus_filepaths_for_suffix(cpus, suffix):
     """
@@ -792,13 +789,14 @@ def get_cpus_filepaths_for_suffix(cpus, suffix):
     for c in cpus:
         c_file_path = os.path.join(CPU_BASE_PATH, 'cpu%d' % c, suffix)
         if os.path.exists(c_file_path):
-          available_cpus.append(c)
-          available_paths.append(c_file_path)
+            available_cpus.append(c)
+            available_paths.append(c_file_path)
     return (available_cpus, available_paths)
 
-class CPUFreqStats(AbstractStats):
+
+class CPUFreqStatsPState(AbstractStats):
     """
-    CPU Frequency statistics
+    CPU Frequency statistics for intel_pstate
     """
     MSR_PLATFORM_INFO = 0xce
     MSR_IA32_MPERF = 0xe7
@@ -806,20 +804,67 @@ class CPUFreqStats(AbstractStats):
 
     def __init__(self, cpus=None):
         name = 'cpufreq'
-        stats_suffix = 'cpufreq/stats/time_in_state'
-        key_suffix = 'cpufreq/scaling_available_frequencies'
-        cpufreq_driver = '/sys/devices/system/cpu/cpu0/cpufreq/scaling_driver'
         if not cpus:
             cpus = get_online_cpus()
-        _, self._file_paths = get_cpus_filepaths_for_suffix(cpus,
-                                                            stats_suffix)
+        self._cpus = cpus
 
         if len(cpus) and len(cpus) < count_all_cpus():
             name = '%s_%s' % (name, '_'.join([str(c) for c in cpus]))
-        self._running_intel_pstate = False
+
         self._initial_perf = None
         self._current_perf = None
-        self._max_freq = 0
+
+        # max_freq is supposed to be the same for all CPUs and remain
+        # constant throughout. So, we set the entry only once.
+        # Note that this is max non-turbo frequency, some CPU can run at
+        # higher turbo frequency in some condition.
+        platform_info = utils.rdmsr(self.MSR_PLATFORM_INFO)
+        mul = platform_info >> 8 & 0xff
+        bclk = utils.get_intel_bclk_khz()
+        self._max_freq = mul * bclk
+
+        super(CPUFreqStatsPState, self).__init__(name)
+
+    def _read_stats(self):
+        aperf = 0
+        mperf = 0
+
+        for cpu in self._cpus:
+            aperf += utils.rdmsr(self.MSR_IA32_APERF, cpu)
+            mperf += utils.rdmsr(self.MSR_IA32_MPERF, cpu)
+
+        if not self._initial_perf:
+            self._initial_perf = (aperf, mperf)
+
+        self._current_perf = (aperf, mperf)
+
+        return {}
+
+    def _weighted_avg_fn(self):
+        if (self._current_perf
+                    and self._current_perf[1] != self._initial_perf[1]):
+            # Avg freq = max_freq * aperf_delta / mperf_delta
+            return self._max_freq * \
+                float(self._current_perf[0] - self._initial_perf[0]) / \
+                (self._current_perf[1] - self._initial_perf[1])
+        return 1.0
+
+
+class CPUFreqStats(AbstractStats):
+    """
+    CPU Frequency statistics
+    """
+
+    def __init__(self, cpus=None):
+        name = 'cpufreq'
+        stats_suffix = 'cpufreq/stats/time_in_state'
+        key_suffix = 'cpufreq/scaling_available_frequencies'
+        if not cpus:
+            cpus = get_online_cpus()
+        _, self._file_paths = get_cpus_filepaths_for_suffix(cpus, stats_suffix)
+
+        if len(cpus) and len(cpus) < count_all_cpus():
+            name = '%s_%s' % (name, '_'.join([str(c) for c in cpus]))
         self._cpus = cpus
         self._available_freqs = set()
 
@@ -827,44 +872,14 @@ class CPUFreqStats(AbstractStats):
             logging.debug('time_in_state file not found')
 
         # assumes cpufreq driver for CPU0 is the same as the others.
-        freq_driver = utils.read_one_line(cpufreq_driver)
-        if freq_driver == 'intel_pstate':
-            logging.debug('intel_pstate driver active')
-            self._running_intel_pstate = True
-        else:
-            _, cpufreq_key_paths = get_cpus_filepaths_for_suffix(cpus,
-                                                                 key_suffix)
-            for path in cpufreq_key_paths:
-                self._available_freqs |= set(int(x) for x in
-                                             utils.read_file(path).split())
+        _, cpufreq_key_paths = get_cpus_filepaths_for_suffix(cpus, key_suffix)
+        for path in cpufreq_key_paths:
+            self._available_freqs |= set(
+                    int(x) for x in utils.read_file(path).split())
 
-        super(CPUFreqStats, self).__init__(name=name)
-
+        super(CPUFreqStats, self).__init__(name)
 
     def _read_stats(self):
-        if self._running_intel_pstate:
-            aperf = 0
-            mperf = 0
-
-            for cpu in self._cpus:
-                aperf += utils.rdmsr(self.MSR_IA32_APERF, cpu)
-                mperf += utils.rdmsr(self.MSR_IA32_MPERF, cpu)
-
-            # max_freq is supposed to be the same for all CPUs and remain
-            # constant throughout. So, we set the entry only once.
-            # Note that this is max non-turbo frequency, some CPU can run at
-            # higher turbo frequency in some condition.
-            if not self._max_freq:
-                platform_info = utils.rdmsr(self.MSR_PLATFORM_INFO)
-                mul = platform_info >> 8 & 0xff
-                bclk = utils.get_intel_bclk_khz()
-                self._max_freq = mul * bclk
-
-            if not self._initial_perf:
-                self._initial_perf = (aperf, mperf)
-
-            self._current_perf = (aperf, mperf)
-
         stats = dict((k, 0) for k in self._available_freqs)
         for path in self._file_paths:
             if not os.path.exists(path):
@@ -882,21 +897,8 @@ class CPUFreqStats(AbstractStats):
                     stats[freq] = timeunits
         return stats
 
-
     def _supports_automatic_weighted_average(self):
-        return not self._running_intel_pstate
-
-
-    def _weighted_avg_fn(self):
-        if not self._running_intel_pstate:
-            return None
-
-        if self._current_perf[1] != self._initial_perf[1]:
-            # Avg freq = max_freq * aperf_delta / mperf_delta
-            return self._max_freq * \
-                float(self._current_perf[0] - self._initial_perf[0]) / \
-                (self._current_perf[1] - self._initial_perf[1])
-        return 1.0
+        return True
 
 
 class CPUCStateStats(AbstractStats):
@@ -905,7 +907,7 @@ class CPUCStateStats(AbstractStats):
     """
     def __init__(self, name, non_c0_stat=''):
         self._non_c0_stat = non_c0_stat
-        super(CPUCStateStats, self).__init__(name=name)
+        super(CPUCStateStats, self).__init__(name)
 
 
     def to_percent(self, stats):
@@ -1062,7 +1064,7 @@ class DevFreqStats(AbstractStats):
     _DIR = '/sys/class/devfreq'
 
 
-    def __init__(self, f):
+    def __init__(self, path):
         """Constructs DevFreqStats Object that track frequency stats
         for the path of the given Devfreq device.
 
@@ -1074,15 +1076,17 @@ class DevFreqStats(AbstractStats):
         Example:
             /sys/class/devfreq/dmc
         """
-        self._path = os.path.join(self._DIR, f)
+        self._path = os.path.join(self._DIR, path)
         if not os.path.exists(self._path):
-            raise error.TestError('DevFreqStats: devfreq device does not exist')
+            raise error.TestError(
+                    'DevFreqStats: devfreq device does not exist: %s' %
+                    self._path)
 
         fname = os.path.join(self._path, 'available_frequencies')
         af = utils.read_one_line(fname).strip()
         self._available_freqs = sorted(af.split(), key=int)
 
-        super(DevFreqStats, self).__init__(name=f)
+        super(DevFreqStats, self).__init__(path)
 
     def _read_stats(self):
         stats = dict((freq, 0) for freq in self._available_freqs)
@@ -1206,7 +1210,7 @@ class GPUFreqStats(AbstractStats):
             events = self._I915_EVENTS
             with open(i915_path) as fd:
                 for ln in fd.readlines():
-                    logging.debug("ln = %s", ln)
+                    logging.debug("ln = %s", ln.strip())
                     result = re.findall(self._I915_CUR_FREQ_RE, ln)
                     if result:
                         cur_mhz = result[0]
@@ -1238,7 +1242,7 @@ class GPUFreqStats(AbstractStats):
             logging.debug("Current GPU freq: %s", cur_mhz)
             logging.debug("All GPU freqs: %s", self._freqs)
 
-        super(GPUFreqStats, self).__init__(name='gpufreq', incremental=incremental)
+        super(GPUFreqStats, self).__init__('gpufreq', incremental=incremental)
 
 
     @classmethod
@@ -1340,7 +1344,7 @@ class USBSuspendStats(AbstractStats):
         self._file_paths = glob.glob(usb_stats_path)
         if not self._file_paths:
             logging.debug('USB stats path not found')
-        super(USBSuspendStats, self).__init__(name='usb')
+        super(USBSuspendStats, self).__init__('usb')
 
 
     def _read_stats(self):
@@ -1366,6 +1370,24 @@ class USBSuspendStats(AbstractStats):
         return usb_stats
 
 
+def read_cpu_set(filename):
+    """
+    Parse data of form "0,2-4,9"
+
+    Return a set of ints
+    """
+    data = utils.read_file(filename)
+    ret = set()
+
+    for entry in data.split(','):
+        entry_data = entry.split('-')
+        start = end = int(entry_data[0])
+        if len(entry_data) > 1:
+            end = int(entry_data[1])
+        ret |= set(range(start, end + 1))
+    return ret
+
+
 def get_cpu_sibling_groups():
     """
     Get CPU core groups in HMP systems.
@@ -1382,15 +1404,7 @@ def get_cpu_sibling_groups():
         if c in cpus_processed:
             # This cpu is already part of a sibling group. Skip.
             continue
-        siblings_data = utils.read_file(siblings_path)
-        sibling_group = set()
-        for sibling_entry in siblings_data.split(','):
-            entry_data = sibling_entry.split('-')
-            sibling_start = sibling_end = int(entry_data[0])
-            if len(entry_data) > 1:
-              sibling_end = int(entry_data[1])
-            siblings = set(range(sibling_start, sibling_end + 1))
-            sibling_group |= siblings
+        sibling_group = read_cpu_set(siblings_path)
         cpus_processed |= sibling_group
         sibling_groups.append(frozenset(sibling_group))
     return tuple(sibling_groups)
@@ -1400,11 +1414,19 @@ def get_available_cpu_stats():
     """Return CPUFreq/CPUIdleStats groups by big-small siblings groups."""
     ret = [CPUPackageStats()]
     cpu_sibling_groups = get_cpu_sibling_groups()
+
+    cpufreq_stat_class = CPUFreqStats
+    # assumes cpufreq driver for CPU0 is the same as the others.
+    cpufreq_driver = '/sys/devices/system/cpu/cpu0/cpufreq/scaling_driver'
+    if utils.read_one_line(cpufreq_driver) == 'intel_pstate':
+        logging.debug('intel_pstate driver active')
+        cpufreq_stat_class = CPUFreqStatsPState
+
     if not cpu_sibling_groups:
-        ret.append(CPUFreqStats())
+        ret.append(cpufreq_stat_class())
         ret.append(CPUIdleStats())
     for cpu_group in cpu_sibling_groups:
-        ret.append(CPUFreqStats(cpu_group))
+        ret.append(cpufreq_stat_class(cpu_group))
         ret.append(CPUIdleStats(cpu_group))
     if has_rc6_support():
         ret.append(GPURC6Stats())
@@ -1802,10 +1824,8 @@ class MeasurementLogger(threading.Thread):
         self.readings = []
         self.times = []
 
-        self.domains = []
         self._measurements = measurements
-        for meas in self._measurements:
-            self.domains.append(meas.domain)
+        self.domains = [meas.domain for meas in self._measurements]
 
         self._checkpoint_logger = \
             checkpoint_logger if checkpoint_logger else CheckpointLogger()
@@ -1822,10 +1842,7 @@ class MeasurementLogger(threading.Thread):
         Returns:
             list of sampled data for every measurements.
         """
-        readings = []
-        for meas in self._measurements:
-            readings.append(meas.refresh())
-        return readings
+        return [meas.refresh() for meas in self._measurements]
 
     def run(self):
         """Threads run method."""
@@ -1906,7 +1923,18 @@ class MeasurementLogger(threading.Thread):
 
         for i, domain_readings in enumerate(zip(*self.readings)):
             meas = numpy.array(domain_readings)
-            domain = self.domains[i]
+            try:
+                domain = self.domains[i]
+            except IndexError:
+                # TODO (evanbenn) temp logging for b:162610351
+                logging.debug('b:162610351 IndexError: %s, %d, %d, (%s)',
+                              type(self).__name__,
+                              len(self.readings),
+                              len(self.domains),
+                              ', '.join(str(len(r)) for r in self.readings))
+                logging.debug('b:162610351 domains: %s',
+                              ', '.join(self.domains))
+                raise
 
             for tname, tlist in self._checkpoint_logger.checkpoint_data.iteritems():
                 if tname:
@@ -1967,18 +1995,18 @@ class MeasurementLogger(threading.Thread):
                           will be [fname]_[raw|summary].txt
         """
         if not fname_prefix:
-          fname_prefix = 'meas_results_%.0f' % time.time()
+            fname_prefix = 'meas_results_%.0f' % time.time()
         fname = '%s_summary.txt' % fname_prefix
         raw_fname = fname.replace('summary', 'raw')
         for name, data in [(fname, self._results),
                            (raw_fname, self._raw_results)]:
-          with open(os.path.join(resultsdir, name), 'wt') as f:
-              # First row contains the headers
-              f.write('%s\n' % '\t'.join(data[0]))
-              for row in data[1:]:
-                  # First column name, rest are numbers. See _calc_power()
-                  fmt_row = [row[0]] + ['%.2f' % x for x in row[1:]]
-                  f.write('%s\n' % '\t'.join(fmt_row))
+            with open(os.path.join(resultsdir, name), 'wt') as f:
+                # First row contains the headers
+                f.write('%s\n' % '\t'.join(data[0]))
+                for row in data[1:]:
+                    # First column name, rest are numbers. See _calc_power()
+                    fmt_row = [row[0]] + ['%.2f' % x for x in row[1:]]
+                    f.write('%s\n' % '\t'.join(fmt_row))
 
 
 class CPUStatsLogger(MeasurementLogger):
@@ -2303,11 +2331,28 @@ class FanRpmLogger(MeasurementLogger):
     def refresh(self):
         @retry.retry(Exception, timeout_min=0.1, delay_sec=2)
         def get_fan_rpm_all():
-            cmd = 'ectool pwmgetfanrpm all | cut -f 2 -d: | xargs'
+            """Some example outputs from ectool
+
+            * Two fan system
+            localhost ~ # ectool pwmgetfanrpm all
+            Fan 0 RPM: 4012
+            Fan 1 RPM: 4009
+
+            * One fan but its stalled
+            localhost ~ # ectool pwmgetfanrpm all
+            Fan 0 stalled!
+            """
+            cmd = 'ectool pwmgetfanrpm all'
             res = utils.run(cmd, ignore_status=True,
                             stdout_tee=utils.TEE_TO_LOGS,
                             stderr_tee=utils.TEE_TO_LOGS)
-            return [int(rpm) for rpm in res.stdout.split(' ')]
+            rpm_data = []
+            for i, ln in enumerate(res.stdout.splitlines()):
+                if ln.find('stalled') != -1:
+                    rpm_data.append(0)
+                else:
+                    rpm_data.append(int(ln.split(':')[1]))
+            return rpm_data
         return get_fan_rpm_all()
 
     def save_results(self, resultsdir, fname_prefix=None):
@@ -2652,13 +2697,14 @@ class RC6ResidencyStats(object):
         # Note that the max counter is bound for sysfs overflow, while the
         # accumulated residency here is the diff against the first reading.
         if current_stat < self._previous_stat:
-          if self._max_counter is None:
-            logging.warning('GPU: Detect rc6_residency_ms wraparound')
-            self._accumulated_stat += current_stat
-          else:
-            self._accumulated_stat += current_stat + (self._max_counter - self._previous_stat)
+            if self._max_counter is None:
+                logging.warning('GPU: Detect rc6_residency_ms wraparound')
+                self._accumulated_stat += current_stat
+            else:
+                self._accumulated_stat += current_stat + (self._max_counter -
+                                                          self._previous_stat)
         else:
-          self._accumulated_stat += current_stat - self._previous_stat
+            self._accumulated_stat += current_stat - self._previous_stat
 
         self._previous_stat = current_stat
         return self._accumulated_stat

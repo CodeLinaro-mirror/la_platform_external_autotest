@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # pylint: disable-msg=C0111
 
 # Copyright (c) 2011 The Chromium OS Authors. All rights reserved.
@@ -10,6 +11,10 @@ This is the core infrastructure. Derived from the client side job.py
 
 Copyright Martin J. Bligh, Andy Whitcroft 2007
 """
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import errno
 import fcntl
@@ -38,6 +43,7 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import logging_manager
 from autotest_lib.client.common_lib import packages
 from autotest_lib.client.common_lib import utils
+from autotest_lib.client.common_lib import seven
 from autotest_lib.server import profilers
 from autotest_lib.server import site_gtest_runner
 from autotest_lib.server import subcommand
@@ -55,6 +61,7 @@ from autotest_lib.server.hosts import host_info
 from autotest_lib.server.hosts import ssh_multiplex
 from autotest_lib.tko import models as tko_models
 from autotest_lib.tko import parser_lib
+from six.moves import zip
 
 try:
     from chromite.lib import metrics
@@ -640,7 +647,7 @@ class server_job(base_job.base_job):
         results = self.parallel_simple(function, machines, timeout=timeout,
                                        return_results=True)
         success_machines = []
-        for result, machine in itertools.izip(results, machines):
+        for result, machine in zip(results, machines):
             if not isinstance(result, Exception):
                 success_machines.append(machine)
         return success_machines
@@ -891,7 +898,7 @@ class server_job(base_job.base_job):
         if not self._sync_offload_dir:
             return ''
         if self._client:
-          return os.path.join(DUT_STATEFUL_PATH, self._sync_offload_dir)
+            return os.path.join(DUT_STATEFUL_PATH, self._sync_offload_dir)
         return os.path.join(self.resultdir, self._sync_offload_dir)
 
     def _maybe_retrieve_client_offload_dirs(self):
@@ -946,11 +953,11 @@ class server_job(base_job.base_job):
         """
         # Make the server-side directory regardless
         try:
-          # 2.7 makedirs doesn't have an option for pre-existing directories
-          os.makedirs(self._server_offload_dir_path())
+            # 2.7 makedirs doesn't have an option for pre-existing directories
+            os.makedirs(self._server_offload_dir_path())
         except OSError as e:
-          if e.errno != errno.EEXIST:
-            raise
+            if e.errno != errno.EEXIST:
+                raise
         if not self._client:
             offload_path = self._offload_dir_target_path()
             marker_string = "server %s%s" % (
@@ -1436,7 +1443,7 @@ class server_job(base_job.base_job):
                 existing_machines_text = None
             if machines_text != existing_machines_text:
                 utils.open_write_close(MACHINES_FILENAME, machines_text)
-        execfile(code_file, namespace, namespace)
+        seven.exec_file(code_file, locals_=namespace, globals_=namespace)
 
 
     def preprocess_client_state(self):
@@ -1475,7 +1482,7 @@ class server_job(base_job.base_job):
         try:
             self._state.read_from_file(state_path)
             os.remove(state_path)
-        except OSError, e:
+        except OSError as e:
             # ignore file-not-found errors
             if e.errno != errno.ENOENT:
                 raise

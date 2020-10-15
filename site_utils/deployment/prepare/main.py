@@ -83,6 +83,9 @@ def main():
     if 'run-pre-deploy-verification' in opts.actions:
       try:
         preparedut.verify_ccd_testlab_enable(host)
+        if host_info.get().os == "labstation":
+            logging.info("testing RPM information on labstation")
+            preparedut.verify_labstation_RPM_config_unsafe(host)
       except Exception as err:
         logging.error("fail on pre-deploy verification: %s", err)
         return RETURN_CODES.PRE_DEPLOY_VERIFICATION_FAILURE

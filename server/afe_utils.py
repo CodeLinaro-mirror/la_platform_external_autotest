@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2016 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,51 +10,17 @@ NOTE: This module should only be used in the context of a running test. Any
       their own instance of the AFE client and interact with it directly.
 """
 
-import common
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import logging
 import traceback
-import urlparse
 
-from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import error
-from autotest_lib.server.cros import autoupdater
 from autotest_lib.server.cros import provision
+from autotest_lib.server.cros import provisioner
 from autotest_lib.server import site_utils as server_utils
-from autotest_lib.server.cros.dynamic_suite import constants as ds_constants
-from autotest_lib.server.cros.dynamic_suite import tools
-
-from chromite.lib import auto_updater
-# TODO(crbug.com/1066686) remove this try/except when moblab is using more
-# recent chromite.
-try:
-   from chromite.lib import auto_updater_transfer
-except ImportError:
-   pass
-from chromite.lib import remote_access
-
-
-_CONFIG = global_config.global_config
-ENABLE_DEVSERVER_TRIGGER_AUTO_UPDATE = _CONFIG.get_config_value(
-        'CROS', 'enable_devserver_trigger_auto_update', type=bool,
-        default=False)
-
-DEVICE_BASE_DIR = '/usr/local/tmp/au-provision'
-
-def _host_in_lab(host):
-    """Check if the host is in the lab and an object the AFE knows.
-
-    This check ensures that autoserv and the host's current job is running
-    inside a fully Autotest instance, aka a lab environment. If this is the
-    case it then verifies the host is registed with the configured AFE
-    instance.
-
-    @param host: Host object to verify.
-
-    @returns The host model object.
-    """
-    if not host.job or not host.job.in_lab:
-        return False
-    return host._afe_host
 
 
 def _log_image_name(image_name):
@@ -123,7 +90,7 @@ def clean_provision_labels(host):
     info.clear_version_labels()
     attributes = host.get_attributes_to_clear_before_provision()
     for key in attributes:
-      info.attributes.pop(key, None)
+        info.attributes.pop(key, None)
 
     host.host_info_store.commit(info)
 
@@ -144,15 +111,12 @@ def add_provision_labels(host, version_prefix, image_name,
     host.host_info_store.commit(info)
 
 
-def machine_install_and_update_labels(host, update_url,
-                                      use_quick_provision=False,
-                                      with_cheets=False, staging_server=None):
+def machine_install_and_update_labels(host, update_url, with_cheets=False,
+                                      staging_server=None):
     """Install a build and update the version labels on a host.
 
     @param host: Host object where the build is to be installed.
     @param update_url: URL of the build to install.
-    @param use_quick_provision:  If true, then attempt to use
-        quick-provision for the update.
     @param with_cheets: If true, installation is for a specific, custom
         version of Android for a target running ARC.
     @param staging_server: Server where images have been staged. Typically,
@@ -160,55 +124,10 @@ def machine_install_and_update_labels(host, update_url,
     """
     clean_provision_labels(host)
 
-    if use_quick_provision:
-        image_name, host_attributes = _provision_with_quick_provision(
-            host, update_url)
-    else:
-        image_name, host_attributes = _provision_with_au(host, update_url,
-                                                         staging_server)
+    logging.debug('Attempting to provision with quick-provision.')
+    cros_provisioner = provisioner.ChromiumOSProvisioner(update_url, host=host)
+    image_name, host_attributes = cros_provisioner.run_provision()
 
     if with_cheets:
         image_name += provision.CHEETS_SUFFIX
     add_provision_labels(host, host.VERSION_PREFIX, image_name, host_attributes)
-
-def _provision_with_au(host, update_url, staging_server):
-    """Installs a build on the host using chromite ChromiumOSUpdater.
-
-    @param host: Host object where the build is to be installed.
-    @param update_url: URL of the build to install.
-    @param staging_server: Server where images have been staged. Typically,
-        an instance of dev_server.ImageServer.
-
-    @returns A tuple of the form `(image_name, host_attributes)`, where
-        'image_name' is the name of the image installed, and 'host_attributes'
-        are new attributes to be applied to the DUT.
-    """
-    logging.debug("Attempting to provision with Chromite ChromiumOSUpdater.")
-    # Get image_name in the format <board>-release/Rxx-12345.0.0 from the
-    # update_url.
-    image_name = '/'.join(urlparse.urlparse(update_url).path.split('/')[-2:])
-    with remote_access.ChromiumOSDeviceHandler(
-          host.ip, base_dir=DEVICE_BASE_DIR) as device:
-        updater = auto_updater.ChromiumOSUpdater(
-            device, None, image_name, auto_updater_transfer.LabTransfer,
-            staging_server=staging_server.url(), reboot=True,
-            clear_tpm_owner=True)
-        updater.RunUpdate()
-    repo_url = tools.get_package_url(staging_server.url(), image_name)
-    host_attributes = {ds_constants.JOB_REPO_URL: repo_url}
-    return image_name, host_attributes
-
-def _provision_with_quick_provision(host, update_url):
-    """Installs a build on the host using autoupdater quick-provision.
-
-    @param host: Host object where the build is to be installed.
-    @param update_url: URL of the build to install.
-
-    @returns A tuple of the form `(image_name, host_attributes)`, where
-        'image_name' is the name of the image installed, and 'host_attributes'
-        are new attributes to be applied to the DUT.
-    """
-    logging.debug('Attempting to provision with autoupdater quick-provision.')
-    updater = autoupdater.ChromiumOSUpdater(update_url, host=host,
-                                            use_quick_provision=True)
-    return updater.run_update()

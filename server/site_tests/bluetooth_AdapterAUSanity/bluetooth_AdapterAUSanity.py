@@ -6,11 +6,11 @@
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros.bluetooth.bluetooth_audio_test_data import (
-        A2DP, AVRCP, HFP_WBS, HFP_NBS)
-from autotest_lib.server.cros.bluetooth.bluetooth_adapter_quick_tests import (
-        BluetoothAdapterQuickTests)
+        A2DP, A2DP_LONG, AVRCP, HFP_WBS, HFP_NBS)
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_audio_tests import (
         BluetoothAdapterAudioTests)
+from autotest_lib.server.cros.bluetooth.bluetooth_adapter_quick_tests import (
+        BluetoothAdapterQuickTests)
 
 
 class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
@@ -41,12 +41,33 @@ class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
         self.cleanup_bluetooth_audio(device, test_profile)
 
 
+    def _au_a2dp_test(self, test_profile, duration=0):
+        """A2DP test with sinewaves on the two channels.
+
+        @param test_profile: which test profile is used, A2DP or A2DP_LONG.
+        @param duration: the duration to test a2dp. The unit is in seconds.
+                if duration is 0, use the default duration in test_profile.
+        """
+        device = self.devices['BLUETOOTH_AUDIO'][0]
+        self.au_run_method(device,
+                           lambda: self.test_a2dp_sinewaves(
+                                   device, test_profile, duration),
+                           test_profile)
+
+
     @test_wrapper('A2DP sinewave test', devices={'BLUETOOTH_AUDIO':1})
     def au_a2dp_test(self):
         """A2DP test with sinewaves on the two channels."""
-        device = self.devices['BLUETOOTH_AUDIO'][0]
-        self.au_run_method(
-                device, lambda: self.test_a2dp_sinewaves(device), A2DP)
+        self._au_a2dp_test(A2DP)
+
+
+    @test_wrapper('A2DP sinewave long test', devices={'BLUETOOTH_AUDIO':1})
+    def au_a2dp_long_test(self, duration=600):
+        """A2DP long test with sinewaves on the two channels.
+
+        @param duration: the duration to test a2dp. The unit is in seconds.
+        """
+        self._au_a2dp_test(A2DP_LONG, duration=duration)
 
 
     def check_wbs_capability(self):
@@ -77,7 +98,9 @@ class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
                 device, lambda: test_method(device, test_profile), test_profile)
 
 
+    # TODO(b/163284498) Realtek not ready for WBS yet pending on cras patches.
     @test_wrapper('HFP WBS sinewave test with dut as source',
+                  skip_chipsets=['Realtek-RTL8822C-USB'],
                   devices={'BLUETOOTH_AUDIO':1})
     def au_hfp_wbs_dut_as_source_test(self):
         """HFP WBS test with sinewave streaming from dut to peer."""
@@ -86,7 +109,9 @@ class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
         self.au_hfp_run_method(device, self.test_hfp_dut_as_source, HFP_WBS)
 
 
+    # TODO(b/163284498) Realtek not ready for WBS yet pending on cras patches.
     @test_wrapper('HFP WBS sinewave test with dut as sink',
+                  skip_chipsets=['Realtek-RTL8822C-USB'],
                   devices={'BLUETOOTH_AUDIO':1})
     def au_hfp_wbs_dut_as_sink_test(self):
         """HFP WBS test with sinewave streaming from peer to dut."""
@@ -110,6 +135,42 @@ class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
         device = self.devices['BLUETOOTH_AUDIO'][0]
         self.au_hfp_run_method(device, self.test_hfp_dut_as_sink, HFP_NBS)
 
+
+    @test_wrapper('HFP WBS VISQOL test with dut as sink',
+                  devices={'BLUETOOTH_AUDIO':1})
+    def au_hfp_wbs_dut_as_sink_visqol_test(self):
+        """HFP WBS VISQOL test with audio streaming from peer to dut"""
+        self.check_wbs_capability()
+        device = self.devices['BLUETOOTH_AUDIO'][0]
+        self.au_hfp_run_method(device, self.test_hfp_dut_as_sink_visqol_score,
+                               HFP_WBS)
+
+
+    @test_wrapper('HFP WBS VISQOL test with dut as source',
+                  devices={'BLUETOOTH_AUDIO':1})
+    def au_hfp_wbs_dut_as_source_visqol_test(self):
+        """HFP WBS VISQOL test with audio streaming from dut to peer"""
+        self.check_wbs_capability()
+        device = self.devices['BLUETOOTH_AUDIO'][0]
+        self.au_hfp_run_method(device, self.test_hfp_dut_as_source_visqol_score,
+                               HFP_WBS)
+
+    @test_wrapper('HFP NBS VISQOL test with dut as sink',
+                  devices={'BLUETOOTH_AUDIO':1})
+    def au_hfp_nbs_dut_as_sink_visqol_test(self):
+        """HFP NBS VISQOL test with audio streaming from peer to dut"""
+        device = self.devices['BLUETOOTH_AUDIO'][0]
+        self.au_hfp_run_method(device, self.test_hfp_dut_as_sink_visqol_score,
+                               HFP_NBS)
+
+
+    @test_wrapper('HFP NBS VISQOL test with dut as source',
+                  devices={'BLUETOOTH_AUDIO':1})
+    def au_hfp_nbs_dut_as_source_visqol_test(self):
+        """HFP NBS VISQOL test with audio streaming from dut to peer"""
+        device = self.devices['BLUETOOTH_AUDIO'][0]
+        self.au_hfp_run_method(device, self.test_hfp_dut_as_source_visqol_score,
+                               HFP_NBS)
 
 
     def au_run_avrcp_method(self, device, test_method):
@@ -138,7 +199,10 @@ class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
         self.au_run_avrcp_method(device, self.test_avrcp_commands)
 
 
-    @test_wrapper('avrcp media info test', devices={'BLUETOOTH_AUDIO':1})
+    # Add 'Quick Sanity' to flags to exclude the test from AVL.
+    # When this test is stable enough later, remove the flags here.
+    @test_wrapper('avrcp media info test', devices={'BLUETOOTH_AUDIO':1},
+                  flags=['Quick Sanity'])
     def au_avrcp_media_info_test(self):
         """AVRCP test to examine metadata propgation."""
         device = self.devices['BLUETOOTH_AUDIO'][0]
@@ -154,10 +218,15 @@ class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
                 whole batch
         """
         self.au_a2dp_test()
+        self.au_a2dp_long_test()
         self.au_hfp_nbs_dut_as_source_test()
         self.au_hfp_nbs_dut_as_sink_test()
         self.au_hfp_wbs_dut_as_source_test()
         self.au_hfp_wbs_dut_as_sink_test()
+        self.au_hfp_wbs_dut_as_source_visqol_test()
+        self.au_hfp_wbs_dut_as_sink_visqol_test()
+        self.au_hfp_nbs_dut_as_source_visqol_test()
+        self.au_hfp_nbs_dut_as_sink_visqol_test()
         self.au_avrcp_command_test()
         self.au_avrcp_media_info_test()
 

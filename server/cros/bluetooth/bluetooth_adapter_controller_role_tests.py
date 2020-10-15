@@ -44,19 +44,19 @@ class bluetooth_AdapterControllerRoleTests(
         self.test_disconnection_by_adapter(device.address)
 
 
-    def connect_and_test_slave_device(self, device, slave_test_func):
-        """Creates connection to a slave device and tests it
+    def connect_and_test_secondary_device(self, device, secondary_test_func):
+        """Creates connection to a secondary device and tests it
 
         @param device: handle to peripheral object
-        @param slave_test_func: function handle to test connection
+        @param secondary_test_func: function handle to test connection
         """
-        logging.info('Setting up slave device')
+        logging.info('Setting up secondary device')
         self.test_discover_device(device.address)
         self.test_pairing(device.address, device.pin, trusted=True)
         time.sleep(self.TEST_SLEEP_SECS)
         self.test_connection_by_adapter(device.address)
         time.sleep(self.TEST_SLEEP_SECS)
-        slave_test_func(device)
+        secondary_test_func(device)
 
 
     def _receiver_discovery_async(self, device):
@@ -84,21 +84,20 @@ class bluetooth_AdapterControllerRoleTests(
     # Definitions of controller readiness tests
     # ---------------------------------------------------------------
 
-    ### General test for controller slave
+    ### General test for controller in secondary role
+    def controller_secondary_role_test(self, primary_device, primary_test_func,
+                                       secondary_info=None):
+        """Advertise from DUT and verify we can handle connection as secondary
 
-    def controller_slave_test(self, master_device, master_test_func,
-                              slave_info=None):
-        """Advertise from DUT and verify we can handle connection as slave
+        Optional secondary device arguments allows us to try test with existing
+        connection, or to establish new secondary connection during test
 
-        Optional slave device arguments allows us to try test with existing
-        connection, or to establish new slave connection during test
-
-        @param master_device: master device of connection test
-        @param master_test_func: function to test connection to master
-        @param slave_info: Optional tuple with structure
-            (slave_device_handle, slave_test_func, use):
-            slave_device_handle: peer device to test with
-            slave_test_func: function handle to run connection test
+        @param primary_device: primary device of connection test
+        @param primary_test_func: function to test connection to primary
+        @param secondary_info: Optional tuple with structure
+            (secondary_device_handle, secondary_test_func, use):
+            secondary_device_handle: peer device to test with
+            secondary_test_func: function handle to run connection test
             device_use: 'pre' - device should be connected before test runs - or
                         'mid' - device should be connected during test
         """
@@ -116,20 +115,22 @@ class bluetooth_AdapterControllerRoleTests(
 
         self.bluetooth_le_facade = self.bluetooth_facade
 
-        if slave_info is not None:
-            (slave_device_handle, slave_test_func, device_use) = slave_info
+        if secondary_info is not None:
+            (secondary_device_handle, secondary_test_func,
+                    device_use) = secondary_info
 
         # Start fresh, remove DUT from peer's known devices
-        master_device.RemoveDevice(self.bluetooth_facade.address)
+        primary_device.RemoveDevice(self.bluetooth_facade.address)
 
-        # Pair the master device first - necessary for later connection to slave
-        self.pair_adapter_to_device(master_device)
-        self.test_device_set_discoverable(master_device, False)
+        # Pair the primary device first - necessary for later connection to
+        # secondary device
+        self.pair_adapter_to_device(primary_device)
+        self.test_device_set_discoverable(primary_device, False)
 
-        # If test requires it, connect and test slave device
-        if slave_info is not None and device_use == 'pre':
-            self.connect_and_test_slave_device(
-                slave_device_handle, slave_test_func)
+        # If test requires it, connect and test secondary device
+        if secondary_info is not None and device_use == 'pre':
+            self.connect_and_test_secondary_device(
+                secondary_device_handle, secondary_test_func)
 
         # Register and start advertising instance
         # We ignore failure because the test isn't able to verify the min/max
@@ -142,42 +143,42 @@ class bluetooth_AdapterControllerRoleTests(
                                          DEFAULT_MAX_ADV_INTERVAL)
 
         # Discover DUT from peer
-        self.test_discover_by_device(master_device)
+        self.test_discover_by_device(primary_device)
         time.sleep(self.TEST_SLEEP_SECS)
 
-        # Connect to DUT from peer, putting DUT in slave role
-        self.test_connection_by_device(master_device)
+        # Connect to DUT from peer, putting DUT in secondary role
+        self.test_connection_by_device(primary_device)
 
-        # If test requires it, connect and test slave device
-        if slave_info is not None and device_use == 'mid':
-            self.connect_and_test_slave_device(
-                slave_device_handle, slave_test_func)
+        # If test requires it, connect and test secondary device
+        if secondary_info is not None and device_use == 'mid':
+            self.connect_and_test_secondary_device(
+                secondary_device_handle, secondary_test_func)
 
         # Try transferring data over connection
-        master_test_func(master_device)
+        primary_test_func(primary_device)
 
         # Handle cleanup of connected devices
-        if slave_info is not None:
-            self.test_disconnection_by_adapter(slave_device_handle.address)
+        if secondary_info is not None:
+            self.test_disconnection_by_adapter(secondary_device_handle.address)
 
-        self.test_disconnection_by_device(master_device)
+        self.test_disconnection_by_device(primary_device)
         self.test_reset_advertising()
 
     ### Nearby sender role test
 
     def nearby_sender_role_test(self, nearby_device, nearby_device_test_func,
-                                slave_info=None):
+                                secondary_info=None):
         """Test Nearby Sender role
 
-        Optional slave device arguments allows us to try test with existing
-        connection, or to establish new slave connection during test
+        Optional secondary device arguments allows us to try test with existing
+        connection, or to establish new secondary connection during test
 
         @param nearby_device: Device acting as Nearby Receiver in test
         @param nearby_device_test_func: function to test connection to device
-        @param slave_info: Optional tuple with structure
-            (slave_device_handle, slave_test_func, use):
-            slave_device_handle: peer device to test with
-            slave_test_func: function handle to run connection test
+        @param secondary_info: Optional tuple with structure
+            (secondary_device_handle, secondary_test_func, use):
+            secondary_device_handle: peer device to test with
+            secondary_test_func: function handle to run connection test
             device_use: 'pre' - device should be connected before test runs - or
                         'mid' - device should be connected during test
         """
@@ -195,22 +196,24 @@ class bluetooth_AdapterControllerRoleTests(
 
         self.bluetooth_le_facade = self.bluetooth_facade
 
-        if slave_info is not None:
-            (slave_device_handle, slave_test_func, device_use) = slave_info
+        if secondary_info is not None:
+            (secondary_device_handle, secondary_test_func,
+                    device_use) = secondary_info
 
         # Start fresh, remove DUT from nearby device
         nearby_device.RemoveDevice(self.bluetooth_facade.address)
 
-        # Pair the nearby device first - necessary for later connection to slave
+        # Pair the nearby device first - necessary for later connection to
+        # secondary device
         self.pair_adapter_to_device(nearby_device)
 
         # We don't want peer advertising until it hears our broadcast
         self.test_device_set_discoverable(nearby_device, False)
 
-        # If test requires it, connect and test slave device
-        if slave_info is not None and device_use == 'pre':
-            self.connect_and_test_slave_device(
-                slave_device_handle, slave_test_func)
+        # If test requires it, connect and test secondary device
+        if secondary_info is not None and device_use == 'pre':
+            self.connect_and_test_secondary_device(
+                secondary_device_handle, secondary_test_func)
 
         # Register and start non-connectable advertising instance
         # We ignore failure because the test isn't able to verify the min/max
@@ -232,7 +235,8 @@ class bluetooth_AdapterControllerRoleTests(
         peer_discover.start()
 
         # Verify that we correctly receive advertisement from nearby device
-        self.test_receive_advertisement(address=nearby_device.address)
+        self.test_receive_advertisement(address=nearby_device.address,
+                                        timeout=30)
 
         # Make sure peer thread completes
         peer_discover.join()
@@ -240,10 +244,14 @@ class bluetooth_AdapterControllerRoleTests(
         # Connect to peer from DUT
         self.test_connection_by_adapter(nearby_device.address)
 
-        # If test requires it, connect and test slave device
-        if slave_info is not None and device_use == 'mid':
-            self.connect_and_test_slave_device(
-                slave_device_handle, slave_test_func)
+        # TODO(b/164131633) On 4.4 kernel, sometimes the input device is not
+        # created if we connect a second device too quickly
+        time.sleep(self.TEST_SLEEP_SECS)
+
+        # If test requires it, connect and test secondary device
+        if secondary_info is not None and device_use == 'mid':
+            self.connect_and_test_secondary_device(
+                secondary_device_handle, secondary_test_func)
 
         time.sleep(self.TEST_SLEEP_SECS)
 
@@ -251,8 +259,8 @@ class bluetooth_AdapterControllerRoleTests(
         nearby_device_test_func(nearby_device)
 
         # Handle cleanup of connected devices
-        if slave_info is not None:
-            self.test_disconnection_by_adapter(slave_device_handle.address)
+        if secondary_info is not None:
+            self.test_disconnection_by_adapter(secondary_device_handle.address)
 
         self.test_disconnection_by_adapter(nearby_device.address)
         self.test_reset_advertising()
@@ -260,18 +268,18 @@ class bluetooth_AdapterControllerRoleTests(
     # Nearby receiver role test
 
     def nearby_receiver_role_test(self, nearby_device, nearby_device_test_func,
-                                  slave_info=None):
+                                  secondary_info=None):
         """Test Nearby Receiver role
 
-        Optional slave device arguments allows us to try test with existing
-        connection, or to establish new slave connection during test
+        Optional secondary device arguments allows us to try test with existing
+        connection, or to establish new secondary connection during test
 
         @param nearby_device: Device acting as Nearby Sender in test
         @param nearby_device_test_func: function to test connection to device
-        @param slave_info: Optional tuple with structure
-            (slave_device_handle, slave_test_func, use):
-            slave_device_handle: peer device to test with
-            slave_test_func: function handle to run connection test
+        @param secondary_info: Optional tuple with structure
+            (secondary_device_handle, secondary_test_func, use):
+            secondary_device_handle: peer device to test with
+            secondary_test_func: function handle to run connection test
             device_use: 'pre' - device should be connected before test runs - or
                         'mid' - device should be connected in middle of test,
                                 during advertisement
@@ -292,24 +300,26 @@ class bluetooth_AdapterControllerRoleTests(
 
         self.bluetooth_le_facade = self.bluetooth_facade
 
-        if slave_info is not None:
-            (slave_device_handle, slave_test_func, device_use) = slave_info
+        if secondary_info is not None:
+            (secondary_device_handle, secondary_test_func,
+                    device_use) = secondary_info
 
         # Start fresh, remove device peer
         nearby_device.RemoveDevice(self.bluetooth_facade.address)
 
-        # If test requires it, connect and test slave device
-        if slave_info is not None and device_use == 'pre':
-            self.connect_and_test_slave_device(
-                slave_device_handle, slave_test_func)
+        # If test requires it, connect and test secondary device
+        if secondary_info is not None and device_use == 'pre':
+            self.connect_and_test_secondary_device(
+                secondary_device_handle, secondary_test_func)
 
         # Verify that we correctly receive advertisement from peer
         # TODO ideally, peer would be broadcasting non-connectable adv with
         # 0xFE2C data, but this is not implemented yet on peer
         self.test_receive_advertisement(address=nearby_device.address,
-                                        timeout=20)
+                                        timeout=30)
 
-        # Pair the nearby device first - necessary for later connection to slave
+        # Pair the nearby device first - necessary for later connection to
+        # secondary device
         self.pair_adapter_to_device(nearby_device)
 
         # Register and start non-connectable advertising instance
@@ -322,10 +332,10 @@ class bluetooth_AdapterControllerRoleTests(
                                          1, DEFAULT_MIN_ADV_INTERVAL,
                                          DEFAULT_MAX_ADV_INTERVAL)
 
-        # If test requires it, connect and test slave device
-        if slave_info is not None and device_use == 'mid':
-            self.connect_and_test_slave_device(
-                slave_device_handle, slave_test_func)
+        # If test requires it, connect and test secondary device
+        if secondary_info is not None and device_use == 'mid':
+            self.connect_and_test_secondary_device(
+                secondary_device_handle, secondary_test_func)
 
         # Discover DUT from peer
         self.test_discover_by_device(nearby_device)
@@ -333,10 +343,14 @@ class bluetooth_AdapterControllerRoleTests(
         # Connect to DUT from peer
         self.test_connection_by_device(nearby_device)
 
-        # If test requires it, connect and test slave device
-        if slave_info is not None and device_use == 'end':
-            self.connect_and_test_slave_device(
-                slave_device_handle, slave_test_func)
+        # TODO(b/164131633) On 4.4 kernel, sometimes the input device is not
+        # created if we connect a second device too quickly
+        time.sleep(self.TEST_SLEEP_SECS)
+
+        # If test requires it, connect and test secondary device
+        if secondary_info is not None and device_use == 'end':
+            self.connect_and_test_secondary_device(
+                secondary_device_handle, secondary_test_func)
 
         time.sleep(self.TEST_SLEEP_SECS)
 

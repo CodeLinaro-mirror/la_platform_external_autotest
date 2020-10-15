@@ -100,8 +100,11 @@ class firmware_Cr50CheckCap(Cr50Test):
         self.fast_ccd_open(enable_testlab=True)
 
         self._ec_prefix = '' if self.servo.main_device_is_ccd() else 'ccd_cr50'
+        # Only check EC uart if the board has a working EC and cr50 can detect
+        # servo connect/disconnect.
         self.check_ec_uart = (
                 self.check_ec_capability(suppress_warning=True) and
+                self.cr50.check_servo_monitor() and
                 self.servo.has_control('ec_board', self._ec_prefix))
         if self.check_ec_uart and self._ec_prefix:
             try:

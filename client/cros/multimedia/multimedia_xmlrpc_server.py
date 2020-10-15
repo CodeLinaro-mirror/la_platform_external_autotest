@@ -8,8 +8,10 @@
 import argparse
 import code
 import logging
+import os
 import xmlrpclib
 import traceback
+
 import common   # pylint: disable=unused-import
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import logging_config
@@ -106,12 +108,14 @@ def config_logging():
     config.configure_logging(use_console=True, verbose=True)
 
 
-if __name__ == '__main__':
+def main():
+    """The main function, to run the XMLRPC server."""
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--debug', action='store_true', required=False,
                         help=('create a debug console with a ServerProxy "s" '
                               'connecting to the XML RPC sever at localhost'))
     args = parser.parse_args()
+    pid = os.getpid()
 
     if args.debug:
         s = xmlrpclib.ServerProxy('http://localhost:%d' %
@@ -120,14 +124,22 @@ if __name__ == '__main__':
         code.interact(local=locals())
     else:
         config_logging()
-        logging.debug('multimedia_xmlrpc_server main...')
+        logging.debug('multimedia_xmlrpc_server[%s] main...', pid)
+        xmlrpc_server.terminate_old(__file__)
 
+        # bind before full setup, so the error is the last thing in the log
+        server = xmlrpc_server.XmlRpcServer(
+                'localhost', constants.MULTIMEDIA_XMLRPC_SERVER_PORT)
 
         # Restart Cras to clean up any audio activities.
         upstart.restart_job('cras')
 
         with facade_resource.FacadeResource() as res:
-            server = xmlrpc_server.XmlRpcServer(
-                    'localhost', constants.MULTIMEDIA_XMLRPC_SERVER_PORT)
             server.register_delegate(MultimediaXmlRpcDelegate(res))
             server.run()
+            logging.debug('multimedia_xmlrpc_server[%s] exiting...', pid)
+        logging.debug('multimedia_xmlrpc_server[%s] done.\n', pid)
+
+
+if __name__ == '__main__':
+    main()

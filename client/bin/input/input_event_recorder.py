@@ -90,7 +90,6 @@ class Event(object):
                 ev_value = int(result.group(4))
                 return Event(ev_type, ev_code, ev_value)
             else:
-                logging.warn('not an event: %s', ev_string)
                 return None
 
 
@@ -144,14 +143,16 @@ class InputEventRecorder(object):
     INPUT_DEVICE_INFO_FILE = '/proc/bus/input/devices'
     SELECT_TIMEOUT_SECS = 1
 
-    def __init__(self, device_name):
+    def __init__(self, device_name, uniq):
         """Construction of input event recorder.
 
         @param device_name: the device name of the input device node to record.
+        @param uniq: Unique address of input device (None if not used)
 
         """
         self.device_name = device_name
-        self.device_node = self.get_device_node_by_name(device_name)
+        self.uniq = uniq
+        self.device_node = self.get_device_node_by_name(device_name, uniq)
         if self.device_node is None:
             err_msg = 'Failed to find the device node of %s' % device_name
             raise InputEventRecorderError(err_msg)
@@ -161,7 +162,7 @@ class InputEventRecorder(object):
         self.events = []
 
 
-    def get_device_node_by_name(self, device_name):
+    def get_device_node_by_name(self, device_name, uniq):
         """Get the input device node by name.
 
         Example of a RN-42 emulated mouse device information looks like
@@ -178,25 +179,52 @@ class InputEventRecorder(object):
         B: REL=103
         B: MSC=10
 
+        Each group of input devices is separated by an empty line.
+
         @param device_name: the device name of the target input device node.
+        @param uniq: Unique address of the device. None if unused.
 
         @returns: the corresponding device node of the device.
 
         """
         device_node = None
         device_found = None
+        event_number = None
+        uniq_found = None
+        uniq = uniq.lower() if uniq else None
+
+        entry_pattern = re.compile('^[A-Z]: ')
         device_pattern = re.compile('N: Name=.*%s' % device_name, re.I)
         event_number_pattern = re.compile('H: Handlers=.*event(\d*)', re.I)
+        uniq_pattern = re.compile('U: Uniq=([a-zA-Z0-9:]+)')
+
         with open(self.INPUT_DEVICE_INFO_FILE) as info:
             for line in info:
-                if device_found:
-                    result = event_number_pattern.search(line)
-                    if result:
-                        event_number = int(result.group(1))
+                line = line.rstrip('\n')
+
+                if not entry_pattern.search(line):
+                    device_found = None
+                    event_number = None
+                    uniq_found = None
+                elif device_found:
+                    # Check if this is an event line
+                    find_event = event_number_pattern.search(line)
+                    if find_event:
+                        event_number = int(find_event.group(1))
+
+                    # Check if this a uniq line
+                    find_uniq = uniq_pattern.search(line)
+                    if find_uniq:
+                        uniq_found = find_uniq.group(1).lower()
+
+                    # If uniq matches expectations, we found the device node
+                    if event_number and (not uniq or uniq_found == uniq):
                         device_node = '/dev/input/event%d' % event_number
                         break
+
                 else:
                     device_found = device_pattern.search(line)
+
         return device_node
 
 

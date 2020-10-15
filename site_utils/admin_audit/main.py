@@ -16,6 +16,7 @@ import logging.config
 import os
 import sys
 import socket
+import errno
 
 import common
 from autotest_lib.client.common_lib import enum
@@ -39,6 +40,7 @@ ACTION_FLASH_SERVO_KEYBOARD_MAP = 'flash-servo-keyboard-map'
 ACTION_VERIFY_DUT_MACADDR = 'verify-dut-macaddr'
 
 _LOG_FILE = 'audit.log'
+_SERVO_UART_LOGS = 'servo_uart'
 
 VERIFIER_MAP = {
     ACTION_VERIFY_DUT_STORAGE: verifiers.VerifyDutStorage,
@@ -61,7 +63,7 @@ ACTIONS_REQUIRED_SERVO_HOST = set([
 ])
 
 class DutAuditError(Exception):
-  """Generic error raised during DUT audit."""
+    """Generic error raised during DUT audit."""
 
 
 def main():
@@ -82,11 +84,18 @@ def main():
     need_servo_host = bool(set(opts.actions) & ACTIONS_REQUIRED_SERVO_HOST)
     # Initialize ServoHost with running Servod process.
     need_servod = bool(set(opts.actions) & ACTIONS_REQUIRED_SERVOD)
+
+    # Create folder for servo uart logs.
+    servo_uart_logs_dir = None
+    if need_servod:
+        servo_uart_logs_dir = _create_servo_uart_path(opts.results_dir)
+
     try:
         host_object = factory.create_target_host(
-            opts.hostname,
-            host_info_path=opts.host_info_file,
-            try_lab_servo=need_servod)
+                opts.hostname,
+                host_info_path=opts.host_info_file,
+                try_lab_servo=need_servod,
+                servo_uart_logs_dir=servo_uart_logs_dir)
     except Exception as err:
         logging.error("fail to create host: %s", err)
         return RETURN_CODES.OTHER_FAILURES
@@ -100,22 +109,20 @@ def main():
             except Exception as err:
                 logging.error("fail to init servo host: %s", err)
                 return RETURN_CODES.OTHER_FAILURES
-        if need_servod and host.servo:
-            host.servo.uart_logs_dir = opts.results_dir
 
         for action in opts.actions:
             if opts.dry_run:
                 logging.info('DRY RUN: Would have run actions %s', action)
                 return
 
-            response = _verify(action, host)
+            response = _verify(action, host, opts.results_dir)
             if response:
                 return response
 
     return RETURN_CODES.OK
 
 
-def _verify(action, host):
+def _verify(action, host, resultdir):
     """Run verifier for the action with targeted host.
 
     @param action: The action requested to run the verifier.
@@ -125,7 +132,9 @@ def _verify(action, host):
         _log("START", action)
         verifier = VERIFIER_MAP[action]
         if verifier:
-            verifier(host).verify()
+            v = verifier(host)
+            v.set_result_dir(resultdir)
+            v.verify()
         else:
             logging.info('Verifier is not specified')
         _log("END_GOOD", action)
@@ -142,42 +151,56 @@ def _log(status, action, err=None):
     logging.info(message)
 
 
+def _create_servo_uart_path(results_dir):
+    servo_uart_logs = os.path.join(results_dir, _SERVO_UART_LOGS)
+    try:
+        if not os.path.exists(servo_uart_logs):
+            os.makedirs(servo_uart_logs)
+    except OSError as e:
+        logging.debug(
+                '(not critical) Fail to create dir for servo logs;'
+                ' %s', e)
+        if not (e.errno == errno.EEXIST):
+            servo_uart_logs = None
+    return servo_uart_logs
+
+
 def _parse_args():
-  parser = argparse.ArgumentParser(
-      description='Audit DUT in a lab.')
+    parser = argparse.ArgumentParser(description='Audit DUT in a lab.')
 
-  parser.add_argument(
-      'actions',
-      nargs='+',
-      choices=list(VERIFIER_MAP),
-      help='DUT audit actions to execute.',
-  )
-  parser.add_argument(
-      '--dry-run',
-      action='store_true',
-      default=False,
-      help='Run in dry-run mode. No changes will be made to the DUT.',
-  )
-  parser.add_argument(
-      '--results-dir',
-      required=True,
-      help='Directory to drop logs and output artifacts in.',
-  )
+    parser.add_argument(
+            'actions',
+            nargs='+',
+            choices=list(VERIFIER_MAP),
+            help='DUT audit actions to execute.',
+    )
+    parser.add_argument(
+            '--dry-run',
+            action='store_true',
+            default=False,
+            help='Run in dry-run mode. No changes will be made to the DUT.',
+    )
+    parser.add_argument(
+            '--results-dir',
+            required=True,
+            help='Directory to drop logs and output artifacts in.',
+    )
 
-  parser.add_argument(
-      '--hostname',
-      required=True,
-      help='Hostname of the DUT to audit.',
-  )
-  parser.add_argument(
-      '--host-info-file',
-      required=True,
-      help=('Full path to HostInfo file.'
-            ' DUT inventory information is read from the HostInfo file.'),
-  )
+    parser.add_argument(
+            '--hostname',
+            required=True,
+            help='Hostname of the DUT to audit.',
+    )
+    parser.add_argument(
+            '--host-info-file',
+            required=True,
+            help=('Full path to HostInfo file.'
+                  ' DUT inventory information is read from the HostInfo file.'
+                  ),
+    )
 
-  return parser.parse_args()
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
-  sys.exit(main())
+    sys.exit(main())

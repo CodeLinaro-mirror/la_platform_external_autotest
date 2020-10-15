@@ -7,8 +7,11 @@ import time
 
 from autotest_lib.client.bin import test
 from autotest_lib.client.common_lib import error
+from autotest_lib.client.common_lib.cros import retry
+from autotest_lib.client.common_lib.cros.network import interface
 from autotest_lib.client.cros import ec
 from autotest_lib.client.cros import service_stopper
+from autotest_lib.client.cros.camera import camera_utils
 from autotest_lib.client.cros.power import power_dashboard
 from autotest_lib.client.cros.power import power_status
 from autotest_lib.client.cros.power import power_telemetry_utils
@@ -24,12 +27,14 @@ class power_Test(test.test):
     hist_percentile_re = '^(\d+).+\{(\d+)\.\d+\%\}'
 
     def initialize(self, seconds_period=20., pdash_note='',
-                   force_discharge=False):
+                   force_discharge=False,
+                   check_network=False):
         """Perform necessary initialization prior to power test run.
 
         @param seconds_period: float of probing interval in seconds.
         @param pdash_note: note of the current run to send to power dashboard.
         @param force_discharge: force battery to discharge during the test.
+        @param check_network: check that Ethernet interface is not running.
 
         @var backlight: power_utils.Backlight object.
         @var keyvals: dictionary of result keyvals.
@@ -63,6 +68,16 @@ class power_Test(test.test):
             if not power_utils.charge_control_by_ectool(False):
                 raise error.TestError('Could not run battery force discharge.')
 
+        ifaces = [iface for iface in interface.get_interfaces()
+                if (not iface.is_wifi_device() and
+                iface.name.startswith('eth'))]
+        logging.debug('Ethernet interfaces include: %s',
+                      str([iface.name for iface in ifaces]))
+        for iface in ifaces:
+            if check_network and iface.is_lower_up:
+                raise error.TestError('Ethernet interface is active. '
+                                      'Please remove Ethernet cable.')
+
         self._psr = power_utils.DisplayPanelSelfRefresh()
         self._services = service_stopper.ServiceStopper(
                 service_stopper.ServiceStopper.POWER_DRAW_SERVICES)
@@ -71,8 +86,28 @@ class power_Test(test.test):
 
         self._meas_logs = power_status.create_measurement_loggers(
                 seconds_period, self._checkpoint_logger)
+        logging.debug('measurement loggers (%d):', len(self._meas_logs))
+        for log in self._meas_logs:
+            logging.debug('%s: %s', type(log).__name__, ", ".join(log.domains))
 
         self._pdash_note = pdash_note
+
+    def get_extra_browser_args_for_camera_test(self):
+        """Return Chrome args for camera power test."""
+        ret = [
+            # No pop up to ask permission to record video.
+            '--use-fake-ui-for-media-stream',
+            # Allow 2 windows side by side.
+            '--force-tablet-mode=clamshell',
+        ]
+
+        # Use fake camera for DUT without camera, e.g. chromebox.
+        if not camera_utils.find_cameras():
+            ret.append('--use-fake-device-for-media-stream')
+            self.keyvals['use_fake_camera'] = 1
+        else:
+            self.keyvals['use_fake_camera'] = 0
+        return ret
 
     def warmup(self, warmup_time=30):
         """Warm up.
@@ -114,6 +149,7 @@ class power_Test(test.test):
         self._checkpoint_logger.checkpoint(name, start_time)
         self._psr.refresh()
 
+    @retry.retry(Exception, timeout_min=1, delay_sec=2)
     def collect_keypress_latency(self, cr):
         """Collect keypress latency information from Histograms.
 

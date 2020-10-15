@@ -16,7 +16,6 @@ EXPECTED_TEST_RESULTS = {'^SERVER_JOB$':                 ['GOOD'],
                          # This is related to dummy_Fail/control.dependency.
                          'dummy_Fail.dependency$':       ['TEST_NA'],
                          'login_LoginSuccess.*':         ['GOOD'],
-                         'provision_AutoUpdate.double':  ['GOOD'],
                          'dummy_Pass.*':                 ['GOOD'],
                          'dummy_Fail.Fail$':             ['FAIL'],
                          'dummy_Fail.Error$':            ['ERROR'],

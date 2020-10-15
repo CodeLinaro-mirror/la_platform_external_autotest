@@ -122,6 +122,9 @@ _CONTROLFILE_TEMPLATE = Template(
     {%- if servo_support_needed %}
             hard_reboot_on_failure=True,
     {%- endif %}
+    {%- if camera_facing %}
+            load_waivers=False,
+    {%- endif %}
             timeout={{timeout}})
 
     {% if sync_count and sync_count > 1 -%}

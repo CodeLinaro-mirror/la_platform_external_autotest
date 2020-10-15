@@ -822,6 +822,16 @@ class BluetoothDevice(object):
         return self._proxy.reset_advertising()
 
 
+    def create_audio_record_directory(self, audio_record_dir):
+        """Create the audio recording directory.
+
+        @param audio_record_dir: the audio recording directory
+
+        @returns: True on success. False otherwise.
+        """
+        return self._proxy.create_audio_record_directory(audio_record_dir)
+
+
     def start_capturing_audio_subprocess(self, audio_data, recording_device):
         """Start capturing audio in a subprocess.
 
@@ -874,29 +884,94 @@ class BluetoothDevice(object):
         return self._proxy.play_audio(json.dumps(audio_data))
 
 
-    def check_audio_frames_legitimacy(self, audio_test_data, recording_device):
+    def check_audio_frames_legitimacy(self, audio_test_data, recording_device,
+                                      recorded_file):
         """Get the number of frames in the recorded audio file.
         @param audio_test_data: the audio test data
         @param recording_device: which device recorded the audio,
                 possible values are 'recorded_by_dut' or 'recorded_by_peer'
+        @param recorded_file: the recorded file name
 
         @returns: True if audio frames are legitimate.
         """
         return self._proxy.check_audio_frames_legitimacy(
-                json.dumps(audio_test_data), recording_device)
+                json.dumps(audio_test_data), recording_device, recorded_file)
 
 
-    def get_primary_frequencies(self, audio_test_data, recording_device):
+    def convert_audio_sample_rate(self, input_file, out_file, test_data,
+                                  new_rate):
+        """Convert audio file to new sample rate.
+
+        @param input_file: Path to file to upsample.
+        @param out_file: Path to create upsampled file.
+        @param test_data: Dictionary with information about file.
+        @param new_rate: New rate to upsample file to.
+
+        @returns: True if upsampling succeeded, False otherwise.
+        """
+        return self._proxy.convert_audio_sample_rate(input_file, out_file,
+                                                     json.dumps(test_data),
+                                                     new_rate)
+
+
+    def trim_wav_file(self, in_file, out_file, new_duration, test_data,
+                      tolerance=0.1):
+        """Trim long file to desired length.
+
+        Trims audio file to length by cutting out silence from beginning and
+        end.
+
+        @param in_file: Path to audio file to be trimmed.
+        @param out_file: Path to trimmed audio file to create.
+        @param new_duration: A float representing the desired duration of
+                the resulting trimmed file.
+        @param test_data: Dictionary containing information about the test file.
+        @param tolerance: (optional) A float representing the allowable
+                difference between trimmed file length and desired duration
+
+        @returns: True if file was trimmed successfully, False otherwise.
+        """
+        return self._proxy.trim_wav_file(in_file, out_file, new_duration,
+                                         json.dumps(test_data), tolerance)
+
+
+    def unzip_audio_test_data(self, tar_path, data_dir):
+        """Unzip audio test data files.
+
+        @param tar_path: Path to audio test data tarball on DUT.
+        @oaram data_dir: Path to directory where to extract test data directory.
+
+        @returns: True if audio test data folder exists, False otherwise.
+        """
+        return self._proxy.unzip_audio_test_data(tar_path, data_dir)
+
+
+    def convert_raw_to_wav(self, input_file, output_file, test_data):
+        """Convert raw audio file to wav file.
+
+        @oaram input_file: The location of the raw file.
+        @param output_file: The location to place the resulting wav file.
+        @param test_data: The data for the file being converted.
+
+        @returns: True if conversion was successful, otherwise false.
+        """
+        return self._proxy.convert_raw_to_wav(input_file, output_file,
+                                              json.dumps(test_data))
+
+
+    def get_primary_frequencies(self, audio_test_data, recording_device,
+                                recorded_file):
         """Get primary frequencies of the audio test file.
 
         @param audio_test_data: the audio test data
         @param recording_device: which device recorded the audio,
                 possible values are 'recorded_by_dut' or 'recorded_by_peer'
+        @param recorded_file: the recorded file name
 
         @returns: a list of primary frequencies of channels in the audio file
         """
         return self._proxy.get_primary_frequencies(
-                json.dumps(audio_test_data), recording_device)
+                json.dumps(audio_test_data), recording_device, recorded_file)
 
 
     def enable_wbs(self, value):
@@ -960,6 +1035,24 @@ class BluetoothDevice(object):
         @returns: True if the operation succeeds.
         """
         return self._proxy.select_input_device(device_name)
+
+
+    def select_output_node(self, node_type):
+        """Select the audio output node.
+
+        @param node_type: the node type of the Bluetooth peer device
+
+        @returns: True if the operation succeeds.
+        """
+        return self._proxy.select_output_node(node_type)
+
+
+    def get_selected_output_device_type(self):
+        """Get the selected audio output node type.
+
+        @returns: the node type of the selected output device.
+        """
+        return self._proxy.get_selected_output_device_type()
 
 
     def read_characteristic(self, uuid, address):
@@ -1227,6 +1320,23 @@ class BluetoothDevice(object):
         """
 
         return self._proxy.do_suspend(seconds, expect_bt_wake)
+
+
+    def get_wlan_vid_pid(self):
+        """ Return vendor id and product id of the wlan chip on BT/WiFi module
+
+        @returns: (vid,pid) on success; (None,None) on failure
+        """
+        return self._proxy.get_wlan_vid_pid()
+
+
+    def get_bt_module_name(self):
+        """ Return bluetooth module name for non-USB devices
+
+        @returns: Name of the Bluetooth module (or string read from device on
+                  success); '' on failure
+        """
+        return self._proxy.get_bt_module_name()
 
 
     def close(self, close_host=True):

@@ -317,7 +317,7 @@ class FirmwareUpdater(object):
         # Replace ecrw.hash to the new one
         ecrw_hash_path = os.path.join(self._cbfs_work_path,
                                       chip_utils.ecrw.cbfs_hash_name)
-        with open(ecrw_hash_path, 'w') as f:
+        with open(ecrw_hash_path, 'wb') as f:
             f.write(self.get_ec_hash())
 
         # Store the modified ecrw and its hash to cbfs
@@ -620,7 +620,8 @@ class FirmwareUpdater(object):
         For a given chip type, returns the chip firmware hash blob.
         Before making this request, the chip blobs must have been
         extracted from cbfs using cbfs_extract_chip().
-        The hash data is returned as hexadecimal string.
+        The hash data is returned as a list of stringified two-byte pieces:
+        \x12\x34...\xab\xcd\xef -> ['0x12', '0x34', ..., '0xab', '0xcd', '0xef']
 
         @param fw_name: Chip firmware name whose hash blob to get.
         @return: Boolean success status.

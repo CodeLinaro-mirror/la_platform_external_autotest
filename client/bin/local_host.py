@@ -212,7 +212,8 @@ class LocalHost(hosts.Host):
 
         @param parent: The leading path to make the tmp dir.
         """
-        self.run('mkdir -p "%s"' % parent)
-        tmp_dir = self.run('mktemp -d -p "%s"' % parent).stdout.rstrip()
+        tmp_dir = self.run(
+            'mkdir -p "%s" && mktemp -d -p "%s"' % (parent, parent)
+        ).stdout.rstrip()
         self.tmp_dirs.append(tmp_dir)
         return tmp_dir

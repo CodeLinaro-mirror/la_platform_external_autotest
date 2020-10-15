@@ -103,7 +103,7 @@ class IwEventLogger(object):
         iw_log = self._host.run('cat %s' % self._iw_event_log_path).stdout
         iw_log_file = StringIO.StringIO(iw_log)
         for line in iw_log_file.readlines():
-            parse_line = re.match('\s*(\d+).(\d+): (\w.*): (\w.*)', line)
+            parse_line = re.match('\s*(\d+).(\d+): (\w[^:]*): (\w.*)', line)
             if parse_line:
                 time_integer = parse_line.group(1)
                 time_decimal = parse_line.group(2)

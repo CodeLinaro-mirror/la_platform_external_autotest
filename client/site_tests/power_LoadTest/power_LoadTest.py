@@ -26,6 +26,8 @@ from autotest_lib.client.cros import httpd
 from autotest_lib.client.cros import memory_bandwidth_logger
 from autotest_lib.client.cros import service_stopper
 from autotest_lib.client.cros.audio import audio_helper
+from autotest_lib.client.cros.networking import cellular_proxy
+from autotest_lib.client.cros.networking import shill_proxy
 from autotest_lib.client.cros.networking import wifi_proxy
 from autotest_lib.client.cros.power import power_dashboard
 from autotest_lib.client.cros.power import power_status
@@ -52,8 +54,8 @@ class power_LoadTest(arc.ArcTest):
                  scroll_loop='false', scroll_interval_ms='10000',
                  scroll_by_pixels='600', test_low_batt_p=3,
                  verbose=True, force_wifi=False, wifi_ap='', wifi_sec='none',
-                 wifi_pw='', wifi_timeout=60, tasks='',
-                 volume_level=10, mic_gain=10, low_batt_margin_p=2,
+                 wifi_pw='', wifi_timeout=60, use_cellular_network=False,
+                 tasks='', volume_level=10, mic_gain=10, low_batt_margin_p=2,
                  ac_ok=False, log_mem_bandwidth=False, gaia_login=None,
                  force_discharge=False, pdash_note=''):
         """
@@ -73,6 +75,7 @@ class power_LoadTest(arc.ArcTest):
         wifi_sec: the type of security for the wifi ap
         wifi_pw: password for the wifi ap
         wifi_timeout: The timeout for wifi configuration
+        use_cellular_network: use the cellular network connection instead of wifi
         volume_level: percent audio volume level
         mic_gain: percent audio microphone gain level
         low_batt_margin_p: percent low battery margin to be added to
@@ -104,6 +107,7 @@ class power_LoadTest(arc.ArcTest):
         self._tmp_keyvals = {}
         self._power_status = None
         self._force_wifi = force_wifi
+        self._use_cellular_network = use_cellular_network
         self._testServer = None
         self._tasks = tasks.replace(' ','')
         self._backchannel = None
@@ -154,6 +158,10 @@ class power_LoadTest(arc.ArcTest):
         # If force wifi enabled, convert eth0 to backchannel and connect to the
         # specified WiFi AP.
         if self._force_wifi:
+            if self._use_cellular_network:
+                raise error.TestError("Can't force WiFi AP when cellular network"
+                                      "is used");
+
             sec_config = None
             # TODO(dbasehore): Fix this when we get a better way of figuring out
             # the wifi security configuration.
@@ -207,6 +215,17 @@ class power_LoadTest(arc.ArcTest):
                 if check_network and iface.is_lower_up:
                     raise error.TestError('Ethernet interface is active. ' +
                                           'Please remove Ethernet cable')
+
+        if self._use_cellular_network:
+            self._shill_proxy = cellular_proxy.CellularProxy()
+            cdev = self._shill_proxy.find_cellular_device_object()
+            if cdev is None:
+                raise error.TestError("No cellular device found")
+
+            self._shill_proxy.manager.DisableTechnology(
+                shill_proxy.ShillProxy.TECHNOLOGY_WIFI)
+
+            self._shill_proxy.wait_for_cellular_service_object()
 
         # record the max backlight level
         self._backlight = power_utils.Backlight()
@@ -560,11 +579,17 @@ class power_LoadTest(arc.ArcTest):
         if self.task_monitor_file:
             self.task_monitor_file.close()
 
-        # cleanup backchannel interface
-        # Prevent wifi congestion in test lab by forcing machines to forget the
-        # wifi AP we connected to at the start of the test.
         if self._shill_proxy:
-            self._shill_proxy.remove_all_wifi_entries()
+            if self._force_wifi:
+                # cleanup backchannel interface
+                # Prevent wifi congestion in test lab by forcing machines to forget the
+                # wifi AP we connected to at the start of the test.
+                self._shill_proxy.remove_all_wifi_entries()
+
+            if self._use_cellular_network:
+                self._shill_proxy.manager.EnableTechnology(
+                    shill_proxy.ShillProxy.TECHNOLOGY_WIFI)
+
         if self._backchannel:
             self._backchannel.teardown()
         if self._browser:

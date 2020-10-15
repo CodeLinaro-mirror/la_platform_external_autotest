@@ -1,6 +1,11 @@
+# Lint as: python2, python3
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import sys
 import functools
@@ -8,15 +13,24 @@ import logging
 import time
 
 import common
+from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import hosts
 from autotest_lib.client.common_lib import utils
+from autotest_lib.server.cros.power import servo_charger
 from autotest_lib.server.cros.servo import servo
+from autotest_lib.server.hosts import cros_constants
 from autotest_lib.server.hosts import repair_utils
+import six
 
 try:
     from chromite.lib import metrics
 except ImportError:
     metrics = utils.metrics_mock
+
+
+# TODO(gregorynisbet): will importing chromite always succeed in all contexts?
+from chromite.lib import timeout_util
+
 
 def ignore_exception_for_non_cros_host(func):
     """
@@ -49,6 +63,7 @@ class _UpdateVerifier(hosts.Verifier):
     up-to-date.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         # First, only run this verifier if the host is in the physical lab.
         # Secondly, skip if the test is being run by test_that, because subnet
@@ -64,12 +79,12 @@ class _UpdateVerifier(hosts.Verifier):
                 # v3s from been update, so always try to repair here.
                 # See crbug.com/994396, crbug.com/1057302.
                 host.run('cgpt repair /dev/mmcblk0', ignore_status=True)
-
-                host.update_image(wait_for_update=False)
+                host.update_image()
         # We don't want failure from update block DUT repair action.
         # See crbug.com/1029950.
         except Exception as e:
-            raise hosts.AutoservNonCriticalVerifyError, e.message, sys.exc_info()[2]
+            six.reraise(hosts.AutoservNonCriticalVerifyError, str(e),
+                        sys.exc_info()[2])
 
     @property
     def description(self):
@@ -150,6 +165,7 @@ class _SerialConfigVerifier(_ConfigVerifier):
 
     ATTR = 'SERIAL'
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         """
         Test whether the `host` has a `SERIAL` setting configured.
@@ -187,6 +203,7 @@ class _BoardConfigVerifier(_ConfigVerifier):
 
     ATTR = 'BOARD'
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         """
         Test whether the `host` has a `BOARD` setting configured.
@@ -219,6 +236,7 @@ class _ServodJobVerifier(hosts.Verifier):
     Verifier to check that the `servod` upstart job is running.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if not host.is_cros_host():
             return
@@ -239,6 +257,7 @@ class _DiskSpaceVerifier(hosts.Verifier):
     Verifier to make sure there is enough disk space left on servohost.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         # Check available space of stateful is greater than threshold, in Gib.
         host.check_diskspace('/mnt/stateful_partition', 0.5)
@@ -257,6 +276,7 @@ class _ServodConnectionVerifier(hosts.Verifier):
     CCD or servo_micro.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         host.initilize_servo()
 
@@ -278,11 +298,13 @@ class _ServodControlVerifier(hosts.Verifier):
     values.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         try:
             host.initialize_dut_for_servo()
         except Exception as e:
-            raise hosts.AutoservNonCriticalVerifyError, e.message, sys.exc_info()[2]
+            six.reraise(hosts.AutoservNonCriticalVerifyError, str(e),
+                        sys.exc_info()[2])
 
     @property
     def description(self):
@@ -291,35 +313,34 @@ class _ServodControlVerifier(hosts.Verifier):
 
 class _CCDTestlabVerifier(hosts.Verifier):
     """
-    Verifier to check that ccd testlab is anabled.
+    Verifier to check that ccd testlab is enabled.
 
-    ALl DUT connected by ccd has to supported cr50 with enabled testlab
+    All DUT connected by ccd has to supported cr50 with enabled testlab
     to allow manipulation by servo. The flag testlab is sticky and will
-    stay enabled if was set up. To enable testlab ccd has to be open.
+    stay enabled if was set up. The testlab can be enabled when ccd is
+    open. (go/ccd-setup)
     """
     @ignore_exception_for_non_cros_host
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if not host.get_servo().has_control('cr50_testlab'):
             raise hosts.AutoservVerifyError(
-                'cr50 has to be supported when use servo with'
-                ' ccd_cr50/type-c connection')
+                'cr50 has to be supported when use servo with '
+                'ccd_cr50/type-c connection')
 
         status = host.get_servo().get('cr50_testlab')
-        if status != 'on':
-            data = {'port': host.servo_port,
-                    'host': host.get_dut_hostname() or host.hostname,
-                    'board': host.servo_board or ''}
-            metrics.Counter(
-                'chromeos/autotest/repair/ccd_testlab').increment(fields=data)
-            # TODO enable when lab will finished rework on all DUTs
-            # or new servo_state will come to the stage
-            # raise hosts.AutoservNonCriticalVerifyError(
-            #     'The ccd testlab is off (not enabled);'
-            #     ' required the rework to enable it (go/ccd-setup)',
-            #     'ccd_testlab_disabled')
-            host.record('INFO', None, 'ccd_testlab_disabled',
-                        'The ccd testlab is off (not enabled);'
-                        ' required the rework to enable it (go/ccd-setup)')
+        # check by 'on' to fail when get unexpected value
+        if status == 'on':
+            # ccd testlab enabled
+            return
+        data = {'port': host.servo_port,
+                'host': host.get_dut_hostname() or host.hostname,
+                'board': host.servo_board or ''}
+        metrics.Counter(
+            'chromeos/autotest/repair/ccd_testlab').increment(fields=data)
+        raise hosts.AutoservNonCriticalVerifyError(
+            'The ccd testlab is disabled; DUT requires manual work '
+            'to enable it (go/ccd-setup).')
 
     def _is_applicable(self, host):
         if host.get_servo():
@@ -347,15 +368,36 @@ class _CCDPowerDeliveryVerifier(hosts.Verifier):
     # verifier/repair pair.
     CHANGE_SERVO_ROLE_TIMEOUT = 180
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if host.get_servo().get('servo_v4_role') == 'snk':
             logging.warning('The servo initlized with role snk while'
                             ' supporting power delivery, resetting role'
                             ' to src...')
-            host.get_servo().set_servo_v4_role('src')
-            time.sleep(self.CHANGE_SERVO_ROLE_TIMEOUT)
+
+            try:
+                logging.info('setting power direction with retries')
+                # do not pass host since host does not inherit from CrosHost.
+                charge_manager = servo_charger.ServoV4ChargeManager(
+                    host=None,
+                    servo=host.get_servo(),
+                )
+                attempts = charge_manager.start_charging()
+                logging.info('setting power direction took %d tries', attempts)
+                # if control makes it here, we successfully changed the host
+                # direction
+                result = 'src'
+            except Exception as e:
+                logging.error(
+                    'setting power direction with retries failed %s',
+                    str(e),
+                )
+            finally:
+                time.sleep(self.CHANGE_SERVO_ROLE_TIMEOUT)
+
             result = host.get_servo().get('servo_v4_role')
             logging.debug('Servo_v4 role after reset: %s', result)
+
             metrics_data = {
                 'hostname': host.get_dut_hostname() or 'unknown',
                 'status': 'success' if result == 'src' else 'failed',
@@ -375,6 +417,136 @@ class _CCDPowerDeliveryVerifier(hosts.Verifier):
         return 'ensure applicable servo is in "src" mode for power delivery'
 
 
+class _DUTConnectionVerifier(hosts.Verifier):
+    """Verifier to check connection between DUT and servo.
+
+    Servo_v4 type-a connected to the DUT by:
+        1) servo_micro - checked by `cold_reset`.
+        2) USB hub - checked by ppdut5_mv.
+    Servo_v4 type-c connected to the DUT by:
+        1) ccd - checked by ppdut5_mv.
+    Servo_v3 connected to the DUT by:
+        1) legacy servo header - can be checked by `cold_reset`.
+    """
+
+    # Bus voltage on ppdut5. Value can be:
+    # - less than 500 - DUT is likely not connected
+    # - between 500 and 4000 - unexpected value
+    # - more than 4000 - DUT is likely connected
+    MAX_PPDUT5_MV_WHEN_NOT_CONNECTED = 500
+    MIN_PPDUT5_MV_WHEN_CONNECTED = 4000
+
+    @ignore_exception_for_non_cros_host
+    def verify(self, host):
+        if self._is_servo_v4_type_a(host):
+            if not self._is_ribbon_cable_connected(host):
+                raise hosts.AutoservVerifyError(
+                        'Servo_micro is likely not connected to the DUT.')
+            # If DUT is not powered then we cannot make second check
+            if (self._is_dut_power_on(host)
+                        and not self._is_usb_hub_connected(host)):
+                raise hosts.AutoservVerifyError(
+                        'Servo USB hub is likely not connected to the DUT.')
+        elif self._is_servo_v4_type_c(host):
+            logging.info('Skip check for type-c till confirm it in the lab')
+            # TODO(otabek@) block check till verify on the lab
+            # if not self._is_usb_hub_connected(host):
+            #     raise hosts.AutoservVerifyError(
+            #             'Servo_v4 is likely not connected to the DUT.')
+        elif self._is_servo_v3(host):
+            if not self._is_ribbon_cable_connected(host):
+                raise hosts.AutoservVerifyError(
+                        'Servo_v3 is likely not connected to the DUT.')
+        else:
+            logging.warn('Unsupported servo type!')
+
+    def _is_usb_hub_connected(self, host):
+        """Checking bus voltage on ppdut5.
+
+        Supported only on servo_v4 boards.
+        If voltage value is lower than 500 then device is not connected.
+        When value higher 4000 means the device is connected. If value
+        between 500 and 4000 is not expected and will be marked as connected
+        and collected information which DUT has this exception.
+
+        @returns: bool
+        """
+        logging.debug('Started check by ppdut5_mv:on')
+        try:
+            val = host.get_servo().get('ppdut5_mv')
+            if val < self.MAX_PPDUT5_MV_WHEN_NOT_CONNECTED:
+                # servo is not connected to the DUT
+                return False
+            if val < self.MIN_PPDUT5_MV_WHEN_CONNECTED:
+                # is unexpected value.
+                # collecting metrics to look case by case
+                # TODO(otabek) for analysis b:163845694
+                data = host._get_host_metrics_data()
+                metrics.Counter('chromeos/autotest/repair/ppdut5_mv_case'
+                                ).increment(fields=data)
+            # else:
+            # servo is physical connected to the DUT
+        except Exception as e:
+            logging.debug('(Not critical) %s', e)
+        return True
+
+    def _is_ribbon_cable_connected(self, host):
+        """Check if ribbon cable is connected to the DUT.
+
+        The servo_micro/flex - can be checked by `cold_reset` signal.
+        When `cold_reset` is `on` it commonly indicates that the DUT
+        is disconnected. To avoid mistake of real signal we try
+        switch it off and if is cannot then servo is not connected.
+
+        @returns: bool
+        """
+        logging.debug('Started check by cold_reset:on')
+        try:
+            if host.get_servo().get('cold_reset') == 'on':
+                # If cold_reset has is on can be right signal
+                # or caused by missing connection between servo_micro and DUT.
+                # if we can switch it to the off then it was signal.
+                host.get_servo().set('cold_reset', 'off')
+        except error.TestFail:
+            logging.debug('Ribbon cable is not connected to the DUT.')
+            return False
+        except Exception as e:
+            logging.debug('(Not critical) %s', e)
+        return True
+
+    def _is_dut_power_on(self, host):
+        # DUT is running in normal state.
+        # if EC not supported by board then we expect error
+        try:
+            return host.get_servo().get('ec_system_powerstate') == 'S0'
+        except Exception as e:
+            logging.debug('(Not critical) %s', e)
+        return False
+
+    def _is_servo_v4_type_a(self, host):
+        return (host.is_labstation()
+                and host.get_servo().has_control('servo_v4_type')
+                and host.get_servo().get('servo_v4_type') == 'type-a')
+
+    def _is_servo_v4_type_c(self, host):
+        return (host.is_labstation()
+                and host.get_servo().has_control('servo_v4_type')
+                and host.get_servo().get('servo_v4_type') == 'type-c')
+
+    def _is_servo_v3(self, host):
+        return not host.is_labstation()
+
+    def _is_applicable(self, host):
+        if host.is_ec_supported():
+            return True
+        logging.info('DUT is not support EC.')
+        return False
+
+    @property
+    def description(self):
+        return 'Ensure the Servo connected to the DUT.'
+
+
 class _PowerButtonVerifier(hosts.Verifier):
     """
     Verifier to check sanity of the `pwr_button` signal.
@@ -388,13 +560,15 @@ class _PowerButtonVerifier(hosts.Verifier):
     _BOARDS_WO_PWR_BUTTON = ['arkham', 'gale', 'mistral', 'storm', 'whirlwind']
 
     @ignore_exception_for_non_cros_host
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if host.servo_board in self._BOARDS_WO_PWR_BUTTON:
             return
         try:
             button = host.get_servo().get('pwr_button')
         except Exception as e:
-            raise hosts.AutoservNonCriticalVerifyError, e.message, sys.exc_info()[2]
+            six.reraise(hosts.AutoservNonCriticalVerifyError, str(e),
+                        sys.exc_info()[2])
 
         if button != 'release':
             raise hosts.AutoservNonCriticalVerifyError(
@@ -412,11 +586,13 @@ class _LidVerifier(hosts.Verifier):
     """
 
     @ignore_exception_for_non_cros_host
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         try:
             lid_open = host.get_servo().get('lid_open')
         except Exception as e:
-            raise hosts.AutoservNonCriticalVerifyError, e.message, sys.exc_info()[2]
+            six.reraise(hosts.AutoservNonCriticalVerifyError, str(e),
+                        sys.exc_info()[2])
 
         if lid_open != 'yes' and lid_open != 'not_applicable':
             raise hosts.AutoservNonCriticalVerifyError(
@@ -433,6 +609,7 @@ class _EcBoardVerifier(hosts.Verifier):
     """
 
     @ignore_exception_for_non_cros_host
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if host.is_ec_supported():
             ec_board_name = ''
@@ -454,6 +631,7 @@ class _EcBoardVerifier(hosts.Verifier):
 class _RestartServod(hosts.RepairAction):
     """Restart `servod` with the proper BOARD setting."""
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         if not host.is_cros_host():
             raise hosts.AutoservRepairError(
@@ -468,37 +646,37 @@ class _RestartServod(hosts.RepairAction):
 
 
 class _ServoRebootRepair(repair_utils.RebootRepair):
-    """
-    Reboot repair action that also waits for an update.
+    """Try repair servo by reboot servohost.
 
-    This is the same as the standard `RebootRepair`, but for
-    a non-multi-DUTs servo host, if there's a pending update,
-    we wait for that to complete before rebooting.  This should
-    ensure that the servo_v3 is up-to-date after reboot. Labstation
-    reboot and update is handled by labstation host class.
+    This is the same as the standard `RebootRepair`, for servo_v3 it will
+    reboot the beaglebone board immidiately while for labstation it will
+    request a reboot by touch a flag file on its labstation, then
+    labstation reboot will be handled by labstation AdminRepair task as
+    labstation host multiple servos and need do an synchronized reboot.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
+        super(_ServoRebootRepair, self).repair(host)
+        # restart servod for v3 after reboot.
+        host.restart_servod()
+
+    def _is_applicable(self, host):
         if host.is_localhost() or not host.is_cros_host():
-            raise hosts.AutoservRepairError(
-                'Target servo is not a test lab servo',
-                'servo_not_applicable_to_host_outside_lab')
+            logging.info('Target servo is not in a lab, the reboot repair'
+                         ' action is not applicable.')
+            return False
+
         if host.is_labstation():
             host.request_reboot()
-            logging.warning('Reboot labstation requested, it will be '
-                            'handled by labstation AdminRepair task.')
-        else:
-            try:
-                host.update_image(wait_for_update=True)
-            # We don't want failure from update block DUT repair action.
-            # See crbug.com/1029950.
-            except Exception as e:
-                logging.error('Failed to update servohost image: %s', e)
-            super(_ServoRebootRepair, self).repair(host)
+            logging.info('Reboot labstation requested, it will be handled'
+                         ' by labstation AdminRepair task.')
+            return False
+        return True
 
     @property
     def description(self):
-        return 'Wait for update, then reboot servo host.'
+        return 'Reboot the servo host.'
 
 
 class _ECRebootRepair(hosts.RepairAction):
@@ -509,6 +687,7 @@ class _ECRebootRepair(hosts.RepairAction):
     def _is_applicable(self, host):
         return (not host.is_localhost()) and host.is_ec_supported()
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         host.get_servo().ec_reboot()
 
@@ -526,6 +705,7 @@ class _DutRebootRepair(hosts.RepairAction):
     rebooting the DUT.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         host.get_servo().get_power_state_controller().reset()
         # Get the lid_open value which requires EC console.
@@ -548,6 +728,7 @@ class _DiskCleanupRepair(hosts.RepairAction):
     FILE_TO_REMOVE = ['/var/lib/metrics/uma-events',
                       '/var/spool/crash/*']
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         if host.is_localhost():
             # we don't want to remove anything from local testing.
@@ -572,23 +753,27 @@ def create_servo_repair_strategy():
     """
     config = ['brd_config', 'ser_config']
     verify_dag = [
-        (repair_utils.SshVerifier,   'servo_ssh',   []),
-        (_DiskSpaceVerifier,         'disk_space',  ['servo_ssh']),
-        (_UpdateVerifier,            'update',      ['servo_ssh']),
-        (_BoardConfigVerifier,       'brd_config',  ['servo_ssh']),
-        (_SerialConfigVerifier,      'ser_config',  ['servo_ssh']),
-        (_ServodJobVerifier,         'servod_job',   config + ['disk_space']),
-        (_ServodConnectionVerifier,  'servod_connection', ['servod_job']),
-        (_ServodControlVerifier,     'servod_control', ['servod_connection']),
-        (_PowerButtonVerifier,       'pwr_button',  ['servod_connection']),
-        (_LidVerifier,               'lid_open',    ['servod_connection']),
-        (_EcBoardVerifier,           'ec_board',    ['servod_connection']),
-        (_CCDTestlabVerifier,        'ccd_testlab', ['servod_connection']),
-        (_CCDPowerDeliveryVerifier,  'power_delivery', ['servod_connection']),
+            (repair_utils.SshVerifier, 'servo_ssh', []),
+            (_DiskSpaceVerifier, 'disk_space', ['servo_ssh']),
+            (_UpdateVerifier, 'update', ['servo_ssh']),
+            (_BoardConfigVerifier, 'brd_config', ['servo_ssh']),
+            (_SerialConfigVerifier, 'ser_config', ['servo_ssh']),
+            (_ServodJobVerifier, 'servod_job', config + ['disk_space']),
+            (_ServodConnectionVerifier, 'servod_connection', ['servod_job']),
+            (_ServodControlVerifier, 'servod_control', ['servod_connection']),
+            (_DUTConnectionVerifier, 'dut_connected', ['servod_connection']),
+            (_PowerButtonVerifier, 'pwr_button', ['servod_connection']),
+            (_LidVerifier, 'lid_open', ['servod_connection']),
+            (_EcBoardVerifier, 'ec_board', ['servod_connection']),
+            (_CCDTestlabVerifier, 'ccd_testlab', ['servod_connection']),
+            (_CCDPowerDeliveryVerifier, 'power_delivery',
+             ['servod_connection']),
     ]
 
-    servod_deps = ['servod_job', 'servod_connection', 'servod_control',
-                   'pwr_button']
+    servod_deps = [
+            'servod_job', 'servod_connection', 'servod_control',
+            'dut_connected', 'pwr_button'
+    ]
     repair_actions = [
         (_DiskCleanupRepair, 'disk_cleanup', ['servo_ssh'], ['disk_space']),
         (_RestartServod, 'restart', ['servo_ssh'], config + servod_deps),

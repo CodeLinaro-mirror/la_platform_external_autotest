@@ -7,10 +7,75 @@ import dbus
 import errno
 import functools
 import logging
+import os
 import select
 import signal
 import threading
 import SimpleXMLRPCServer
+
+
+def terminate_old(script_name):
+    """
+    Avoid "address already in use" errors by killing any leftover RPC server
+    processes, possibly from previous runs.
+
+    A process is a match if it's Python and has the given script in the command
+    line.  This should avoid including processes such as editors and 'tail' of
+    logs, which might match a simple pkill.
+
+    exe=/usr/local/bin/python2.7
+    cmdline=['/usr/bin/python2', '-u', '/usr/local/autotest/.../rpc_server.py']
+
+    @param script_name: The filename of the main script, used to match processes
+    """
+    # import late, to avoid affecting servers that don't call the method
+    import psutil
+
+    script_name_abs = os.path.abspath(script_name)
+    script_name_base = os.path.basename(script_name)
+    me = psutil.Process()
+    logging.debug('%s: %s, %s', me, me.exe(), me.cmdline())
+    for proc in psutil.process_iter():
+        if proc == me:
+            continue
+        name = None
+        exe = None
+        try:
+            name = proc.name()
+            if not name or 'py' not in name:
+                continue
+            exe = proc.exe()
+            args = proc.cmdline()
+        except psutil.Error as e:
+            logging.debug('%s: %s', e, proc)
+            continue
+        try:
+            if '/python' in exe and (script_name in args
+                                     or script_name_abs in args
+                                     or script_name_base in args):
+                logging.info('Terminating leftover process: %s: %s, %s', proc,
+                             exe, args)
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                    logging.debug('Process exited')
+                except psutil.TimeoutExpired as e:
+                    logging.warn(
+                            'Process did not exit, '
+                            'falling back to SIGKILL: %s', e)
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=2.5)
+                        logging.debug('Process exited')
+                    except psutil.TimeoutExpired:
+                        logging.exception('Process did not exit; '
+                                          'address may remain in use.')
+        except psutil.AccessDenied:
+            logging.exception('Process could not be terminated; '
+                              'address may remain in use.')
+        except psutil.NoSuchProcess as e:
+            # process exited already
+            logging.debug('Process exited: %s', e)
 
 
 class XmlRpcServer(threading.Thread):

@@ -115,7 +115,6 @@ suite:faft_ec_fw_qual
 suite:faft_ec_tot
 suite:faft_ec_wp
 suite:faft_experimental
-suite:faft_framework
 suite:faft_lab
 suite:faft_lv1
 suite:faft_lv2
@@ -200,6 +199,7 @@ suite:storage_qual_cq
 suite:storage_qual_external
 suite:storage_qual_quick
 suite:storage_qual_temp
+suite:storage_qual_v2_quick
 suite:storagequal
 suite:stress
 suite:syzkaller

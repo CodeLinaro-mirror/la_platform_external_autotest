@@ -184,6 +184,7 @@ class _PowerStateController(object):
         """
         self._servo = servo
         self.supported = self._servo.has_control('power_state')
+        self.last_rec_mode = self.REC_OFF
         if not self.supported:
             logging.info('Servo setup does not support power-state operations. '
                          'All power-state calls will lead to error.TestFail')
@@ -269,11 +270,34 @@ class _PowerStateController(object):
         """
         self._check_supported()
         self._servo.set_nocheck('power_state', rec_mode)
+        self.last_rec_mode = rec_mode
+
+    def retry_power_on(self):
+        """Retry powering on the DUT.
+
+        After power_on(...) the system might not come up reliably, although
+        the reasons aren't known yet. This function retries turning on the
+        system again, trying to bring it in the last state that power_on()
+        attempted to reach.
+        """
+        self._check_supported()
+        self._servo.set_nocheck('power_state', self.last_rec_mode)
 
 
 class _Uart(object):
     """Class to capture UART streams of CPU, EC, Cr50, etc."""
-    _UartToCapture = ('cpu', 'ec', 'cr50', 'servo_v4', 'servo_micro', 'usbpd')
+    _UartToCapture = (
+        'cpu',
+        'cr50',
+        'ec',
+        'servo_micro',
+        'servo_v4',
+        'usbpd',
+        'ccd_cr50.ec',
+        'ccd_cr50.cpu',
+        'ccd_cr50.cr50'
+    )
+
 
     def __init__(self, servo):
         self._servo = servo
@@ -318,16 +342,22 @@ class _Uart(object):
         """Start capturing UART streams."""
         for uart in self._UartToCapture:
             if self._start_stop_capture(uart, True):
-                self._streams.append(('%s_uart_stream' % uart, '%s_uart.log' %
-                                      uart))
+                self._streams.append(uart)
+
+    def get_logfile(self, uart):
+        """Return the path to the uart logfile or none if logs_dir isn't set."""
+        if not self.logs_dir:
+            return None
+        return os.path.join(self.logs_dir, '%s_uart.txt' % uart)
 
     def dump(self):
         """Dump UART streams to log files accordingly."""
         if not self.logs_dir:
             return
 
-        for stream, logfile in self._streams:
-            logfile_fullname = os.path.join(self.logs_dir, logfile)
+        for uart in self._streams:
+            logfile_fullname = self.get_logfile(uart)
+            stream = '%s_uart_stream' % uart
             try:
                 content = self._servo.get(stream)
             except Exception as err:
@@ -428,8 +458,6 @@ class Servo(object):
         # to minimize the dependencies on the rest of Autotest.
         self._servo_host = servo_host
         self._servo_serial = servo_serial
-        with self._wrap_socket_errors('get_servod_server_proxy()'):
-            self._server = servo_host.get_servod_server_proxy()
         self._servo_type = self.get_servo_version()
         self._power_state = _PowerStateController(self)
         self._uart = _Uart(self)
@@ -444,6 +472,11 @@ class Servo(object):
                 type(self).__name__,
                 self._servo_host.hostname,
                 self._servo_host.servo_port)
+
+    @property
+    def _server(self):
+        with self._wrap_socket_errors('get_servod_server_proxy()'):
+            return self._servo_host.get_servod_server_proxy()
 
     @contextlib.contextmanager
     def _wrap_socket_errors(self, description):
@@ -515,6 +548,19 @@ class Servo(object):
         else:
             logging.warning('Servod command \'usb_mux_oe1\' is not available. '
                             'Any USB drive related servo routines will fail.')
+        # Create a record of SBU voltages if this is running support servo (v4,
+        # v4p1).
+        # TODO(coconutruben): eventually, replace this with a metric to track
+        # SBU voltages wrt servo-hw/dut-hw
+        if self.has_control('servo_v4_sbu1_mv'):
+            for sbu in ['sbu1', 'sbu2']:
+                try:
+                    mv = int(self.get('servo_v4_%s_mv' % sbu))
+                    logging.info('%s voltage: %d mv', sbu, mv)
+                except error.TestFail as e:
+                    # This is a nice to have but if reading this fails, it
+                    # shouldn't interfere with the test.
+                    logging.info('Failed to read %s voltage', sbu)
         self._uart.start_capture()
         if cold_reset:
             if not self._power_state.supported:
@@ -525,14 +571,6 @@ class Servo(object):
         with self._wrap_socket_errors('initialize_dut->get_version()'):
             version = self._server.get_version()
         logging.debug('Servo initialized, version is %s', version)
-        if self.has_control('init_keyboard'):
-            # This indicates the servod version does not
-            # have explicit keyboard initialization yet.
-            # Ignore this.
-            # TODO(coconutruben): change this back to set() about a month
-            # after crrev.com/c/1586239 has been merged (or whenever that
-            # logic is in the labstation images).
-            self.set_nocheck('init_keyboard','on')
 
 
     def is_localhost(self):
@@ -1318,16 +1356,20 @@ class Servo(object):
                     self._servo_type)
 
 
-    def program_bios(self, image, rw_only=False):
+    def program_bios(self, image, rw_only=False, copy_image=True):
         """Program bios on DUT with given image.
 
         @param image: a string, file name of the BIOS image to program
                       on the DUT.
         @param rw_only: True to only program the RW portion of BIOS.
+        @param copy_image: True indicates we need scp the image to servohost
+                           while False means the image file is already on
+                           servohost.
 
         """
         self._initialize_programmer()
-        if not self.is_localhost():
+        # We don't need scp if test runs locally.
+        if copy_image and not self.is_localhost():
             image = self._scp_image(image)
         if rw_only:
             self._programmer_rw.program_bios(image)
@@ -1335,16 +1377,19 @@ class Servo(object):
             self._programmer.program_bios(image)
 
 
-    def program_ec(self, image, rw_only=False):
+    def program_ec(self, image, rw_only=False, copy_image=True):
         """Program ec on DUT with given image.
 
         @param image: a string, file name of the EC image to program
                       on the DUT.
         @param rw_only: True to only program the RW portion of EC.
-
+        @param copy_image: True indicates we need scp the image to servohost
+                           while False means the image file is already on
+                           servohost.
         """
         self._initialize_programmer()
-        if not self.is_localhost():
+        # We don't need scp if test runs locally.
+        if copy_image and not self.is_localhost():
             image = self._scp_image(image)
         if rw_only:
             self._programmer_rw.program_ec(image)
@@ -1686,18 +1731,22 @@ class Servo(object):
         """Set directory to save UART logs.
 
         @param logs_dir  String of directory name."""
-        if self._uart:
-            self._uart.logs_dir = logs_dir
+        self._uart.logs_dir = logs_dir
 
+    def get_uart_logfile(self, uart):
+        """Return the path to the uart log file."""
+        return self._uart.get_logfile(uart)
+
+    def record_uart_capture(self, outdir=None):
+        """Save uart stream output."""
+        if outdir and not self.uart_logs_dir:
+            self.uart_logs_dir = outdir
+        self._uart.dump()
 
     def close(self, outdir=None):
         """Close the servo object."""
-        if outdir and not self.uart_logs_dir:
-            self.uart_logs_dir = outdir
-        if self._uart:
-            self._uart.stop_capture()
-            self._uart.dump()
-            self._uart = None
+        self._uart.stop_capture()
+        self.record_uart_capture(outdir)
 
     def ec_reboot(self):
         """Reboot Just the embedded controller."""

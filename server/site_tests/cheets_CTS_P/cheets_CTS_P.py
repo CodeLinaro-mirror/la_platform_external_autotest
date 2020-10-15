@@ -30,8 +30,8 @@ _CTS_TIMEOUT_SECONDS = 3600
 _PUBLIC_CTS = 'https://dl.google.com/dl/android/cts/'
 _PARTNER_CTS = 'gs://chromeos-partner-cts/'
 _CTS_URI = {
-    'arm': _PUBLIC_CTS + 'android-cts-9.0_r12-linux_x86-arm.zip',
-    'x86': _PUBLIC_CTS + 'android-cts-9.0_r12-linux_x86-x86.zip',
+    'arm': _PUBLIC_CTS + 'android-cts-9.0_r13-linux_x86-arm.zip',
+    'x86': _PUBLIC_CTS + 'android-cts-9.0_r13-linux_x86-x86.zip',
 }
 _CTS_MEDIA_URI = _PUBLIC_CTS + 'android-cts-media-1.4.zip'
 _CTS_MEDIA_LOCALPATH = '/tmp/android-cts-media'
@@ -42,8 +42,9 @@ class cheets_CTS_P(tradefed_test.TradefedTest):
     version = 1
 
     _SHARD_CMD = '--shard-count'
-    _SCENE_URI = ('https://storage.googleapis.com'
-                  '/chromiumos-test-assets-public/camerabox/scene.pdf')
+    _SCENE_URI = (
+            'https://storage.googleapis.com/chromiumos-test-assets-public'
+            '/camerabox/cts_portrait_scene.jpg')
 
     def _tradefed_retry_command(self, template, session_id):
         """Build tradefed 'retry' command from template."""
@@ -66,6 +67,8 @@ class cheets_CTS_P(tradefed_test.TradefedTest):
                     os.environ['PATH'] = os.environ['JAVA_HOME']\
                                        + '/bin:' + os.environ['PATH']
                     logging.info(subprocess.check_output(['java', '-version'], stderr=subprocess.STDOUT))
+                    # TODO(jiyounha): remove once crbug.com/1105515 is resolved.
+                    logging.info(subprocess.check_output(['whereis', 'java'], stderr=subprocess.STDOUT))
                 except OSError:
                     logging.error('Can\'t change current PATH directory')
 

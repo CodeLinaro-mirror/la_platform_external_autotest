@@ -18,6 +18,7 @@ from autotest_lib.server.cros.network import wifi_test_context_manager
 from autotest_lib.server.hosts import cros_host
 from autotest_lib.server.hosts import servo_host
 from autotest_lib.server.hosts import servo_constants
+from autotest_lib.utils import labellib
 
 
 # A datetime.DateTime representing the Unix epoch in UTC.
@@ -115,7 +116,7 @@ class tast(test.test):
                    max_run_sec=3600, command_args=[], install_root='/',
                    ssp=None, build=None, build_bundle='cros',
                    run_private_tests=True, varsfiles=None,
-                   clear_tpm=False):
+                   download_data_lazily=False, clear_tpm=False):
         """
         @param host: remote.RemoteHost instance representing DUT.
         @param test_exprs: Array of strings describing tests to run.
@@ -141,6 +142,9 @@ class tast(test.test):
             specified to build and run a private bundle.
         @param varsfiles: list of names of yaml files containing variables set
             in |-varsfile| arguments.
+        @param download_data_lazily: If True, external data files are downloaded
+            lazily between tests. If false, external data files are downloaded
+            in a batch before running tests.
         @param clear_tpm: clear the TPM first before running the tast tests.
 
         @raises error.TestFail if the Tast installation couldn't be found.
@@ -162,6 +166,7 @@ class tast(test.test):
         self._run_private_tests = run_private_tests
         self._fake_now = None
         self._varsfiles = varsfiles
+        self._download_data_lazily = download_data_lazily
         self._clear_tpm = clear_tpm
 
         # List of JSON objects describing tests that will be run. See Test in
@@ -278,9 +283,15 @@ class tast(test.test):
         """
         gs_bucket = dev_server._get_image_storage_server()
         args_dict = utils.args_to_dict(self._command_args)
-        if not gs_bucket or 'build' not in args_dict.keys():
+        build = args_dict.get('build')
+        if not build:
+            labels = self._host.host_info_store.get().labels
+            build = labellib.LabelsMapping(labels).get(
+                labellib.Key.CROS_VERSION)
+
+        if not gs_bucket or not build:
             return []
-        gs_path = gs_bucket + args_dict['build']
+        gs_path = gs_bucket + build
         if not gs_path.endswith('/'):
             gs_path += '/'
         logging.info('Cloud storage bucket: %s', gs_path)
@@ -330,6 +341,8 @@ class tast(test.test):
             '-logtime=false',
             subcommand,
             '-sshretries=%d' % self._SSH_CONNECT_RETRIES,
+            '-downloaddata=%s' % (
+                'lazy' if self._download_data_lazily else 'batch'),
         ]
         if self._build:
             cmd.extend([
@@ -397,7 +410,7 @@ class tast(test.test):
         @raises error.TestFail if the tast command fails or times out.
         """
         logging.info('Getting list of tests that will be run')
-        args = ['-json=true']
+        args = ['-json=true'] + self._get_cloud_storage_info()
         result = self._run_tast('list', args, self._LIST_TIMEOUT_SEC)
         try:
             self._tests_to_run = _encode_utf8_json(

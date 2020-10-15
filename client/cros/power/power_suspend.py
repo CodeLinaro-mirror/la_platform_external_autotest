@@ -80,6 +80,16 @@ class Suspender(object):
     # the last resume.
     _TIMINGS_FILE = '/run/power_manager/root/last_resume_timings'
 
+    # Latest powerd log files
+    _POWERD_LOG_LATEST_PATH = '/var/log/power_manager/powerd.LATEST'
+    _POWERD_LOG_PREVIOUS_PATH = '/var/log/power_manager/powerd.PREVIOUS'
+
+    # Line to look for suspend abort due to override.
+    _ABORT_DUE_TO_OVERRIDE_LINE = 'Aborting suspend attempt for lockfile'
+
+    # Regexp to extract TS from powerd log line.
+    _POWERD_TS_RE = '\[(\d{4}/\d{6}\.\d{6}):.*\]'
+
     # Amount of lines to dump from the eventlog on a SpuriousWakeup. Should be
     # enough to include ACPI Wake Reason... 10 should be far on the safe side.
     _RELEVANT_EVENTLOG_LINES = 10
@@ -114,6 +124,7 @@ class Suspender(object):
         self._reset_pm_print_times = False
         self._restart_tlsdated = False
         self._log_file = None
+        self._powerd_cycle_start_ts = None
         self._suspend_state = suspend_state
         if device_times:
             self.device_times = []
@@ -188,6 +199,40 @@ class Suspender(object):
         return (utils.get_board().replace("_freon", ""))
 
 
+    def _retrive_last_matching_line_ts(self, filename, pattern):
+        """
+        Returns timestamp of last matching line or None
+        """
+        with open(filename) as f:
+            lines = f.readlines()
+            for line in reversed(lines):
+                if re.search(pattern, line):
+                    matches = re.search(self._POWERD_TS_RE, line)
+                    if matches:
+                        return matches.group(1)
+        return None
+
+
+    def _aborted_due_to_locking(self):
+        """
+        Returns true if we found evidences in the powerd log that the suspend
+        was aborted due to power_management override lock.
+        """
+        latest_ts = self._retrive_last_matching_line_ts(
+            self._POWERD_LOG_LATEST_PATH, self._ABORT_DUE_TO_OVERRIDE_LINE)
+        if latest_ts is None:
+            latest_ts = self._retrive_last_matching_line_ts(
+                self._POWERD_LOG_PREVIOUS_PATH, self._ABORT_DUE_TO_OVERRIDE_LINE)
+
+        if latest_ts is None:
+            return False
+
+        if latest_ts > self._powerd_cycle_start_ts:
+            return True
+
+        return False
+
+
     def _reset_logs(self):
         """Throw away cached log lines and reset log pointer to current end."""
         if self._log_file:
@@ -196,11 +241,16 @@ class Suspender(object):
         self._log_file.seek(0, os.SEEK_END)
         self._logs = []
 
+        self._powerd_cycle_start_ts = (
+            self._retrive_last_matching_line_ts(self._POWERD_LOG_LATEST_PATH,
+                                                self._POWERD_TS_RE))
 
-    def _update_logs(self, retries=11):
+
+    def _check_resume_finished(self, retries=11):
         """
         Read all lines logged since last reset into log cache. Block until last
-        powerd_suspend resume message was read, raise if it takes too long.
+        powerd_suspend resume message was read. Returns true if succeeded or
+        false if took too long
         """
         finished_regex = re.compile(r'powerd_suspend\[\d+\]: Resume finished')
         for retry in xrange(retries + 1):
@@ -212,10 +262,10 @@ class Suspender(object):
                 self._logs += lines
             for line in reversed(self._logs):
                 if (finished_regex.search(line)):
-                    return
+                    return True
             time.sleep(0.005 * 2**retry)
 
-        raise error.TestError("Sanity check failed: did not try to suspend.")
+        return False
 
 
     def _ts(self, name, retries=11):
@@ -542,7 +592,12 @@ class Suspender(object):
                             logging.info('Saved firmware log: ' + firmware_log)
                             raise sys_power.FirmwareError(msg.strip('\r\n '))
 
-                self._update_logs()
+
+                if not self._check_resume_finished():
+                    if not self._aborted_due_to_locking():
+                        raise error.TestError("Sanity check failed: did not try to suspend.")
+                    logging.warning('Aborted suspend due to power override, will retry\n')
+                    continue
                 if not self._check_for_errors(ignore_kernel_warns):
                     hwclock_ts = self._hwclock_ts(alarm)
                     if hwclock_ts:

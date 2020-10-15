@@ -24,7 +24,7 @@ class platform_KernelErrorPaths(test.test):
             # connection wedged for a long time.
             self.client.run(
                 'sh -c "sync; sleep 1; %s" >/dev/null 2>&1 &' % command)
-        except error.AutoservRunError, e:
+        except error.AutoservRunError as e:
             # It is expected that this will cause a non-zero exit status.
             pass
 

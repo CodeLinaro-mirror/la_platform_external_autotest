@@ -33,7 +33,7 @@ def install_protobufs(autodir, job):
 
 
 def compare_policy_response(policy_response, owner=None, guests=None,
-                            new_users=None, roaming=None, whitelist=None):
+                            new_users=None, roaming=None):
     """Check the contents of |policy_response| against given args.
 
     Deserializes |policy_response| into a PolicyFetchResponse protobuf,
@@ -46,7 +46,6 @@ def compare_policy_response(policy_response, owner=None, guests=None,
     @param guests: boolean indicating whether guests should be allowed.
     @param new_users: boolean indicating if user pods are on login screen.
     @param roaming: boolean indicating whether data roaming is enabled.
-    @param whitelist: list of accounts that are allowed to log in.
 
     @return True if |policy_response| has all the provided data, else False.
     """
@@ -67,9 +66,6 @@ def compare_policy_response(policy_response, owner=None, guests=None,
     if guests: ownership.assert_guest_setting(settings, guests)
     if new_users: ownership.assert_show_users(settings, new_users)
     if roaming: ownership.assert_roaming(settings, roaming)
-    if whitelist:
-        ownership.assert_new_users(settings, False)
-        ownership.assert_users_on_whitelist(settings, whitelist)
 
 
 def build_policy_data(owner=None, guests=None, new_users=None, roaming=None,

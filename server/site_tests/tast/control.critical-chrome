@@ -38,6 +38,7 @@ def run(machine):
                              '!"dep:android*"'
                              ')'],
                  ignore_test_failures=False, max_run_sec=3600,
-                 command_args=args)
+                 command_args=args,
+                 clear_tpm=True)
 
 parallel_simple(run, machines)

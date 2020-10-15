@@ -15,5 +15,5 @@ platform_DMVerityBitCorruption
 platform_DMVerityCorruption
 platform_MemCheck
 platform_ToolchainOptions
-provision_AutoUpdate
+provision_QuickProvision
 tast

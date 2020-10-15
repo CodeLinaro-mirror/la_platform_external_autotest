@@ -13,8 +13,8 @@ from autotest_lib.client.common_lib.cros.network import ping_runner
 from autotest_lib.server import hosts
 from autotest_lib.server import site_linux_router
 from autotest_lib.server import test
-from autotest_lib.server.cros import autoupdater
 from autotest_lib.server.cros import dnsname_mangler
+from autotest_lib.server.cros import provisioner
 from autotest_lib.server.cros.network import wifi_test_context_manager
 
 
@@ -32,7 +32,7 @@ class network_WiFi_UpdateRouter(test.test):
     it is advantageous to write this as a test so that we can schedule it to
     run periodically via the same infrastructure we use to run tests.
 
-    Note that this test is very much patterned on provision_AutoUpdate.
+    Note that this test is very much patterned on provision_QuickProvision.
 
     """
     version = 1
@@ -41,11 +41,10 @@ class network_WiFi_UpdateRouter(test.test):
         ## crbug.com/1098024: these are left here as documentation of what the
         # last stable version is, but the current updater code does not support
         # them.
-        'whirlwind': StableVersion('trybot-whirlwind-test-ap-tryjob/'
-                                   'R65-10323.83.0-c40829',
-                                   '10323.83.2018_04_30_1605'),
-        'gale': StableVersion('gale-test-ap-tryjob/R74-11895.11.0-b3621467',
-                              '11895.11.2019_03_15_1149'),
+        'whirlwind': StableVersion('whirlwind-test-ap-tryjob/R85-13310.60.0-b4641849',
+                                   '13310.60.2020_08_25_0212'),
+        'gale': StableVersion('gale-test-ap-tryjob/R85-13310.54.0-b4637444',
+                              '13310.54.2020_08_19_1536'),
     }
 
 
@@ -133,15 +132,13 @@ class network_WiFi_UpdateRouter(test.test):
         logging.info('Updating %s to image %s from %s',
                      device_host.hostname, desired.release_version,
                      current_release_version)
-        logging.info('Staging artifacts.')
         try:
             ds = dev_server.ImageServer.resolve(desired.builder_version,
                                                 device_host.hostname)
-            ds.stage_artifacts(desired.builder_version,
-                               ['full_payload', 'stateful'])
         except dev_server.DevServerException as e:
             logging.error(e)
             raise error.TestFail(str(e))
 
         url = self.get_update_url(ds.url(), desired.builder_version)
-        autoupdater.ChromiumOSUpdater(url, host=device_host).run_update()
+        provisioner.ChromiumOSProvisioner(url,
+                                          host=device_host).run_provision()

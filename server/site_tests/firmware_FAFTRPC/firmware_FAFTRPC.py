@@ -936,7 +936,8 @@ RPC_CATEGORIES = [
                     "get_keys_path",
                     "get_work_path",
                     "get_bios_relative_path",
-                    "get_ec_relative_path"
+                    "get_ec_relative_path",
+                    "get_ec_hash"
                 ],
                 "passing_args": [
                     NO_ARGS,

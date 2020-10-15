@@ -67,6 +67,9 @@ class firmware_PDVbusRequest(FirmwareTest):
     def initialize(self, host, cmdline_args, flip_cc=False, dts_mode=False,
                    init_power_mode=None):
         super(firmware_PDVbusRequest, self).initialize(host, cmdline_args)
+        # Only run on DUTs that can supply battery power.
+        if not self._client.has_battery():
+            raise error.TestNAError("DUT type does not have a battery.")
         self.setup_pdtester(flip_cc, dts_mode)
         # Only run in normal mode
         self.switcher.setup_mode('normal')

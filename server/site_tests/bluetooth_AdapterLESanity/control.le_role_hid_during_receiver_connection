@@ -22,7 +22,7 @@ DOC = """Tests HID capability while connected to Nearby device
       In Receiver role, the DUT will be connected to a device in Sender role
       as part of its duties. This test checks if the controller is able to
       initiate a new connection to a HID device while already in connection
-      as slave to the Sender device.
+      as secondary role to the Sender device.
       """
 
 args_dict = utils.args_to_dict(args)

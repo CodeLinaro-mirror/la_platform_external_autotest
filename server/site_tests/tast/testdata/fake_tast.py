@@ -58,7 +58,7 @@ def main():
         for path, data in cmd['files_to_write'].iteritems():
             dirname = os.path.dirname(path)
             if not os.path.exists(dirname):
-                os.makedirs(dirname, 0755)
+                os.makedirs(dirname, 0o0755)
             with open(path, 'w') as f:
                 f.write(data)
 
@@ -98,6 +98,7 @@ def parse_args():
         subparser.add_argument('-remotedatadir')
         subparser.add_argument('-remoterunner')
         subparser.add_argument('-sshretries')
+        subparser.add_argument('-downloaddata')
         subparser.add_argument('target')
         subparser.add_argument('patterns', action='append', nargs='*')
 

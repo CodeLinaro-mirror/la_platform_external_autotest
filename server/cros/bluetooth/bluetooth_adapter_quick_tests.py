@@ -100,6 +100,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                         flag='Quick Sanity', start_browser=False):
         """Inits the test batch"""
         self.host = host
+        self.start_browser = start_browser
         self.in_lab = site_utils.host_in_lab(self.host.hostname)
         #factory can not be declared as local variable, otherwise
         #factory._proxy.__del__ will be invoked, which shutdown the xmlrpc
@@ -107,7 +108,8 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
 
         try:
             self.factory = remote_facade_factory.RemoteFacadeFactory(host,
-                    no_chrome = not start_browser, disable_arc=True)
+                    no_chrome=not self.start_browser,
+                    disable_arc=True)
             self.bluetooth_facade = self.factory.create_bluetooth_hid_facade()
 
         # For b:142276989, catch 'object_path' fault and reboot to prevent
@@ -187,6 +189,12 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
 
         self.enable_disable_debug_log(enable=True)
 
+        # Disable cellular services, as they can sometimes interfere with
+        # suspend/resume, i.e. b/161920740
+        self.enable_disable_cellular(enable=False)
+
+        self.enable_disable_ui(enable=False)
+
         # Delete files created in previous run
         self.host.run('[ ! -d {0} ] || rm -rf {0} || true'.format(
                                                     self.BTMON_DIR_LOG_PATH))
@@ -224,6 +232,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                                   model_testNA=[],
                                   model_testWarn=[],
                                   skip_models=[],
+                                  skip_chipsets=[],
                                   shared_devices_count=0):
         """A decorator providing a wrapper to a quick test.
            Using the decorator a test method can implement only the core
@@ -242,6 +251,9 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                                   failures are emitted as TestWarn.
            @param skip_models: Raises TestNA on these models and doesn't attempt
                                to run the tests.
+           @param skip_chipsets: Raises TestNA on these chipset and doesn't
+                                 attempt to run the tests.
+
         """
 
         def decorator(test_method):
@@ -297,13 +309,22 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
 
                 try:
                     if not _is_enough_peers_present(self):
+                        logging.info('Not enough peer available')
                         raise error.TestNAError('Not enough peer available')
 
-                    model = self.host.get_platform()
+                    model = self.get_base_platform_name()
                     if model in skip_models:
                         logging.info('SKIPPING TEST %s', test_name)
                         raise error.TestNAError(
                                 'Test not supported on this model')
+
+                    chipset = self.get_chipset_name()
+                    logging.debug('Bluetooth module name is %s', chipset)
+                    if chipset in skip_chipsets:
+                        logging.info('SKIPPING TEST %s on chipset %s',
+                                     test_name, chipset)
+                        raise error.TestNAError(
+                                'Test not supported on this chipset')
 
                     self.quick_test_test_start(test_name, devices,
                                                shared_devices_count)
@@ -350,7 +371,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
     def quick_test_test_end(self, model_testNA=[], model_testWarn=[]):
         """Log and track the test results"""
         result_msgs = []
-        model = self.host.get_platform()
+        model = self.get_base_platform_name()
 
         if self.test_iter is not None:
             result_msgs += ['Test Iter: ' + str(self.test_iter)]

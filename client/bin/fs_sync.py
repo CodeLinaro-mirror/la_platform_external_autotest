@@ -16,6 +16,7 @@ to ensure the disk is in a consistent state before a hard reset.
 
 import argparse
 import collections
+import glob
 import logging
 import logging.handlers
 import os
@@ -31,12 +32,14 @@ ENCSTATEFUL_MOUNT = '/mnt/stateful_partition/encrypted'
 Result = collections.namedtuple('Result', ['command', 'rc', 'stdout', 'stderr'])
 
 
-def run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE):
+def run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        strip=False):
     """Run the given command, and return a Result (namedtuple) for it.
 
     @param cmd: the command to run
     @param stdout: an open file to capture stdout in, or subprocess.PIPE
     @param stderr: an open file to capture stderr in, or subprocess.PIPE
+    @param strip: if True, remove certain escape sequences from stdout
     @type stdout: file | int | None
     @type stderr: file | int | None
     """
@@ -44,12 +47,15 @@ def run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE):
 
     proc = subprocess.Popen(cmd, shell=True, stdout=stdout, stderr=stderr)
     (stdout, stderr) = proc.communicate()
-
     if stdout:
+        if strip:
+            stdout = stdout.replace('\x1b[0m', '')
+            stdout = stdout.replace('\x1b[1m', '')
         logging.debug('    stdout: %s', repr(stdout))
     if stderr:
         logging.debug('    stderr: %s', repr(stderr))
-    logging.debug('    rc: %s', proc.returncode)
+    if proc.returncode != 0:
+        logging.debug('    rc: %s', proc.returncode)
     return Result(cmd, proc.returncode, stdout, stderr)
 
 
@@ -82,10 +88,24 @@ def _unfreeze_fs_later(fs):
     run_background('sleep 120 && fsfreeze --unfreeze %s' % fs)
 
 
-def _flush_blockdev(device):
-    """Run /sbin/blockdev to flush buffers"""
+def _flush_blockdev(device, wildcard=None):
+    """Run /sbin/blockdev to flush buffers
+
+    @param device: The base block device (/dev/nvme0n1, /dev/mmcblk0, /dev/sda)
+    @param wildcard: The wildcard pattern to match and iterate.
+                      (e.g. the 'p*' in '/dev/mmcblk0p*')
+    """
     # ioctl: BLKFLSBUF
     run('blockdev --flushbufs %s' % device)
+
+    if wildcard:
+        partitions = glob.glob(device + wildcard)
+        if device in partitions:
+            # sda* matches sda too, so avoid flushing it twice
+            partitions.remove(device)
+        if partitions:
+            run('for part in %s; do blockdev --flushbufs $part; done'
+                % ' '.join(partitions))
 
 
 def _do_blocking_sync(device):
@@ -94,14 +114,16 @@ def _do_blocking_sync(device):
     'sync' only sends SYNCHRONIZE_CACHE but doesn't check the status.
     This function will perform a device-specific sync command.
 
-    @param device: String name (/dev/sda, /dev/nvme0, etc.) to sync
+    @param device: Name of the block dev: /dev/sda, /dev/nvme0n1, /dev/mmcblk0.
+                   The value is assumed to be the full block device,
+                   not a partition or the nvme controller char device.
     """
     if 'mmcblk' in device:
         # For mmc devices, use `mmc status get` command to send an
         # empty command to wait for the disk to be available again.
 
-        # flush mmcblk0 and mmcblk0p1, mmcblk0p2, ...
-        _flush_blockdev('%s %sp*' % (device, device))
+        # Flush device and partitions, ex. mmcblk0 and mmcblk0p1, mmcblk0p2, ...
+        _flush_blockdev(device, 'p*')
 
         # mmc status get <device>: Print the response to STATUS_SEND (CMD13)
         # ioctl: MMC_IOC_CMD, <hex value>
@@ -111,35 +133,55 @@ def _do_blocking_sync(device):
         # For NVMe devices, use `nvme flush` command to commit data
         # and metadata to non-volatile media.
 
-        # flush nvme0n*: nvme0n1, nvme0n1p1, nvme0n1p2, ...
-        _flush_blockdev('%sn*' % device)
+        # The flush command is sent to the namespace, not the char device:
+        # https://chromium.googlesource.com/chromiumos/third_party/kernel/+/bfd8947194b2e2a53db82bbc7eb7c15d028c46db
+
+        # Flush device and partitions, ex. nvme0n1, nvme0n1p1, nvme0n1p2, ...
+        _flush_blockdev(device, 'p*')
 
         # Get a list of NVMe namespaces, and flush them individually.
         # The output is assumed to be in the following format:
         # [ 0]:0x1
         # [ 1]:0x2
-        list_result = run("nvme list-ns %s" % device)
+        list_result = run("nvme list-ns %s" % device, strip=True)
         available_ns = list_result.stdout.strip()
 
+        if list_result.rc != 0:
+            logging.warn("Listing namespaces failed (rc=%s); assuming default.",
+                         list_result.rc)
+            available_ns = ''
+
+        elif available_ns.startswith('Usage:'):
+            logging.warn("Listing namespaces failed (just printed --help);"
+                         " assuming default.")
+            available_ns = ''
+
+        elif not available_ns:
+            logging.warn("Listing namespaces failed (empty output).")
+
         if not available_ns:
-            logging.warn("Listing namespaces failed (empty output): %s",
-                         list_result)
-
-        for ns in available_ns.splitlines():
-            ns = ns.split(':')[-1]
-
-            # ioctl NVME_IOCTL_IO_CMD, <hex value>
-            flush_result = run('nvme flush %s -n %s' % (device, ns))
+            # -n Defaults to 0xffffffff, indicating flush for all namespaces.
+            flush_result = run('nvme flush %s' % device, strip=True)
 
             if flush_result.rc != 0:
-                logging.info("Warning: Flushing namespace %s failed:\n%s",
-                             ns, flush_result)
+                logging.warn("Flushing %s failed (rc=%s).",
+                             device, flush_result.rc)
+
+        for line in available_ns.splitlines():
+            ns = line.split(':')[-1]
+
+            # ioctl NVME_IOCTL_IO_CMD, <hex value>
+            flush_result = run('nvme flush %s -n %s' % (device, ns), strip=True)
+
+            if flush_result.rc != 0:
+                logging.warn("Flushing %s namespace %s failed (rc=%s).",
+                             device, ns, flush_result.rc)
 
     elif 'sd' in device:
         # For other devices, use hdparm to attempt a sync.
 
-        # flush sda*: sda, sda1, sda2, ...
-        _flush_blockdev('%s*' % device)
+        # flush device and partitions, ex. sda, sda1, sda2, sda3, ...
+        _flush_blockdev(device, '*')
 
         # -f  Flush buffer cache for device on exit
         #   ioctl: BLKFLSBUF: flush buffer cache
@@ -153,7 +195,7 @@ def _do_blocking_sync(device):
 
     else:
         logging.warn("Unhandled device type: %s", device)
-        _flush_blockdev(device)
+        _flush_blockdev(device, '*')
 
 
 def blocking_sync(freeze=False):

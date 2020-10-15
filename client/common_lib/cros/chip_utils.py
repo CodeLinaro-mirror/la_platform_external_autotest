@@ -90,8 +90,7 @@ class anx3429(generic_chip):
     cbfs_hash_name = fw_name + '.hash'
 
     def fw_ver_from_hash(self, blob):
-        """Return the firmware version encoded in the firmware hash."""
-
+        """Return the firmware version encoded in the passed-in hash content."""
         return blob[0]
 
     def compute_hash_bytes(self):
@@ -125,10 +124,12 @@ class ecrw(generic_chip):
 
         # openssl outputs the result to stdout
         cmd = 'openssl dgst -sha256 -binary %s' % self.fw_file_name
-        return subprocess.check_output(cmd, shell=True)
+        result = subprocess.check_output(cmd, shell=True)
+        return bytearray(result)
 
 
 chip_id_map = {
-    '0x8751': ps8751,
-    '0x3429': anx3429,
+        'ecrw': ecrw,
+        '0x8751': ps8751,
+        '0x3429': anx3429,
 }

@@ -20,7 +20,8 @@ class firmware_ECLidShutdown(FirmwareTest):
     # Delay to allow for a power state change after closing or opening the lid.
     # This value is determined experimentally.
     LID_POWER_STATE_DELAY = 5
-    POWER_STATE_CHECK_TRIES = 1
+    POWER_STATE_CHECK_TRIES = 3
+    POWER_STATE_CHECK_DELAY = 10
     IGNORE_LID_IN_USERSPACE_CMD = 'echo 0 > /var/lib/power_manager/use_lid'
     CHECK_POWER_MANAGER_CFG_DEFAULT = '[ ! -f /var/lib/power_manager/use_lid ]'
 
@@ -73,11 +74,14 @@ class firmware_ECLidShutdown(FirmwareTest):
         self.switcher.simple_reboot(sync_before_boot=False)
         # Some boards may reset the lid_open state when AP reboot,
         # check b/137612865
+        time.sleep(self.faft_config.ec_boot_to_console)
         if self.servo.get('lid_open') != 'no':
             self.servo.set('lid_open', 'no')
             time.sleep(self.LID_POWER_STATE_DELAY)
         time.sleep(self.faft_config.firmware_screen)
-        if not self.wait_power_state('G3', self.POWER_STATE_CHECK_TRIES):
+        if not self.wait_power_state('G3',
+                                     self.POWER_STATE_CHECK_TRIES,
+                                     self.POWER_STATE_CHECK_DELAY):
             raise error.TestFail('The device did not stay in a mechanical off '
                                  'state after a lid close and a warm reboot.')
         self.servo.set('lid_open', 'yes')
@@ -108,6 +112,7 @@ class firmware_ECLidShutdown(FirmwareTest):
                     'with powerd ignoring lid state.  Maybe userspace power '
                     'management behaviors have changed.')
         self.switcher.simple_reboot(sync_before_boot=False)
+        time.sleep(self.faft_config.ec_boot_to_console)
         if self.servo.get('lid_open') != 'no':
             self.servo.set('lid_open', 'no')
             time.sleep(self.LID_POWER_STATE_DELAY)

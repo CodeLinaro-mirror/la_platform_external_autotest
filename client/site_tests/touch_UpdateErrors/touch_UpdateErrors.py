@@ -90,10 +90,12 @@ class touch_UpdateErrors(touch_playback_test_base.touch_playback_test_base):
         if not hw_id:
             raise error.TestError('%s has no valid hw_id!' % input_type)
 
+        updater_name = 'touch-firmware-update'
         start_line = self._find_logs_start_line()
-        log_cmd = 'tail -n +%s /var/log/messages | grep -i touch' % start_line
+        log_cmd = 'tail -n +%s /var/log/messages | grep -i %s' % (
+                start_line, updater_name)
 
-        pass_terms = ['touch-firmware-update.*%s' % hw_id ]
+        pass_terms = ['%s.*%s' % (updater_name, hw_id) ]
 
         fail_terms = ['error[^s]', 'err[^a-z]']
         ignore_terms = ['touchview','autotest']

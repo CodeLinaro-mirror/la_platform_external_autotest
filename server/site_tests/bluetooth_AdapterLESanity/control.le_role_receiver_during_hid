@@ -10,7 +10,7 @@ NAME = 'bluetooth_AdapterLESanity.le_role_receiver_during_hid'
 PURPOSE = ('Tests controller can handle Receiver role while already connected'
            ' to a HID device')
 CRITERIA = 'Pass the test'
-ATTRIBUTES = 'suite:bluetooth_flaky'
+ATTRIBUTES = 'suite:bluetooth, suite:bluetooth_e2e'
 TIME = 'SHORT'
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'bluetooth'

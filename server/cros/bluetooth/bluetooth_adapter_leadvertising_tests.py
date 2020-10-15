@@ -407,9 +407,10 @@ class bluetooth_AdapterLEAdvertising(
                                            instance_id,
                                            advertising_disabled=False)
 
-        self.test_check_duration_and_intervals(new_min_adv_interval_ms,
-                                               new_max_adv_interval_ms,
-                                               number_advs)
+        if not self.ext_adv_enabled():
+            self.test_check_duration_and_intervals(new_min_adv_interval_ms,
+                                                   new_max_adv_interval_ms,
+                                                   number_advs)
 
         # Unregister all existing advertisements which are [1, 2, 4]
         # since adv 3 was removed in the previous step.
@@ -468,9 +469,10 @@ class bluetooth_AdapterLEAdvertising(
                                            instance_id,
                                            advertising_disabled=False)
 
-        self.test_check_duration_and_intervals(new_min_adv_interval_ms,
-                                               new_max_adv_interval_ms,
-                                               len(advertisements) - 1)
+        if not self.ext_adv_enabled():
+            self.test_check_duration_and_intervals(new_min_adv_interval_ms,
+                                                   new_max_adv_interval_ms,
+                                                   len(advertisements) - 1)
 
         self.test_reset_advertising([2, 3])
 
@@ -506,9 +508,10 @@ class bluetooth_AdapterLEAdvertising(
                                            instance_id,
                                            advertising_disabled=False)
 
-        self.test_check_duration_and_intervals(new_min_adv_interval_ms,
-                                               new_max_adv_interval_ms,
-                                               number_advs1 - 1)
+        if not self.ext_adv_enabled():
+            self.test_check_duration_and_intervals(new_min_adv_interval_ms,
+                                                   new_max_adv_interval_ms,
+                                                   number_advs1 - 1)
 
         # Register two more advertisements.
         # The instance IDs to register would be [2, 4]
@@ -552,9 +555,14 @@ class bluetooth_AdapterLEAdvertising(
                                                  new_min_adv_interval_ms,
                                                  new_max_adv_interval_ms)
 
-        self.test_check_duration_and_intervals(new_min_adv_interval_ms,
-                                               new_max_adv_interval_ms,
-                                               number_advs)
+        # If the registration fails and extended advertising is available,
+        # there will be no events in btmon. Therefore, we only run this part of
+        # the test if extended advertising is not available, indicating that
+        # software advertisement rotation is being used.
+        if not self.ext_adv_enabled():
+            self.test_check_duration_and_intervals(new_min_adv_interval_ms,
+                                                   new_max_adv_interval_ms,
+                                                   number_advs)
 
         self.unregister_advertisements(advertisements)
 
@@ -710,9 +718,10 @@ class bluetooth_AdapterLEAdvertising(
                                            instance_id,
                                            advertising_disabled=False)
 
-        self.test_check_duration_and_intervals(new_min_adv_interval_ms,
-                                               new_max_adv_interval_ms,
-                                               number_advs - 1)
+        if not self.ext_adv_enabled():
+            self.test_check_duration_and_intervals(new_min_adv_interval_ms,
+                                                   new_max_adv_interval_ms,
+                                                   number_advs - 1)
 
         # Test if advertising is reset correctly.Only instances [1, 3] are left.
         self.test_reset_advertising([1, 3])
@@ -787,9 +796,14 @@ class bluetooth_AdapterLEAdvertising(
                                                  new_min_adv_interval_ms,
                                                  new_max_adv_interval_ms)
 
-        self.test_check_duration_and_intervals(new_min_adv_interval_ms,
-                                               new_max_adv_interval_ms,
-                                               number_advs)
+        # If the registration fails and extended advertising is available,
+        # there will be no events in btmon. Therefore, we only run this part of
+        # the test if extended advertising is not available, indicating that
+        # software advertisement rotation is being used.
+        if not self.ext_adv_enabled():
+            self.test_check_duration_and_intervals(new_min_adv_interval_ms,
+                                                   new_max_adv_interval_ms,
+                                                   number_advs)
 
         self.unregister_advertisements(advertisements)
 
@@ -832,9 +846,10 @@ class bluetooth_AdapterLEAdvertising(
                 invalid_small_max_adv_interval_ms,
                 new_min_adv_interval_ms, new_max_adv_interval_ms)
 
-        self.test_check_duration_and_intervals(new_min_adv_interval_ms,
-                                               new_max_adv_interval_ms,
-                                               number_advs)
+        if not self.ext_adv_enabled():
+            self.test_check_duration_and_intervals(new_min_adv_interval_ms,
+                                                   new_max_adv_interval_ms,
+                                                   number_advs)
 
         # Fails to set intervals that are too large. Intervals remain the same.
         self.test_fail_to_set_advertising_intervals(
@@ -842,9 +857,10 @@ class bluetooth_AdapterLEAdvertising(
                 invalid_large_max_adv_interval_ms,
                 new_min_adv_interval_ms, new_max_adv_interval_ms)
 
-        self.test_check_duration_and_intervals(new_min_adv_interval_ms,
-                                               new_max_adv_interval_ms,
-                                               number_advs)
+        if not self.ext_adv_enabled():
+            self.test_check_duration_and_intervals(new_min_adv_interval_ms,
+                                                   new_max_adv_interval_ms,
+                                                   number_advs)
 
         # Unregister all advertisements.
         self.unregister_advertisements(advertisements)
@@ -1263,20 +1279,12 @@ class bluetooth_AdapterLEAdvertising(
             self.test_case_SI200_RA3_CD_RS()
             self.test_case_SI200_RA3_CD_UA1_CD_RS()
             self.test_case_SI200_RA3_CD_UA1_CD_RA2_CD_UA4()
-
-            # TODO b/155925590 : Bluez 5.54 has a known issue where the failure
-            # on 6th adv isn't communicated back to the caller properly.
-            # Disabling test until a fix is applied
-            # self.test_case_SI200_RA5_CD_FRA1_CD_UA5()
+            self.test_case_SI200_RA5_CD_FRA1_CD_UA5()
             self.test_case_RA3_CD_SI200_CD_UA3()
             self.test_case_RA3_CD_SI200_CD_RS()
             self.test_case_RA3_CD_SI200_CD_UA1_CD_RS()
             self.test_case_RA3_CD_SI200_CD_SI2000_CD_UA3()
-
-            # TODO b/155925590 : Bluez 5.54 has a known issue where the failure
-            # on 6th adv isn't communicated back to the caller properly.
-            # Disabling test until a fix is applied
-            # self.test_case_RA5_CD_SI200_CD_FRA1_CD_UA5()
+            self.test_case_RA5_CD_SI200_CD_FRA1_CD_UA5()
             self.test_case_RA3_CD_SI200_CD_FSI10_CD_FSI20000_CD_UA3()
             self.test_case_SI200_RA3_CD_SR_CD_UA3()
             self.test_case_RA3_CD_SI200_CD_SR_CD_UA3()

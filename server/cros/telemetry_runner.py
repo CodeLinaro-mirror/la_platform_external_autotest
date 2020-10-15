@@ -1,13 +1,18 @@
+# Lint as: python2, python3
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import json
 import logging
 import numbers
 import os
 import tempfile
-import StringIO
+import six
 
 import numpy
 
@@ -296,8 +301,8 @@ class TelemetryRunner(object):
         """
         logging.debug('Running: %s', cmd)
 
-        output = StringIO.StringIO()
-        error_output = StringIO.StringIO()
+        output = six.StringIO()
+        error_output = six.StringIO()
         exit_code = 0
         try:
             result = utils.run(
@@ -574,14 +579,14 @@ class TelemetryRunner(object):
                 continue
             metric_name = obj['name']
             diagnostics = obj['diagnostics']
-            if diagnostics.has_key('stories'):
+            if 'stories' in diagnostics:
                 story_name = value_map[diagnostics['stories']][0]
             else:
                 story_name = 'default'
             local_benchmark_name = value_map[diagnostics['benchmarks']][0]
             if benchmark_name == '':
                 benchmark_name = local_benchmark_name
-                if diagnostics.has_key('benchmarkDescriptions'):
+                if 'benchmarkDescriptions' in diagnostics:
                     benchmark_desc = value_map[
                             diagnostics['benchmarkDescriptions']][0]
             if benchmark_name != local_benchmark_name:

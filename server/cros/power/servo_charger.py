@@ -46,7 +46,9 @@ class ServoV4ChargeManager(object):
         responds to Servo charging commands. Restore Servo v4 power role after
         sanity check.
 
-        @param host: CrosHost object representing the DUT.
+        @param host: CrosHost object representing the DUT or None.
+                     If host is None, then the is_ac_connected check on the
+                     host object is skipped.
         @param servo: a proxy for servod.
         """
         super(ServoV4ChargeManager, self).__init__()
@@ -179,6 +181,8 @@ class ServoV4ChargeManager(object):
                      delay_sec=_DELAY_SEC, backoff=_BACKOFF)
         def check_host_ac(connected):
             """Check if DUT AC power is as expected, if not, retry."""
+            if self._host is None:
+                return
             if self._host.is_ac_connected() != connected:
                 intent = 'connect' if connected else 'disconnect'
                 raise error.TestError('DUT failed to %s AC power.'% intent)

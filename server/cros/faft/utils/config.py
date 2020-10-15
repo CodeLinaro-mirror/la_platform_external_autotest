@@ -76,12 +76,14 @@ class Config(object):
         # octopus_fleex should look for fleex.json. It doesn't exist, so
         # instead it loads octopus.json.
         platform = platform.lower().replace('-', '_')
-        for p in platform.rsplit('_', 1)[::-1]:
+        for p in platform.rsplit('_')[::-1]:
+            logging.debug('Looking for %s config', p)
             if _has_config_file(p):
+                logging.info('Found %s config', p)
                 self.platform = p
                 break
         else:
-            self.platform = platform.replace('-','_')
+            self.platform = platform
         if _has_config_file(self.platform):
             platform_config = _load_config(self.platform)
             seen_platforms = [self.platform]
