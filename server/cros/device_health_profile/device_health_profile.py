@@ -343,6 +343,34 @@ class DeviceHealthProfile(object):
         """
         return self.get_failed_repair_actions().get(tag, 0)
 
+    def get_badblocks_ro_run_time(self):
+        """Get the timestamp of when run last read-only badblocks check
+        on the device. Example "2020-01-01 15:05:05"
+        """
+        last_time = self._get_value(LAST_BADBLOCKS_RO_RUN_TIME_KEY)
+        return last_time or DEFAULT_TIMESTAMP
+
+    def get_badblocks_ro_run_time_epoch(self):
+        """Get the unix time of when run last read-only badblocks check
+        on the device."
+        """
+        last_time = self.get_badblocks_ro_run_time()
+        return int(time.mktime(time.strptime(last_time, TIME_PATTERN)))
+
+    def get_badblocks_rw_run_time(self):
+        """Get the timestamp of when run last read-write badblocks check
+        on the device. Example "2020-01-01 15:05:05"
+        """
+        last_time = self._get_value(LAST_BADBLOCKS_RW_RUN_TIME_KEY)
+        return last_time or DEFAULT_TIMESTAMP
+
+    def get_badblocks_rw_run_time_epoch(self):
+        """Get the unix time of when run last read-write badblocks check
+        on the device."
+        """
+        last_time = self.get_badblocks_rw_run_time()
+        return int(time.mktime(time.strptime(last_time, TIME_PATTERN)))
+
     def set_cros_stable_version(self, build):
         """Set the most recent used cros image during repair.
         """
@@ -353,6 +381,22 @@ class DeviceHealthProfile(object):
         expect to see this on non-faft pool device.
         """
         self._update_profile(FIRMWARE_STABLE_VERSION_KEY, build)
+
+    def refresh_badblocks_ro_run_time(self):
+        """Get the timestamp of when run last read-only badblocks check
+        on the device.
+        """
+        return self._update_profile(
+                LAST_BADBLOCKS_RO_RUN_TIME_KEY,
+                time.strftime(TIME_PATTERN, time.localtime()))
+
+    def refresh_badblocks_rw_run_time(self):
+        """Get the timestamp of when run last read-write badblocks check
+        on the device.
+        """
+        return self._update_profile(
+                LAST_BADBLOCKS_RW_RUN_TIME_KEY,
+                time.strftime(TIME_PATTERN, time.localtime()))
 
     def refresh_update_time(self):
         """Update last_update_time to current timestamp in UTC.

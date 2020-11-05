@@ -231,6 +231,18 @@ class GeneralFirmwareRepair(FirmwareRepair):
                       'image not loaded on usbkey')
         ec_image, bios_image = host._servo_host.prepare_repair_firmware_image()
 
+        # For EVT device with signed variant exists we skip this repair
+        # as it's hard to decide which image to use if DUT do not boot.
+        info = host.host_info_store.get()
+        phase = info.get_label_value('phase')
+        if 'signed' in bios_image and phase.lower() in ('evt', 'dvt', ''):
+            raise hosts.AutoservRepairError(
+                    'Could not determine which firmware image to use'
+                    ' due to signed firmware image variant exists but'
+                    ' DUT phase is earlier than PVT or missing; Phase'
+                    ' from inventory: %s' % phase,
+                    'Can not determine variant for EVT device')
+
         # Before flash firmware we want update the build into health profile.
         if host.health_profile:
             host.health_profile.set_firmware_stable_version(build)
@@ -240,7 +252,7 @@ class GeneralFirmwareRepair(FirmwareRepair):
             host.servo.program_ec(ec_image, copy_image=False)
         if bios_image:
             logging.info('Attempting to flash bios firmware...')
-            host.servo.program_bios(bios_image, copy_image=False)
+            host._servo_host.flash_ap_firmware_via_servo(bios_image)
 
         logging.info('Cold resetting DUT through servo...')
         host.servo.get_power_state_controller().reset()
@@ -267,6 +279,16 @@ class GeneralFirmwareRepair(FirmwareRepair):
         if not dhp:
             logging.info('Device health profile is not available, cannot'
                          ' determine if firmware repair is needed.')
+            return False
+        repair_fail_count = dhp.get_repair_fail_count()
+        if repair_fail_count < 2:
+            # We want to start with a more conservative strategy, so only try
+            # this action on DUTs that failed repair at least twice.
+            # @TODO(xianuowang@) adjust or remove this threshold.
+            logging.info(
+                    'Firmware repair will only applies to DUT that'
+                    ' failed at least two AdminRepair, current fail'
+                    ' count: %s', repair_fail_count)
             return False
         flashed_build = dhp.get_firmware_stable_version()
         candidate_build = self._get_stable_build(host)

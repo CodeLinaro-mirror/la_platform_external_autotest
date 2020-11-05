@@ -20,6 +20,7 @@ class firmware_InvalidUSB(FirmwareTest):
     restores the USB image and boots into it again.
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     def restore_usb(self):
         """Restore the USB image. USB plugs/unplugs happen in this method."""

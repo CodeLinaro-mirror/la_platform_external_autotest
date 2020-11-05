@@ -1,4 +1,4 @@
-import os, logging, ConfigParser
+import os, logging, six.moves.configparser
 from autotest_lib.client.common_lib import autotemp, packages, error
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.bin import harness
@@ -28,7 +28,7 @@ class harness_autoserv(harness.harness):
         # was written.
         try:
             cfg = global_config.global_config.get_section_values("CLIENT")
-        except ConfigParser.NoSectionError:
+        except six.moves.configparser.NoSectionError:
             logging.error("Empty CLIENT configuration session. "
                           "global_config.ini missing. This probably means "
                           "a bug on the server code. Please verify.")

@@ -14,7 +14,7 @@ import threading
 import SimpleXMLRPCServer
 
 
-def terminate_old(script_name):
+def terminate_old(script_name, sigterm_timeout=5, sigkill_timeout=3):
     """
     Avoid "address already in use" errors by killing any leftover RPC server
     processes, possibly from previous runs.
@@ -27,6 +27,8 @@ def terminate_old(script_name):
     cmdline=['/usr/bin/python2', '-u', '/usr/local/autotest/.../rpc_server.py']
 
     @param script_name: The filename of the main script, used to match processes
+    @param sigterm_timeout: Wait N seconds after SIGTERM before trying SIGKILL.
+    @param sigkill_timeout: Wait N seconds after SIGKILL before complaining.
     """
     # import late, to avoid affecting servers that don't call the method
     import psutil
@@ -34,48 +36,65 @@ def terminate_old(script_name):
     script_name_abs = os.path.abspath(script_name)
     script_name_base = os.path.basename(script_name)
     me = psutil.Process()
-    logging.debug('%s: %s, %s', me, me.exe(), me.cmdline())
-    for proc in psutil.process_iter():
+
+    logging.debug('This process:  %s: %s, %s', me, me.exe(), me.cmdline())
+    logging.debug('Checking for leftover processes...')
+
+    running = []
+    for proc in psutil.process_iter(attrs=['name', 'exe', 'cmdline']):
         if proc == me:
             continue
-        name = None
-        exe = None
         try:
             name = proc.name()
             if not name or 'py' not in name:
                 continue
             exe = proc.exe()
             args = proc.cmdline()
-        except psutil.Error as e:
-            logging.debug('%s: %s', e, proc)
-            continue
-        try:
+            # Note: If we ever need multiple instances on different ports,
+            # add a check for listener ports, likely via proc.connections()
             if '/python' in exe and (script_name in args
                                      or script_name_abs in args
                                      or script_name_base in args):
-                logging.info('Terminating leftover process: %s: %s, %s', proc,
-                             exe, args)
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=5)
-                    logging.debug('Process exited')
-                except psutil.TimeoutExpired as e:
-                    logging.warn(
-                            'Process did not exit, '
-                            'falling back to SIGKILL: %s', e)
-                    try:
-                        proc.kill()
-                        proc.wait(timeout=2.5)
-                        logging.debug('Process exited')
-                    except psutil.TimeoutExpired:
-                        logging.exception('Process did not exit; '
-                                          'address may remain in use.')
-        except psutil.AccessDenied:
-            logging.exception('Process could not be terminated; '
-                              'address may remain in use.')
+                logging.debug('Found process: %s: %s', proc, args)
+                running.append(proc)
+        except psutil.Error as e:
+            logging.debug('%s: %s', e, proc)
+            continue
+
+    if not running:
+        return
+
+    logging.info('Trying SIGTERM: pids=%s', [p.pid for p in running])
+    for proc in running:
+        try:
+            proc.send_signal(0)
+            proc.terminate()
         except psutil.NoSuchProcess as e:
-            # process exited already
-            logging.debug('Process exited: %s', e)
+            logging.debug('%s: %s', e, proc)
+        except psutil.Error as e:
+            logging.warn('%s: %s', e, proc)
+
+    (terminated, running) = psutil.wait_procs(running, sigterm_timeout)
+    if not running:
+        return
+
+    running.sort()
+    logging.info('Trying SIGKILL: pids=%s', [p.pid for p in running])
+    for proc in running:
+        try:
+            proc.kill()
+        except psutil.NoSuchProcess as e:
+            logging.debug('%s: %s', e, proc)
+        except psutil.Error as e:
+            logging.warn('%s: %s', e, proc)
+
+    (sigkilled, running) = psutil.wait_procs(running, sigkill_timeout)
+    if running:
+        running.sort()
+        logging.warn('Found leftover processes %s; address may be in use!',
+                     [p.pid for p in running])
+    else:
+        logging.debug('Leftover processes have exited.')
 
 
 class XmlRpcServer(threading.Thread):

@@ -3,13 +3,12 @@
 # found in the LICENSE file.
 
 from autotest_lib.server import utils
-from autotest_lib.server.cros.bluetooth import bluetooth_test
 
 AUTHOR = 'chromeos-bluetooth'
 NAME = 'bluetooth_AdapterSASanity.sa_valid_address_test'
 PURPOSE = ('batch of Bluetooth stand along sanity tests')
 CRITERIA = 'Pass all sanity test'
-ATTRIBUTES = 'suite:bluetooth, suite:bluetooth_standalone'
+ATTRIBUTES = 'suite:bluetooth, suite:bluetooth_standalone, suite:bluetooth_standalone_cq'
 TIME = 'MEDIUM'
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'bluetooth'

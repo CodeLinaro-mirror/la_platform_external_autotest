@@ -5,12 +5,16 @@
 """This throttler tries to reduce result size by compress files to tgz file.
 """
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import re
 import os
 import tarfile
 
-import throttler_lib
-import utils_lib
+from . import throttler_lib
+from . import utils_lib
 
 
 # File with extensions that can not be zipped or compression won't reduce file

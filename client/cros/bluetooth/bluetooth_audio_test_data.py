@@ -8,7 +8,7 @@ import logging
 import os
 import subprocess
 
-
+import common
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.bin import utils
 
@@ -27,6 +27,8 @@ VISQOL_PATH = os.path.join(VISQOL_FOLDER, 'visqol')
 # There are several available models for VISQOL, since these VISQOL based tests
 # are primarily for voice quality, this model is more tuned for voice quality.
 # experimentally, the scores have been fairly similar to the default model
+# TODO b:169251326 terms below are set outside of this codebase
+# and should be updated when possible. ("master" -> "main")
 # 'libsvm_nu_svr_model.txt'. Details: github.com/google/visqol/tree/master/model
 VISQOL_SIMILARITY_MODEL = os.path.join(
         VISQOL_FOLDER, 'visqol.runfiles', '__main__', 'model',
@@ -308,7 +310,7 @@ a2dp_test_data = {
     'file': os.path.join(AUDIO_TEST_DIR,
                          'binaural_sine_440hz_20000hz_rate48000_%dsecs.raw'),
     'recorded_by_peer': os.path.join(AUDIO_RECORD_DIR,
-                                     'a2dp_recorded_by_peer_%d.wav'),
+                                     'a2dp_recorded_by_peer.raw'),
     'chunk_in_secs': 5,
 }
 a2dp_test_data.update(common_test_data)
@@ -319,7 +321,7 @@ a2dp_test_data.update(common_test_data)
 a2dp_long_test_data = a2dp_test_data.copy()
 a2dp_long_test_data.update({
     'recorded_by_peer': os.path.join(AUDIO_RECORD_DIR,
-                                     'a2dp_long_recorded_by_peer_%d.wav'),
+                                     'a2dp_long_recorded_by_peer.raw'),
     'duration': 0,       # determined at run time
     'chunk_in_secs': 1,
 })

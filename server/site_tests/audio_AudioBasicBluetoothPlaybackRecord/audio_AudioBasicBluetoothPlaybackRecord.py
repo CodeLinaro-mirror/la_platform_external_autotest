@@ -7,6 +7,8 @@ This is a server side bluetooth playback/record test using the Chameleon
 board.
 """
 
+from __future__ import print_function
+
 import logging
 import os
 import time

@@ -10,7 +10,6 @@ suite:arc-cts-unibuild
 suite:arc-cts-unibuild-hw
 suite:arc-gts
 suite:arc-gts-qual
-suite:arc-unit-test
 suite:audio
 suite:audio_advanced
 suite:audio_basic
@@ -34,6 +33,7 @@ suite:bluetooth_mtbf
 suite:bluetooth_qualification
 suite:bluetooth_sanity
 suite:bluetooth_standalone
+suite:bluetooth_standalone_cq
 suite:bluetooth_stress
 suite:bluetooth_wifi_coex
 suite:brillo-bvt
@@ -83,6 +83,7 @@ suite:crosbolt_perf_perbuild
 suite:crosbolt_perf_weekly
 suite:cts_P
 suite:cups_weekly
+suite:debug_kernel_testing
 suite:dev_drone_image_test
 suite:dummy
 suite:dummy_server

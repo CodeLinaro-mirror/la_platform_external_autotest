@@ -679,7 +679,7 @@ class DevServer(object):
 
         @param build: The build (e.g. x86-mario-release/R18-1586.0.0-a1-b1514).
         @param devservers: The devserver list to be chosen out a healthy one.
-        @param ban_list: The blacklist of devservers we don't want to choose.
+        @param ban_list: The ban_list of devservers we don't want to choose.
                 Default is None.
 
         @return: A DevServer object of a healthy devserver. Return None if no
@@ -759,7 +759,7 @@ class DevServer(object):
         @param hostname: The hostname of dut that requests a devserver. It's
                          used to make sure a devserver in the same subnet is
                          preferred.
-        @param ban_list: The blacklist of devservers shouldn't be chosen.
+        @param ban_list: The ban_list of devservers shouldn't be chosen.
 
         @raise DevServerException: If no devserver is available.
         """
@@ -2080,7 +2080,7 @@ def resolve(build, hostname=None, ban_list=None):
                   Launch Control build: git_mnc_release/shamu-eng
     @param hostname: Hostname of a devserver for, default is None, which means
             devserver is not restricted by the network location of the host.
-    @param ban_list: The blacklist of devservers shouldn't be chosen.
+    @param ban_list: The ban_list of devservers shouldn't be chosen.
 
     @return: A DevServer instance that can be used to stage given build for the
              given host.

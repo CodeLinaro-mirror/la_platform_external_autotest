@@ -250,7 +250,7 @@ class ChromiumOSProvisioner(object):
     def _reset_update_engine(self):
         """Resets the host to prepare for a clean update regardless of state."""
         self._run('stop ui || true')
-        self._run('restart update-engine')
+        self._run('stop update-engine || true; start update-engine')
 
     def _reset_stateful_partition(self):
         """Clear any pending stateful update request."""

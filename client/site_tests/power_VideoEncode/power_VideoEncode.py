@@ -1,7 +1,6 @@
 # Copyright 2020 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-import itertools
 import logging
 import time
 
@@ -17,22 +16,36 @@ class power_VideoEncode(power_test.power_Test):
 
     video_url = 'https://crospower.page.link/power_VideoEncode'
 
-    codecs = ['h264', 'vp8', 'vp9', 'av1']
-    resolutions = ['360', '720', '1080', '4k']
-    framerates = [30, 60]
+    formats = [
+            # Video call with fewer participants.
+            ('vp9', 'hd', 24),
+            ('vp9', 'vga', 24),
+            ('vp9', 'qvga', 24),
+            ('vp8', 'hd', 24),
+            ('vp8', 'vga', 24),
+            ('vp8', 'qvga', 24),
+            ('h264', 'hd', 24),
+            ('h264', 'vga', 24),
+            # Video call with more participants.
+            ('vp9', 'hvga', 24),
+            ('vp9', 'qhvga', 20),
+            ('vp8', 'hvga', 24),
+            ('vp8', 'qhvga', 15),
+            # Higher resolution video
+            ('vp9', 'fhd', 24),
+            ('vp8', 'fhd', 24),
+            ('h264', 'fhd', 24),
+            # AV1 for informational
+            ('av1', 'hvga', 24),
+            ('av1', 'qhvga', 15),
+    ]
 
-    def run_once(self, seconds_per_test=120, codecs=codecs,
-                 resolutions=resolutions, framerates=framerates):
+    def run_once(self, seconds_per_test=120, format=formats):
         """run_once method.
 
         @param seconds_per_test: time in seconds for each subtest.
-        @param codecs: list of codec to test. Possible value are
-                       ['h264', 'vp8', 'vp9', 'av1'].
-        @param resolutions: list of resolutions to test. Possible value are
-                       ['360', '540', '720', '1080', '1440', '4k'].
-        @param framerates: list of framerate to test. Possible value are
-                           number in the range of 1 to 60.
-
+        @param format: list of formats to test.
+                       Format is tuple of codec, resolution and framerate.
         """
         extra_browser_args = self.get_extra_browser_args_for_camera_test()
         with chrome.Chrome(init_network_controller=True,
@@ -60,8 +73,7 @@ class power_VideoEncode(power_test.power_Test):
 
             loop = 0
             self.start_measurements()
-            for codec, resolution, fps in itertools.product(codecs, resolutions,
-                                                            framerates):
+            for codec, resolution, fps in format:
                 tagname = '%s_%s_%sfps' % (codec, resolution, fps)
                 js = 'changeFormat("%s", "%s", %d)' % (codec, resolution, fps)
                 logging.info(js)

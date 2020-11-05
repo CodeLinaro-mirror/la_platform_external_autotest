@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -14,12 +15,20 @@ Decoding class can be invoked independently.
 
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import json
 import logging
 import re
 
+import six
+from six.moves import range
+
 import common
 from autotest_lib.client.bin import utils
+
 
 class fio_graph_generator():
     """
@@ -301,7 +310,7 @@ def fio_parser(lines, prefix=None):
         job.pop('jobname')
 
 
-        for k, v in job.iteritems():
+        for k, v in six.iteritems(job):
             # Igonre "job options", its alphanumerc keys confuses tko.
             # Besides, these keys are redundant.
             if k == 'job options':
@@ -425,7 +434,7 @@ def fio_runner(test, job, env_vars,
     if not graph_prefix:
         graph_prefix = ''
 
-    for k, v in result.iteritems():
+    for k, v in six.iteritems(result):
         # Remove the prefix for value, and replace it the graph prefix.
         if name_prefix:
             k = k.replace('_' + name_prefix, graph_prefix)

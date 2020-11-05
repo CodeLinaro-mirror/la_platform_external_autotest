@@ -69,6 +69,9 @@ HASH_TO_SIGN = ('91f93c8d88ed6168d07a36de53bd62b6'
                 '649e84d343dd417ed6062775739b6e65')
 RANDOM_32 = '0fd2bf886fa8c036d069adf321bf1390859da4d615034c3a81ca3812a210ce0d'
 
+# For complying with struct u2f_generate_req only.
+# Auth-time secret hash is used only in versioned KHs.
+UNUSED_AUTH_TIME_SECRET_HASH = '00' * 32
 
 def get_bytes(tpm_str, start, length):
   return tpm_str[(start * 2):(start * 2 + length * 2)]
@@ -192,7 +195,8 @@ class firmware_Cr50U2fCommands(FirmwareTest):
     assert_byte_length(flags, 1)
 
     response = self.__send_vendor_cmd(
-        VENDOR_CC_U2F_GENERATE, '{}{}{}'.format(app_id, user_secret, flags),
+        VENDOR_CC_U2F_GENERATE, '{}{}{}{}'.format(app_id, user_secret, flags,
+                                                  UNUSED_AUTH_TIME_SECRET_HASH),
         expected_response)
 
     check_response_size(response, expected_response,

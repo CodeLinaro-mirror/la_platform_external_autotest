@@ -6,6 +6,8 @@
 
 # Constants used by other constants.
 USER_DATA_DIR = '/home/chronos'
+# TODO b:169251326 terms below are set outside of this codebase
+# and should be updated when possible. ("whitelist" -> "allowlist")
 ALLOWLIST_DIR = '/var/lib/whitelist'
 LOG_DIR = '/var/log'
 
@@ -156,13 +158,6 @@ BLUETOOTH_DEVICE_XMLRPC_SERVER_CLEANUP_PATTERN = (
         'bluetooth_device_xmlrpc_server')
 BLUETOOTH_DEVICE_XMLRPC_SERVER_READY_METHOD = 'ready'
 
-BLUETOOTH_TESTER_XMLRPC_SERVER_PORT = 9990
-BLUETOOTH_TESTER_XMLRPC_SERVER_COMMAND = (
-        'cd /usr/local/autotest/cros/bluetooth;  '
-        './bluetooth_tester_xmlrpc_server.py')
-BLUETOOTH_TESTER_XMLRPC_SERVER_CLEANUP_PATTERN = (
-        'bluetooth_tester_xmlrpc_server')
-BLUETOOTH_TESTER_XMLRPC_SERVER_READY_METHOD = 'ready'
 
 MULTIMEDIA_XMLRPC_SERVER_PORT = 9991
 MULTIMEDIA_XMLRPC_SERVER_COMMAND = (

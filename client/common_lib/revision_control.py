@@ -56,8 +56,8 @@ class GitRepo(object):
         Initialized reposotory.
 
         @param repodir: destination repo directory.
-        @param giturl: master repo git url.
-        @param weburl: a web url for the master repo.
+        @param giturl: main repo git url.
+        @param weburl: a web url for the main repo.
         @param abs_work_tree: work tree of the git repo. In the
             absence of a work tree git manipulations will occur
             in the current working directory for non bare repos.
@@ -162,15 +162,15 @@ class GitRepo(object):
         """
         Clones a repo using giturl and repodir.
 
-        Since we're cloning the master repo we don't have a work tree yet,
+        Since we're cloning the main repo we don't have a work tree yet,
         make sure the getter of the gitcmd doesn't think we do by setting
         work_tree to None.
 
         @param remote_branch: Specify the remote branch to clone. None if to
-                              clone master branch.
+                              clone main branch.
         @param shallow: If True, do a shallow clone.
 
-        @raises GitCloneError: if cloning the master repo fails.
+        @raises GitCloneError: if cloning the main repo fails.
         """
         logging.info('Cloning git repo %s', self.giturl)
         cmd = 'clone %s %s ' % (self.giturl, self.repodir)
@@ -458,8 +458,8 @@ class GitRepo(object):
         """
         Checks for empty but initialized repos.
 
-        eg: we clone an empty master repo, then don't pull
-        after the master commits.
+        eg: we clone an empty main repo, then don't pull
+        after the main commits.
 
         @return True if the repo has no commits.
         """

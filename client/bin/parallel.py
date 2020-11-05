@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 """ Parallel execution management """
 
 __author__ = """Copyright Andy Whitcroft 2006"""
@@ -18,9 +19,9 @@ def fork_start(tmp, l):
             l()
         except error.AutotestError:
             raise
-        except Exception, e:
+        except Exception as e:
             raise error.UnhandledTestError(e)
-    except Exception, detail:
+    except Exception as detail:
         try:
             try:
                 logging.error('child process failed')
@@ -57,7 +58,7 @@ def _check_for_subprocess_exception(temp_dir, pid):
     ename = temp_dir + "/debug/error-%d" % pid
     if os.path.exists(ename):
         try:
-            e = pickle.load(file(ename, 'r'))
+            e = pickle.load(open(ename, 'rb'))
         except ImportError:
             with open(ename, 'r') as fp:
                 file_text = fp.read()

@@ -134,8 +134,6 @@ class firmware_UpdaterModes(FirmwareTest):
         """Run test, iterating through combinations of mode and write-protect"""
         errors = []
 
-        # TODO(dgoyette): Add a test that checks EC versions (can't be emulated)
-
         # factory: update A, B, and RO; reset gbb flags.  If WP=1, abort.
         errors += self.run_case('factory', 0, ['ro', 'a', 'b'], writes_gbb=True)
         errors += self.run_case('factory', 1, [], should_abort=True)

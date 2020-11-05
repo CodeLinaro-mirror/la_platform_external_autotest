@@ -4,6 +4,10 @@
 # found in the LICENSE file.
 
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import logging
 import numpy
 import os
@@ -21,6 +25,7 @@ from autotest_lib.client.cros.audio import audio_data
 from autotest_lib.client.cros.audio import cmd_utils
 from autotest_lib.client.cros.audio import cras_utils
 from autotest_lib.client.cros.audio import sox_utils
+from six.moves import range
 
 LD_LIBRARY_PATH = 'LD_LIBRARY_PATH'
 
@@ -111,7 +116,7 @@ def loopback_latency_check(**args):
     @return A tuple containing measured and reported latency in uS.
         Return None if no audio detected.
     """
-    noise_threshold = str(args['n']) if args.has_key('n') else '400'
+    noise_threshold = str(args['n']) if 'n' in args else '400'
 
     cmd = '%s -n %s -c' % (LOOPBACK_LATENCY_PATH, noise_threshold)
 
@@ -389,7 +394,7 @@ def get_rms(input_audio, channels=1, bits=16, rate=48000):
     """
     stats = [get_channel_sox_stat(
             input_audio, i + 1, channels=channels, bits=bits,
-            rate=rate) for i in xrange(channels)]
+            rate=rate) for i in range(channels)]
 
     logging.info('sox stat: %s', [str(s) for s in stats])
     return [s.rms for s in stats]
@@ -750,7 +755,7 @@ def recorded_filesize_check(filesize,
 
     @raises: TestFail if the size is less or larger than expect.
     """
-    expected = duration * channels * (bits / 8) * rate
+    expected = duration * channels * (bits // 8) * rate
     ratio = abs(float(filesize) / expected)
     if ratio < 1 or ratio > 1 + tolerant_ratio:
         raise error.TestFail(

@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 
 from autotest_lib.server import utils
-from autotest_lib.server.cros.bluetooth import bluetooth_test
 
 AUTHOR = 'chromeos-bluetooth'
 NAME = 'bluetooth_AdapterMDSanity.stress'
@@ -33,8 +32,8 @@ args_dict = utils.args_to_dict(args)
 btpeer_args = hosts.CrosHost.get_btpeer_arguments(args_dict)
 
 def run(machine):
-    host = hosts.create_host(machine, btpeer_args=btpeer_args)
+    host = hosts.create_host(machine)
     job.run_test('bluetooth_AdapterMDSanity', host=host,
-                  num_iterations=15)
+                 btpeer_args=btpeer_args, num_iterations=15)
 
 parallel_simple(run, machines)

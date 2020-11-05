@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import difflib
 import logging
 import math
@@ -224,7 +226,7 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
 
         errors = []
         if exp_count and not hibernate:
-                errors.append('reset during suspend')
+            errors.append('reset during suspend')
 
         # Use the absolute value, because cr50 shouldn't suspend more or less
         # than expected.
@@ -296,7 +298,7 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
                 self.run_reboots(suspend_count)
             elif reset_type == 'mem':
                 self.run_suspend_resume(suspend_count)
-        except Exception, e:
+        except Exception as e:
             main_error = e
 
         errors = []

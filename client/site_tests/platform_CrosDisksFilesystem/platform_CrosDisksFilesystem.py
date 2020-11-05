@@ -31,16 +31,16 @@ class CrosDisksFilesystemTester(CrosDisksTester):
     @contextlib.contextmanager
     def _set_timezone(self, new_zone):
         if not new_zone:
-          yield
-          return
+            yield
+            return
 
         try:
-          utils.system('restart cros-disks TZ=":%s"' % new_zone)
-          self.reconnect_client(self.RECONNECT_TIMEOUT_SECONDS)
-          yield
+            utils.system('restart cros-disks TZ=":%s"' % new_zone)
+            self.reconnect_client(self.RECONNECT_TIMEOUT_SECONDS)
+            yield
         finally:
-          utils.system('restart cros-disks')
-          self.reconnect_client(self.RECONNECT_TIMEOUT_SECONDS)
+            utils.system('restart cros-disks')
+            self.reconnect_client(self.RECONNECT_TIMEOUT_SECONDS)
 
     @contextlib.contextmanager
     def _switch_user(self, config):
@@ -84,17 +84,21 @@ class CrosDisksFilesystemTester(CrosDisksTester):
             image.unmount()
 
             device_file = image.loop_device
-            self.cros_disks.mount(device_file, test_mount_filesystem_type,
-                                  test_mount_options)
-            expected_mount_completion = {
-                'status': config['expected_mount_status'],
-                'source_path': device_file,
-            }
-            if 'expected_mount_path' in config:
-                expected_mount_completion['mount_path'] = \
-                    config['expected_mount_path']
-            result = self.cros_disks.expect_mount_completion(
-                    expected_mount_completion)
+            self.cros_disks.add_loopback_to_allowlist(device_file)
+            try:
+                self.cros_disks.mount(device_file, test_mount_filesystem_type,
+                                      test_mount_options)
+                expected_mount_completion = {
+                        'status': config['expected_mount_status'],
+                        'source_path': device_file,
+                }
+                if 'expected_mount_path' in config:
+                    expected_mount_completion['mount_path'] = \
+                        config['expected_mount_path']
+                result = self.cros_disks.expect_mount_completion(
+                        expected_mount_completion)
+            finally:
+                self.cros_disks.remove_loopback_from_allowlist(device_file)
 
             actual_mount_path = result['mount_path']
 

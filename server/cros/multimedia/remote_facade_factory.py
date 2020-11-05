@@ -1,15 +1,17 @@
+# Lint as: python2, python3
 # Copyright 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import httplib
 import logging
 import os
+import pprint
 import re
 import socket
-import xmlrpclib
-import pprint
 import sys
+
+import six.moves.http_client
+import six.moves.xmlrpc_client
 
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import logging_manager
@@ -186,8 +188,8 @@ class RemoteFacadeProxy(object):
             try:
                 return call_rpc_with_log()
             except (socket.error,
-                    xmlrpclib.ProtocolError,
-                    httplib.BadStatusLine,
+                    six.moves.xmlrpc_client.ProtocolError,
+                    six.moves.http_client.BadStatusLine,
                     WebSocketConnectionClosedException):
                 # Reconnect the RPC server in case connection lost, e.g. reboot.
                 self.connect()
@@ -238,8 +240,8 @@ class RemoteFacadeProxy(object):
 
         """
         @retry.retry((socket.error,
-                      xmlrpclib.ProtocolError,
-                      httplib.BadStatusLine),
+                      six.moves.xmlrpc_client.ProtocolError,
+                      six.moves.http_client.BadStatusLine),
                       timeout_min=self.XMLRPC_RETRY_TIMEOUT / 60.0,
                       delay_sec=self.XMLRPC_RETRY_DELAY)
         def connect_with_retries():

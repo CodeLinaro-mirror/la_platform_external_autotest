@@ -16,7 +16,7 @@ import socket
 import six.moves.xmlrpc_client
 
 from autotest_lib.client.bin import utils
-from autotest_lib.client.common_lib import enum
+from autotest_lib.client.common_lib import autotest_enum
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import hosts
 from autotest_lib.client.common_lib import lsbrelease_utils
@@ -48,7 +48,8 @@ class BaseServoHost(ssh_host.SSHHost):
     BOOT_TIMEOUT = 240
 
     # Constants that reflect current host update state.
-    UPDATE_STATE = enum.Enum('IDLE', 'RUNNING', 'PENDING_REBOOT')
+    UPDATE_STATE = autotest_enum.AutotestEnum('IDLE', 'RUNNING',
+                                              'PENDING_REBOOT')
 
     def _initialize(self, hostname, is_in_lab=None, *args, **dargs):
         """Construct a BaseServoHost object.

@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import logging
 
 from autotest_lib.client.common_lib import error
@@ -42,7 +44,7 @@ class firmware_FWMPDisableCCD(Cr50Test):
             self.cr50.set_ccd_level(level, self.CCD_PASSWORD)
             if fwmp_disabled_ccd:
                 raise error.TestFail('FWMP failed to prevent %r' % level)
-        except error.TestFail, e:
+        except error.TestFail as e:
             logging.info(e)
             if fwmp_disabled_ccd:
                 if ("FWMP disabled 'ccd open'" in str(e) or

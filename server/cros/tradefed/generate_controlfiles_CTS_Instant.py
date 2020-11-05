@@ -76,7 +76,16 @@ CONFIG['BVT_TIMEOUT'] = 0.1
 
 CONFIG['QUAL_TIMEOUT'] = 5
 
-CONFIG['QUAL_BOOKMARKS'] = []
+# Split tests so that large and flaky tests are distributed evenly.
+CONFIG['QUAL_BOOKMARKS'] = [
+        'A',  # A bookend to simplify partition algorithm.
+        # CtsAccessibility, CtsAutoFill
+        'CtsBackgroundRestrictionsTestCases',
+        # CtsMedia, CtsPrint
+        'CtsSampleDeviceTestCases',
+        # CtsView, CtsWidget
+        'zzzzz'  # A bookend to simplify algorithm.
+]
 
 CONFIG['SMOKE'] = [
     # TODO(b/113641546): add to CQ/PFQ when it's ready.
@@ -178,5 +187,4 @@ CONFIG['EXTRA_ARTIFACTS'] = {}
 CONFIG['PREREQUISITES'] = {}
 
 if __name__ == '__main__':
-        main(CONFIG)
-
+    main(CONFIG)

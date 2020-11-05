@@ -7,8 +7,14 @@ import logging
 from autotest_lib.client.common_lib import hosts
 from autotest_lib.server.hosts import cros_constants
 from autotest_lib.server.hosts import repair_utils
+from autotest_lib.client.common_lib import utils
 
 from chromite.lib import timeout_util
+
+try:
+    from chromite.lib import metrics
+except ImportError:
+    metrics = utils.metrics_mock
 
 # There are some labstations we don't want they receive auto-update,
 # e.g. labstations that used for image qualification purpose
@@ -24,7 +30,7 @@ class _LabstationUpdateVerifier(hosts.Verifier):
     up-to-date.
     """
 
-    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    @timeout_util.TimeoutDecorator(cros_constants.LONG_VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         """First, only run this verifier if the host is in the physical lab.
         Secondly, skip if the test is being run by test_that, because subnet
@@ -67,14 +73,52 @@ class _LabstationRebootVerifier(hosts.Verifier):
         return 'Reboot labstation if requested and the labstation is not in use'
 
 
+class _LabstationLangidVerifier(hosts.Verifier):
+    """Check if labstation has issue with read serial from servo devices.
+
+    TODO(b:162518926): remove when bug will be resolved.
+    """
+
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    def verify(self, host):
+        cmd = (
+                "python2 -c 'import usb;"
+                " print([[d.open().getString(d.iSerialNumber, 128)"
+                " for d in bus.devices if d.idVendor == 0x18d1"
+                " and (d.idProduct == 0x501b"  #servo_v4
+                " or d.idProduct == 0x501a"  #servo_micro
+                " or d.idProduct == 0x5014)"  #ccd_cr50
+                " and d.iSerialNumber == 3]"  # 3 - slot for serial
+                " for bus in usb.busses()])'")
+        result = host.run(cmd, ignore_status=True, timeout=30)
+        if (result.exit_status != 0
+                    and 'The device has no langid' in result.stderr.strip()):
+            logging.info('Detected langid issue.')
+            data = {'host': host.hostname, 'board': host.get_board() or ''}
+            metrics.Counter('chromeos/autotest/labstation/langid_issue'
+                            ).increment(fields=data)
+            # labstation reboot will fix the issue but we does not want to
+            # reboot the labstation to often. Just create request to reboot
+            # it for the next time.
+            logging.info('Created request for reboot.')
+            cmd = ('touch %slangid%s' %
+                   (host.TEMP_FILE_DIR, host.REBOOT_FILE_POSTFIX))
+            host.run(cmd, ignore_status=True, timeout=30)
+
+    @property
+    def description(self):
+        return 'Check if labsattion has langid issue'
+
+
 def create_labstation_repair_strategy():
     """
     Return a `RepairStrategy` for a `LabstationHost`.
     """
     verify_dag = [
-        (repair_utils.SshVerifier,   'ssh',     []),
-        (_LabstationUpdateVerifier,  'update',  ['ssh']),
-        (_LabstationRebootVerifier,  'reboot',  ['ssh']),
+            (repair_utils.SshVerifier, 'ssh', []),
+            (_LabstationUpdateVerifier, 'update', ['ssh']),
+            (_LabstationLangidVerifier, 'langid', ['ssh']),
+            (_LabstationRebootVerifier, 'reboot', ['ssh']),
     ]
 
     repair_actions = [

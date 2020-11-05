@@ -3,6 +3,11 @@
 provides access to global configuration file
 """
 
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
+
 # The config values can be stored in 3 config files:
 #     global_config.ini
 #     moblab_config.ini
@@ -16,7 +21,7 @@ provides access to global configuration file
 __author__ = 'raphtee@google.com (Travis Miller)'
 
 import collections
-import ConfigParser
+import six.moves.configparser as ConfigParser
 import os
 import re
 import sys

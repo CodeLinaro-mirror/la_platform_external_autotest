@@ -1348,7 +1348,7 @@ class test_job_tags(unittest.TestCase):
         self.assertEqual(
             ('test9', 'subtestdir/test9.subdirtag', 'subdirtag'),
             self.job._build_tagged_test_name('test9',
-                                             {'master_testpath': 'subtestdir',
+                                             {'main_testpath': 'subtestdir',
                                               'subdir_tag': 'subdirtag'}))
 
 
@@ -1360,7 +1360,7 @@ class test_job_tags(unittest.TestCase):
                     'tag._01_.auto.subdir')
         actual = self.job._build_tagged_test_name(
             'test10', {'tag': 'tag', 'subdir_tag': 'subdir',
-                       'master_testpath': 'subtestdir'})
+                       'main_testpath': 'subtestdir'})
         self.assertEqual(expected, actual)
 
 

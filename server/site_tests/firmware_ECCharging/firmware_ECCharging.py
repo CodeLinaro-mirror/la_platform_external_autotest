@@ -13,6 +13,10 @@ class firmware_ECCharging(FirmwareTest):
     """
     version = 1
 
+    # Flags set by battery
+    BATT_FLAG_WANT_CHARGE = 0x1
+    STATUS_FULLY_CHARGED = 0x20
+
     # Threshold of trickle charging current in mA
     TRICKLE_CHARGE_THRESHOLD = 100
 
@@ -147,6 +151,18 @@ class firmware_ECCharging(FirmwareTest):
                 1.05 * self._get_charger_target_current()):
             raise error.TestFail("Battery actual current is too high.")
 
+    def _check_if_discharge_on_ac(self):
+        """Check if DUT is performing discharge on AC"""
+        match = self.ec.send_command_get_output("battery",
+                ["Status:\s*(0x[0-9a-f]+)\s", "Param flags:\s*([0-9a-f]+)\s"])
+        status = int(match[0][1], 16)
+        params = int(match[1][1], 16)
+
+        if (not (params & self.BATT_FLAG_WANT_CHARGE) and
+                (status & self.STATUS_FULLY_CHARGED)):
+            return True
+
+        return False
 
     def run_once(self):
         """Execute the main body of the test.
@@ -155,6 +171,9 @@ class firmware_ECCharging(FirmwareTest):
             raise error.TestNAError("Nothing needs to be tested on this device")
         if self._get_battery_charge() == 100:
             logging.info("Battery is full. Unable to test.")
+            return
+        if self._check_if_discharge_on_ac():
+            logging.info("DUT is performing discharge on AC. Unable to test.")
             return
         if self._get_trickle_charging():
             logging.info("Trickling charging battery. Unable to test.")

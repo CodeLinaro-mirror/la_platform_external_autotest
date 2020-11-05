@@ -19,6 +19,7 @@ class firmware_FwScreenPressPower(FirmwareTest):
     and then presses the power button in order to power the machine down.
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     SHORT_SHUTDOWN_CONFIRMATION_PERIOD = 0.1
 

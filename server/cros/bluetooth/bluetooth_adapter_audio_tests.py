@@ -1,8 +1,13 @@
+# Lint as: python2, python3
 # Copyright 2020 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Server side Bluetooth audio tests."""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import logging
 import os
@@ -10,6 +15,7 @@ import re
 import subprocess
 import time
 
+import common
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros.bluetooth.bluetooth_audio_test_data import (
@@ -19,6 +25,7 @@ from autotest_lib.client.cros.bluetooth.bluetooth_audio_test_data import (
         get_visqol_binary)
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_tests import (
     BluetoothAdapterTests, test_retry_and_log)
+from six.moves import range
 
 
 class BluetoothAdapterAudioTests(BluetoothAdapterTests):
@@ -623,24 +630,22 @@ class BluetoothAdapterAudioTests(BluetoothAdapterTests):
         chunk_in_secs = test_data['chunk_in_secs']
         if not bool(chunk_in_secs):
             chunk_in_secs = self.DEFAULT_CHUNK_IN_SECS
-        nchunks = duration / chunk_in_secs
+        nchunks = duration // chunk_in_secs
         logging.info('Number of chunks: %d', nchunks)
 
         all_chunks_test_result = True
         for i in range(nchunks):
             logging.info('Handle chunk %d', i)
-            if not device.HandleOneChunk(chunk_in_secs, i, test_profile):
+            recorded_file = device.HandleOneChunk(chunk_in_secs, i,
+                                                  test_profile, self.host.ip)
+            if recorded_file is None:
                 raise error.TestError('Failed to handle chunk %d' % i)
-
-            # Copy the recorded audio file to the DUT for spectrum analysis.
-            logging.debug('Scp recorded file of chunk %d', i)
-            recorded_file = test_data['recorded_by_peer'] % i
-            device.ScpToDut(recorded_file, recorded_file, self.host.ip)
 
             # Check if the audio frames in the recorded file are legitimate.
             if not self._check_audio_frames_legitimacy(
                     test_data, 'recorded_by_peer', recorded_file=recorded_file):
-                if i >= nchunks - self.IGNORE_LAST_FEW_CHUNKS:
+                if (i > self.IGNORE_LAST_FEW_CHUNKS and
+                        i >= nchunks - self.IGNORE_LAST_FEW_CHUNKS):
                     logging.info('empty chunk %d ignored for last %d chunks',
                                  i, self.IGNORE_LAST_FEW_CHUNKS)
                 else:
@@ -652,7 +657,8 @@ class BluetoothAdapterAudioTests(BluetoothAdapterTests):
             if not self._check_primary_frequencies(A2DP, test_data,
                                                    'recorded_by_peer',
                                                    recorded_file=recorded_file):
-                if i >= nchunks - self.IGNORE_LAST_FEW_CHUNKS:
+                if (i > self.IGNORE_LAST_FEW_CHUNKS and
+                        i >= nchunks - self.IGNORE_LAST_FEW_CHUNKS):
                     msg = 'partially filled chunk %d ignored for last %d chunks'
                     logging.info(msg, i, self.IGNORE_LAST_FEW_CHUNKS)
                 else:
@@ -793,6 +799,18 @@ class BluetoothAdapterAudioTests(BluetoothAdapterTests):
 
         return all(visqol_results.values())
 
+    @test_retry_and_log(False)
+    def test_device_a2dp_connected(self, device, timeout=15):
+        """ Tests a2dp profile is connected on device. """
+        self.results = {}
+        check_connection = lambda: self._get_pulseaudio_bluez_source_a2dp(
+                device, A2DP)
+        is_connected = self._wait_for_condition(check_connection,
+                                                'test_device_a2dp_connected',
+                                                timeout=timeout)
+        self.results['peer a2dp connected'] = is_connected
+
+        return all(self.results.values())
 
     @test_retry_and_log(False)
     def test_a2dp_sinewaves(self, device, test_profile, duration):
@@ -808,7 +826,9 @@ class BluetoothAdapterAudioTests(BluetoothAdapterTests):
                   tolerance of the playback sine wave frequency.
 
         """
-        test_data = audio_test_data[test_profile]
+        # Make a copy since the test_data may be formatted with distinct
+        # arguments in the follow-up tests.
+        test_data = audio_test_data[test_profile].copy()
         if bool(duration):
             test_data['duration'] = duration
         else:
@@ -1023,7 +1043,7 @@ class BluetoothAdapterAudioTests(BluetoothAdapterTests):
         # The AVRCP time information is in the unit of microseconds but with
         # milliseconds resolution. Convert both send and received length into
         # milliseconds for comparison.
-        result_length = bool(expected_length / 1000 == actual_length / 1000)
+        result_length = bool(expected_length // 1000 == actual_length // 1000)
 
         self.results = {'status': result_status, 'album': result_album,
                         'artist': result_artist, 'title': result_title,

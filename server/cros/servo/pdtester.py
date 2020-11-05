@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -150,7 +151,7 @@ class PDTester(chrome_ec.ChromeEC):
             # htctools and servov4 is not updated, fallback to the old path.
             logging.warn('hdctools or servov4 firmware too old, fallback to '
                          'fixed charging voltages.')
-            return self.USBC_CHARGING_VOLTAGES_LEGACY.keys()
+            return list(self.USBC_CHARGING_VOLTAGES_LEGACY.keys())
 
         # insert 0 voltage for sink
         vols = [0]

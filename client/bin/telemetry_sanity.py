@@ -10,6 +10,8 @@ This script runs a number of sanity tests to ensure that Chrome browser on
 Chrome OS is functional.
 '''
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 import argparse
@@ -23,6 +25,7 @@ from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib.cros import arc, arc_common, chrome
 from autotest_lib.client.common_lib.error import TestFail
 from autotest_lib.client.cros import cryptohome
+from six.moves import range
 
 
 class TelemetrySanity(object):

@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -6,32 +7,31 @@
 # prompt, such as within the Chromium OS development chroot.
 
 import ast
-import contextlib
-import httplib
 import logging
 import os
 import re
-import socket
-import time
-import xmlrpclib
-
 import six
+import six.moves.xmlrpc_client
+import six.moves.http_client
+import time
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import lsbrelease_utils
+from autotest_lib.client.common_lib import seven
 from autotest_lib.server import utils as server_utils
 from autotest_lib.server.cros.servo import firmware_programmer
 from autotest_lib.server.cros.faft.utils.config import Config as FAFTConfig
 
 
 # Regex to match XMLRPC errors due to a servod control not existing.
-NO_CONTROL_RE = re.compile(r'No control named (\w*\.?\w*)')
+# Servod uses both 'No control %s' and 'No control named %s' in exceptions.
+NO_CONTROL_RE = re.compile(r'No control(?: named)? (?P<name>\w*\.?\w*)')
 
 # Please see servo/drv/pty_driver.py for error messages to match.
 
 # This common prefix can apply to all subtypes of console errors.
-                     # The first portion is an optional qualifier of the type
-                     # of error that occurred. Each error is or'd.
+# The first portion is an optional qualifier of the type
+# of error that occurred. Each error is or'd.
 CONSOLE_COMMON_RE = (r'((Timeout waiting for response|'
                      r'Known error [\w\'\".\s]+). )?'
                      # The second portion is an optional name for the console
@@ -74,29 +74,36 @@ class ResponsiveConsoleError(ConsoleError):
     pass
 
 
-class ServodBadStatusLine(httplib.BadStatusLine):
-    """Error for failures to communicate with servod"""
+class ServodBadResponse(six.moves.http_client.BadStatusLine):
+    """Indicates a bad HTTP response from servod"""
+
     def __init__(self, when, line):
         """
 
         @param when: Description of the operation being performed (get/set)
-        @param line: The line that came from the server; most failures see ''
+        @param line: The line that came from the server, often an empty string.
         """
-        super(ServodBadStatusLine, self).__init__(line)
+        super(ServodBadResponse, self).__init__(line)
         self.when = when
 
     def __str__(self):
         """String representation of the exception"""
-        return '%s: %s' % (self.when, self.line)
+        return '%s -- StatusLine=%s' % (self.when, self.line)
 
 
-class ServodConnectionError(socket.error):
-    """Error for socket errors seen during communication with servod"""
+class ServodEmptyResponse(ServodBadResponse):
+    """Indicates an empty response from servod, possibly because it exited."""
+    pass
 
-    # TODO(b/990593): when in python3, subclass ConnectionError instead
+
+class ServodConnectionError(seven.SOCKET_ERRORS[0]):
+    """Indicates socket errors seen during communication with servod"""
 
     def __init__(self, when, errno, strerror, filename):
-        """
+        """Instance initializer
+
+        The filename is used to add details to the exception message:
+        [Errno 104] Connection reset by peer: "<Servo 'ipaddr:9999'>"
 
         @param when: Description of the operation being performed at the time
         @param errno: errno value, such as ECONNRESET
@@ -109,8 +116,103 @@ class ServodConnectionError(socket.error):
 
     def __str__(self):
         """String representation of the exception"""
-        return '%s: [Errno %d] %s: %r' % (
-            self.when, self.errno, self.strerror, self.filename)
+        return '%s -- [Errno %d] %s: %r' % (self.when, self.errno,
+                                            self.strerror, self.filename)
+
+
+# TODO: once in python 3, inherit from AbstractContextManager
+class _WrapServoErrors(object):
+    """
+    Wrap an operation, replacing BadStatusLine and socket.error with
+    servo-specific versions, and extracting exception info from xmlrplib.Fault.
+
+    @param servo_name: The servo object, used to add the servo name to errors.
+                       See the ServodConnectionError docstring.
+    @param description:  String to use when describing what was being done
+    @raise ServodBadStatusLine: if exception is a httplib.BadStatusLine
+    @raise ServodSocketError: if exception is a socket.error
+    @raise ControlUnavailableError: if Fault matches NO_CONTROL_RE
+    @raise UnresponsiveConsoleError: if Fault matches NO_CONSOLE_OUTPUT_RE
+    @raise ResponsiveConsoleError: if Fault matches CONSOLE_MISMATCH_RE
+    """
+
+    def __init__(self, servo, description):
+        self.servo_name = str(servo)
+        self.description = description
+
+    @staticmethod
+    def _get_xmlrpclib_exception(xmlexc):
+        """Get meaningful exception string from xmlrpc.
+
+        Args:
+            xmlexc: xmlrpclib.Fault object
+
+        xmlrpclib.Fault.faultString has the following format:
+
+        <type 'exception type'>:'actual error message'
+
+        Parse and return the real exception from the servod side instead of the
+        less meaningful one like,
+           <Fault 1: "<type 'exceptions.AttributeError'>:'tca6416' object has no
+           attribute 'hw_driver'">
+
+        Returns:
+            string of underlying exception raised in servod.
+        """
+        return re.sub('^.*>:', '', xmlexc.faultString)
+
+    def __enter__(self):
+        """Enter the context"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit the context, handling the exception if there was one"""
+        try:
+            if exc_val is not None:
+                logging.debug(
+                        'Wrapped exception:',
+                        exc_info=(exc_type, exc_val, exc_tb))
+
+            if isinstance(exc_val, six.moves.http_client.BadStatusLine):
+                if exc_val.line in ('', "''"):
+                    err = ServodEmptyResponse(self.description, exc_val.line)
+                else:
+                    err = ServodBadResponse(self.description, exc_val.line)
+                six.reraise(err.__class__, err, exc_tb)
+
+            if isinstance(exc_val, seven.SOCKET_ERRORS):
+                err = ServodConnectionError(self.description, exc_val.args[0],
+                                            exc_val.args[1], self.servo_name)
+                six.reraise(err.__class__, err, exc_tb)
+
+            if isinstance(exc_val, six.moves.xmlrpc_client.Fault):
+                err_str = self._get_xmlrpclib_exception(exc_val)
+                err_msg = '%s :: %s' % (self.description, err_str)
+                unknown_ctrl = re.search(NO_CONTROL_RE, err_str)
+                if not unknown_ctrl:
+                    # Log the full text for errors, except unavailable controls.
+                    logging.debug(err_msg)
+                if unknown_ctrl:
+                    # The error message for unavailable controls is huge, since
+                    # it reports all known controls.  Don't log the full text.
+                    unknown_ctrl_name = unknown_ctrl.group('name')
+                    logging.error('%s :: No control named %r',
+                                  self.description, unknown_ctrl_name)
+                    err = ControlUnavailableError(
+                            'No control named %r' % unknown_ctrl_name)
+                elif re.search(NO_CONSOLE_OUTPUT_RE, err_str):
+                    err = UnresponsiveConsoleError(
+                            'Console not printing output. %s.' %
+                            self.description)
+                elif re.search(CONSOLE_MISMATCH_RE, err_str):
+                    err = ResponsiveConsoleError(
+                            'Control failed but console alive. %s.' %
+                            self.description)
+                else:
+                    err = error.TestFail(err_msg)
+                six.reraise(err.__class__, err, exc_tb)
+        finally:
+            del exc_tb
 
 
 def _extract_image_from_tarball(tarball, dest_dir, image_candidates, timeout):
@@ -332,10 +434,10 @@ class _Uart(object):
                 logging.warning('Failed to set %s to %s. %s. Ignoring.',
                                 uart_cmd, target_level, str(e))
             if level == target_level:
-              logging.debug('Managed to set %s to %s.', uart_cmd, level)
+                logging.debug('Managed to set %s to %s.', uart_cmd, level)
             else:
-              logging.debug('Failed to set %s to %s. Got %s.', uart_cmd,
-                            target_level, level)
+                logging.debug('Failed to set %s to %s. Got %s.', uart_cmd,
+                              target_level, level)
         return level == target_level
 
     def start_capture(self):
@@ -475,29 +577,9 @@ class Servo(object):
 
     @property
     def _server(self):
-        with self._wrap_socket_errors('get_servod_server_proxy()'):
+        with _WrapServoErrors(
+                servo=self, description='get_servod_server_proxy()'):
             return self._servo_host.get_servod_server_proxy()
-
-    @contextlib.contextmanager
-    def _wrap_socket_errors(self, description):
-        """
-        Wrap an operation, replacing BadStatusLine and socket.error with
-        servo-specific versions.
-
-        @param description:  String to use when describing what was being done
-        @raise ServodBadStatusLine: when operation raises httplib.BadStatusLine
-        @raise ServodSocketError: when operation raises socket.error
-        """
-        try:
-            yield
-        except httplib.BadStatusLine as e:
-            exc = ServodBadStatusLine(description, e.line)
-            six.reraise(type(exc), exc)
-        except socket.error as e:
-            # TODO(b/990593): when in python3, catch ConnectionError instead
-            exc = ServodConnectionError(
-                description, e.args[0], e.args[1], str(self))
-            six.reraise(type(exc), exc)
 
     @property
     def servo_serial(self):
@@ -540,7 +622,8 @@ class Servo(object):
         if enable_main:
             self.enable_main_servo_device()
 
-        with self._wrap_socket_errors('initialize_dut->hwinit()'):
+        with _WrapServoErrors(
+                servo=self, description='initialize_dut()->hwinit()'):
             self._server.hwinit()
         if self.has_control('usb_mux_oe1'):
             self.set('usb_mux_oe1', 'on')
@@ -568,7 +651,8 @@ class Servo(object):
                              'setup does not support power_state. Skipping.')
             else:
                 self._power_state.reset()
-        with self._wrap_socket_errors('initialize_dut->get_version()'):
+        with _WrapServoErrors(
+                servo=self, description='initialize_dut()->get_version()'):
             version = self._server.get_version()
         logging.debug('Servo initialized, version is %s', version)
 
@@ -875,21 +959,21 @@ class Servo(object):
 
     def get_board(self):
         """Get the board connected to servod."""
-        with self._wrap_socket_errors('get_board()'):
+        with _WrapServoErrors(servo=self, description='get_board()'):
             return self._server.get_board()
 
 
     def get_base_board(self):
         """Get the board of the base connected to servod."""
         try:
-            with self._wrap_socket_errors('get_base_board()'):
+            with _WrapServoErrors(servo=self, description='get_base_board()'):
                 return self._server.get_base_board()
-        except  xmlrpclib.Fault as e:
+        except six.moves.xmlrpc_client.Fault as e:
             # TODO(waihong): Remove the following compatibility check when
             # the new versions of hdctools are deployed.
             if 'not supported' in str(e):
                 logging.warning('The servod is too old that get_base_board '
-                        'not supported.')
+                                'not supported.')
                 return ''
             raise
 
@@ -909,27 +993,6 @@ class Servo(object):
         """Get the active copy of the EC image."""
         return self.get('ec_active_copy')
 
-
-    def _get_xmlrpclib_exception(self, xmlexc):
-        """Get meaningful exception string from xmlrpc.
-
-        Args:
-            xmlexc: xmlrpclib.Fault object
-
-        xmlrpclib.Fault.faultString has the following format:
-
-        <type 'exception type'>:'actual error message'
-
-        Parse and return the real exception from the servod side instead of the
-        less meaningful one like,
-           <Fault 1: "<type 'exceptions.AttributeError'>:'tca6416' object has no
-           attribute 'hw_driver'">
-
-        Returns:
-            string of underlying exception raised in servod.
-        """
-        return re.sub('^.*>:', '', xmlexc.faultString)
-
     def has_control(self, ctrl_name, prefix=''):
         """Query servod server to determine if |ctrl_name| is a valid control.
 
@@ -941,14 +1004,13 @@ class Servo(object):
         ctrl_name = self._build_ctrl_name(ctrl_name, prefix)
         try:
             # If the control exists, doc() will work.
-            with self._wrap_socket_errors('has_control->doc(%s)' % ctrl_name):
+            with _WrapServoErrors(
+                    servo=self,
+                    description='has_control(%s)->doc()' % ctrl_name):
                 self._server.doc(ctrl_name)
             return True
-        except xmlrpclib.Fault as e:
-            if re.search('No control %s' % ctrl_name,
-                         self._get_xmlrpclib_exception(e)):
-                return False
-            raise e
+        except ControlUnavailableError:
+            return False
 
     def _build_ctrl_name(self, ctrl_name, prefix):
         """Helper to build the control name if a prefix is used.
@@ -963,49 +1025,6 @@ class Servo(object):
             return '%s.%s' % (prefix, ctrl_name)
         return ctrl_name
 
-    def _inspect_control_failure(self, e, ctrl_name, ctrl_value=None):
-        """Inspect the |e| for special failures.
-
-        @param e: exception object
-        @param ctrl_name: control name
-        @param ctrl_value: The value the control was set to. None indicates a
-                           'get' control.
-
-        @raises ControlUnavailableError: if error message matches NO_CONTROL_RE
-        @raises UnresponsiveConsoleError: if error message matches
-                                          NO_CONSOLE_OUTPUT_RE
-        @raises ResponsiveConsoleError: if error message matches
-                                        CONSOLE_MISMATCH_RE
-        @raises error.TestFail: otherwise
-        """
-        err_str = self._get_xmlrpclib_exception(e)
-        # Prefix for error parsing
-        if ctrl_value == None:
-            prefix = 'Getting'
-            ctrl_value_str = ''
-        else:
-            prefix = 'Setting'
-            ctrl_value_str = ' to %r' % ctrl_value
-        err_summary = '%s %r %s' % (prefix, ctrl_name, ctrl_value_str)
-        err_msg = '%s :: %s' % (err_summary, err_str)
-        unknown_ctrl = re.search(NO_CONTROL_RE, err_str)
-        if unknown_ctrl:
-            unknown_ctrl_name = unknown_ctrl.group(1)
-            logging.error('%s :: No control named %r', err_summary,
-                          unknown_ctrl_name)
-            raise ControlUnavailableError('No control named %r' %
-                                          unknown_ctrl_name)
-        # The error message for unavailble controls is huge as it prints
-        # all available controls. Do not log it explicitly.
-        logging.debug(err_msg)
-        if re.search(NO_CONSOLE_OUTPUT_RE, err_str):
-            raise UnresponsiveConsoleError('Console not printing output. %s.' %
-                                           err_summary)
-        elif re.search(CONSOLE_MISMATCH_RE, err_str):
-            raise ResponsiveConsoleError('Control failed but console alive. %s.'
-                                         % err_summary)
-        raise error.TestFail(err_msg)
-
     def get(self, ctrl_name, prefix=''):
         """Get the value of a gpio from Servod.
 
@@ -1018,11 +1037,9 @@ class Servo(object):
         @raise error.TestFail: for all other failures doing get().
         """
         ctrl_name = self._build_ctrl_name(ctrl_name, prefix)
-        try:
-            with self._wrap_socket_errors('Getting %s' % ctrl_name):
-                return self._server.get(ctrl_name)
-        except xmlrpclib.Fault as e:
-            self._inspect_control_failure(e, ctrl_name)
+        with _WrapServoErrors(
+                servo=self, description='Getting %s' % ctrl_name):
+            return self._server.get(ctrl_name)
 
     def set(self, ctrl_name, ctrl_value, prefix=''):
         """Set and check the value of a gpio using Servod.
@@ -1063,11 +1080,8 @@ class Servo(object):
         assert ctrl_value is not None
         description = 'Setting %s to %r' % (ctrl_name, ctrl_value)
         logging.debug('%s', description)
-        try:
-            with self._wrap_socket_errors(description):
-                self._server.set(ctrl_name, ctrl_value)
-        except xmlrpclib.Fault as e:
-            self._inspect_control_failure(e, ctrl_name, ctrl_value=ctrl_value)
+        with _WrapServoErrors(servo=self, description=description):
+            self._server.set(ctrl_name, ctrl_value)
 
     def set_get_all(self, controls):
         """Set &| get one or more control values.
@@ -1076,33 +1090,10 @@ class Servo(object):
 
         @raise: error.TestError in case error occurs setting/getting values.
         """
-        rv = []
         description = 'Set/get all: %s' % str(controls)
         logging.debug('%s', description)
-        try:
-            with self._wrap_socket_errors(description):
-                rv = self._server.set_get_all(controls)
-        except xmlrpclib.Fault as e:
-            # TODO(waihong): Remove the following backward compatibility when
-            # the new versions of hdctools are deployed.
-            if 'not supported' in str(e):
-                logging.warning('The servod is too old that set_get_all '
-                        'not supported. Use set and get instead.')
-                for control in controls:
-                    if ':' in control:
-                        (name, value) = control.split(':')
-                        if name == 'sleep':
-                            time.sleep(float(value))
-                        else:
-                            self.set_nocheck(name, value)
-                        rv.append(True)
-                    else:
-                        rv.append(self.get(name))
-            else:
-                err_msg = "Problem with '%s' :: %s" % \
-                    (controls, self._get_xmlrpclib_exception(e))
-                raise error.TestFail(err_msg)
-        return rv
+        with _WrapServoErrors(servo=self, description=description):
+            return self._server.set_get_all(controls)
 
 
     def probe_host_usb_dev(self):
@@ -1171,19 +1162,33 @@ class Servo(object):
                                   'Please take a look at Servo Logs.',
                                   str(e))
 
-    def boot_in_recovery_mode(self):
-        """Boot host DUT in recovery mode."""
+    def boot_in_recovery_mode(self, snk_mode=False):
+        """Boot host DUT in recovery mode.
+
+        @param snk_mode: If True, switch servo_v4 role to 'snk' mode before
+                         boot DUT into recovery mode.
+        """
         # This call has a built-in delay to ensure that we wait a timeout
         # for the stick to enumerate and settle on the DUT side.
         self.switch_usbkey('dut')
+        # Switch servo_v4 mode to snk as the DUT won't able to see usb drive
+        # in recovery mode if the servo is in src mode(see crbug.com/1129165).
+        if snk_mode:
+            logging.info('Setting servo_v4 role to snk mode in order to make'
+                         ' the DUT can see usb drive while in recovery mode.')
+            self.set_servo_v4_role('snk')
+
         try:
             self._power_state.power_on(rec_mode=self._power_state.REC_ON)
         except error.TestFail as e:
+            self.set_servo_v4_role('src')
             logging.error('Failed to boot DUT in recovery mode. %s.', str(e))
             raise error.AutotestError('Failed to boot DUT in recovery mode.')
 
-    def install_recovery_image(self, image_path=None,
-                               make_image_noninteractive=False):
+    def install_recovery_image(self,
+                               image_path=None,
+                               make_image_noninteractive=False,
+                               snk_mode=False):
         """Install the recovery image specified by the path onto the DUT.
 
         This method uses google recovery mode to install a recovery image
@@ -1191,17 +1196,23 @@ class Servo(object):
         board specified by the usb_dev.  If no image path is specified
         we use the recovery image already on the usb image.
 
+        This method will switch servo_v4 role to 'snk' mode in order to make
+        the DUT can see the usb drive plugged on servo, the caller should
+        set servo_v4 role back to 'src' mode one the DUT exit recovery mode.
+
         @param image_path: Path on the host to the recovery image.
         @param make_image_noninteractive: Make the recovery image
                 noninteractive, therefore the DUT will reboot automatically
                 after installation.
+        @param snk_mode: If True, switch servo_v4 role to 'snk' mode before
+                         boot DUT into recovery mode.
         """
         self.image_to_servo_usb(image_path, make_image_noninteractive)
         # Give the DUT some time to power_off if we skip
         # download image to usb. (crbug.com/982993)
         if not image_path:
             time.sleep(10)
-        self.boot_in_recovery_mode()
+        self.boot_in_recovery_mode(snk_mode=snk_mode)
 
 
     def _scp_image(self, image_path):
@@ -1269,7 +1280,8 @@ class Servo(object):
         @return: The version of the servo.
 
         """
-        with self._wrap_socket_errors('get_servo_version->get_version()'):
+        with _WrapServoErrors(
+                servo=self, description='get_servo_version()->get_version()'):
             servo_type = self._server.get_version()
         if '_and_' not in servo_type or not active:
             return servo_type
@@ -1304,7 +1316,8 @@ class Servo(object):
 
     def main_device_is_ccd(self):
         """Whether the main servo device (no prefixes) is a ccd device."""
-        with self._wrap_socket_errors('main_device_is_ccd->get_version()'):
+        with _WrapServoErrors(
+                servo=self, description='main_device_is_ccd()->get_version()'):
             servo = self._server.get_version()
         return 'ccd_cr50' in servo and 'servo_micro' not in servo
 
@@ -1547,14 +1560,21 @@ class Servo(object):
 
         @param role: Power role for DUT port on servo v4, either 'src' or 'snk'.
         """
-        if self._servo_type.startswith('servo_v4'):
-            value = self.get('servo_v4_role')
-            if value != role:
-                self.set_nocheck('servo_v4_role', role)
-            else:
-                logging.debug('Already in the role: %s.', role)
-        else:
+        if not self._servo_type.startswith('servo_v4'):
             logging.debug('Not a servo v4, unable to set role to %s.', role)
+            return
+
+        if not self.has_control('servo_v4_role'):
+            logging.debug(
+                    'Servo does not has servo_v4_role control, unable'
+                    ' to set role to %s.', role)
+            return
+
+        value = self.get('servo_v4_role')
+        if value != role:
+            self.set_nocheck('servo_v4_role', role)
+        else:
+            logging.debug('Already in the role: %s.', role)
 
     def set_servo_v4_pd_comm(self, en):
         """Set the PD communication of servo v4, either 'on' or 'off'.
@@ -1745,6 +1765,15 @@ class Servo(object):
 
     def close(self, outdir=None):
         """Close the servo object."""
+        # We want to ensure that servo_v4 is in src mode to avoid DUTs
+        # left in discharge state after a task.
+        try:
+            self.set_servo_v4_role('src')
+        except Exception as e:
+            logging.info(
+                    'Unexpected error while setting servo_v4 role'
+                    ' to src; %s', e)
+
         self._uart.stop_capture()
         self.record_uart_capture(outdir)
 

@@ -8,10 +8,13 @@ In preparation for Nearby features, we need to verify that our device
 controllers support the LE connection roles that we will require
 """
 
+from __future__ import absolute_import
+
 import logging
 import threading
 import time
 
+import common
 from autotest_lib.server.cros.bluetooth import advertisements_data
 from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
 

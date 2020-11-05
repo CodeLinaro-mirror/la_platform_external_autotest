@@ -1,10 +1,16 @@
+# Lint as: python2, python3
 # Copyright 2018 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Helper class for managing charging the DUT with Servo v4."""
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import logging
+from six.moves import range
 import time
 
 from autotest_lib.client.common_lib import error

@@ -11,15 +11,16 @@ import logging
 import textwrap
 import re
 
-from autotest_lib.client.common_lib import enum
+from autotest_lib.client.common_lib import autotest_enum
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import priorities
 
 REQUIRED_VARS = set(['author', 'doc', 'name', 'time', 'test_type'])
 OBSOLETE_VARS = set(['experimental'])
 
-CONTROL_TYPE = enum.Enum('Server', 'Client', start_value=1)
-CONTROL_TYPE_NAMES =  enum.Enum(*CONTROL_TYPE.names, string_values=True)
+CONTROL_TYPE = autotest_enum.AutotestEnum('Server', 'Client', start_value=1)
+CONTROL_TYPE_NAMES = autotest_enum.AutotestEnum(*CONTROL_TYPE.names,
+                                                string_values=True)
 
 _SUITE_ATTRIBUTE_PREFIX = 'suite:'
 
@@ -66,7 +67,8 @@ class ControlData(object):
     # Available TIME settings in control file, the list must be in lower case
     # and in ascending order, test running faster comes first.
     TEST_TIME_LIST = ['fast', 'short', 'medium', 'long', 'lengthy']
-    TEST_TIME = enum.Enum(*TEST_TIME_LIST, string_values=False)
+    TEST_TIME = autotest_enum.AutotestEnum(*TEST_TIME_LIST,
+                                           string_values=False)
 
     @staticmethod
     def get_test_time_index(time):

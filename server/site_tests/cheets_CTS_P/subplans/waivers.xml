@@ -13,7 +13,8 @@
   <Entry include="CtsKeystoreTestCases android.keystore.cts.CipherTest#testEmptyPlaintextEncryptsAndDecryptsWhenUnlockedRequired" />
   <Entry include="CtsPermission2TestCases android.permission2.cts.PermissionPolicyTest#testPlatformPermissionPolicyUnaltered" />
   <Entry include="CtsIncidentHostTestCases com.android.server.cts.GraphicsStatsValidationTest#testBasicDrawFrame" />
-  <Entry include="CtsMediaTestCases android.media.cts.AudioTrackTest#testPlayStaticData" />
+  <Entry include="CtsMediaTestCases android.media.cts.AudioTrackTest" />
+  <Entry include="CtsMediaTestCases android.media.cts.MediaCodecListTest#testRequiredMediaCodecList" />
   <Entry include="CtsSkQPTestCases" />
   <Entry include="CtsHarmfulAppWarningHostTestCases android.harmfulappwarning.cts.HarmfulAppWarningTest#testLaunchAnyway" />
 </SubPlan>

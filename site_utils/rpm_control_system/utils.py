@@ -16,7 +16,7 @@ import common
 
 import rpm_infrastructure_exception
 from config import rpm_config
-from autotest_lib.client.common_lib import enum
+from autotest_lib.client.common_lib import autotest_enum
 
 
 MAPPING_FILE = os.path.join(
@@ -32,7 +32,8 @@ DEFAULT_EXPIRATION_SECS = 60 * 30
 class PowerUnitInfo(object):
     """A class that wraps rpm/poe information of a device."""
 
-    POWERUNIT_TYPES = enum.Enum('POE', 'RPM', string_value=True)
+    POWERUNIT_TYPES = autotest_enum.AutotestEnum('POE', 'RPM',
+                                                 string_value=True)
 
     def __init__(self, device_hostname, powerunit_type,
                  powerunit_hostname, outlet, hydra_hostname=None):

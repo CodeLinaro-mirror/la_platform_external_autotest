@@ -9,7 +9,7 @@ CRITERIA = '''
 Check if the values of active, volume, and max supported channels of ALSA
 loopback input and output nodes are correct by dbus GetNodes API.
 '''
-ATTRIBUTES = 'suite:audio_essential'
+ATTRIBUTES = 'suite:audio'
 TIME = 'SHORT'
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'audio'

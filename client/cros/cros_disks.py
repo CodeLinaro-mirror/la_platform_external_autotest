@@ -385,6 +385,24 @@ class CrosDisksClient(DBusClient):
         return self.expect_signal(self.MOUNT_COMPLETED_SIGNAL,
                                   expected_content)
 
+    def add_loopback_to_allowlist(self, path):
+        """Adds a device by its path to the allowlist for testing.
+
+        Args:
+            path: path to the /dev/loopX device.
+        """
+        sys_path = '/sys/devices/virtual/block/' + os.path.basename(path)
+        self.interface.AddDeviceToAllowlist(sys_path)
+
+    def remove_loopback_from_allowlist(self, path):
+        """Removes a device by its sys path from the allowlist for testing.
+
+        Args:
+            path: path to the /dev/loopX device.
+        """
+        sys_path = '/sys/devices/virtual/block/' + os.path.basename(path)
+        self.interface.RemoveDeviceFromAllowlist(sys_path)
+
 
 class CrosDisksTester(GenericTesterMainLoop):
     """A base tester class for testing the CrosDisks server.

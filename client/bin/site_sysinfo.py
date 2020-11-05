@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2011 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -210,7 +211,7 @@ class diffable_logdir(logdir):
 
         """
         bytes_to_skip = 0
-        if self._log_stats.has_key(file_path):
+        if file_path in self._log_stats:
             prev_stat = self._log_stats[file_path]
             new_stat = os.stat(file_path)
             if new_stat.st_ino == prev_stat.st_ino:

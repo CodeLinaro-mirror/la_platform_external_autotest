@@ -43,9 +43,9 @@ def convert_timeout_to_retry(backoff, timeout_min, delay_sec):
     # => max_retry*ln(backoff) = ln(1-(total_sleep/sleep)*(1-backoff))
     # => max_retry = ln(1-(total_sleep/sleep)*(1-backoff))/ln(backoff)
     total_sleep = timeout_min * 60
-    numerator = math.log10(1-(total_sleep/delay_sec)*(1-backoff))
+    numerator = math.log10(1 - (total_sleep / delay_sec) * (1 - backoff))
     denominator = math.log10(backoff)
-    return int(math.ceil(numerator/denominator))
+    return int(math.ceil(numerator / denominator))
 
 
 class RetryingAFE(frontend.AFE):

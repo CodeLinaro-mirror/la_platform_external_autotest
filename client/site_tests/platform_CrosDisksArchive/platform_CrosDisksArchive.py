@@ -1,3 +1,5 @@
+# coding: UTF-8
+
 # Copyright (c) 2011 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -119,6 +121,17 @@ class CrosDisksArchiveTester(CrosDisksTester):
         self._test_archive(os.path.join(mount_path, 'Unicode.zip'),
                            FilesystemTestDirectory('', want))
 
+    def _test_macos_utf8(self, mount_path):
+        self._test_archive(
+                os.path.join(mount_path, 'MacOS UTF-8 (Bug 903664).zip'),
+                FilesystemTestDirectory('', [
+                        FilesystemTestFile('ファイル.dat', 'This is a file.\n'),
+                        FilesystemTestDirectory('日本語フォルダ', [
+                                FilesystemTestFile('新しいテキストドキュメント.txt',
+                                                   '新しいテキストドキュメントです。\n')
+                        ])
+                ]))
+
     def _test_symlinks(self, mount_path):
         self._test_archive(
                 os.path.join(mount_path, 'Symlinks.zip'),
@@ -146,7 +159,6 @@ class CrosDisksArchiveTester(CrosDisksTester):
         for archive_name in [
                 'Invalid.rar',
                 'Invalid.zip',
-                'Encrypted.rar',
                 'Not There.rar',
                 'Not There.zip',
         ]:
@@ -181,6 +193,10 @@ class CrosDisksArchiveTester(CrosDisksTester):
         ])
 
         for archive_name, want in [
+                ('Encrypted Full V4.rar', fs1),
+                ('Encrypted Full V5.rar', fs1),
+                ('Encrypted Partial V4.rar', fs1),
+                ('Encrypted Partial V5.rar', fs1),
                 ('Encrypted AES-128.zip', fs1),
                 ('Encrypted AES-192.zip', fs1),
                 ('Encrypted AES-256.zip', fs1),
@@ -208,6 +224,20 @@ class CrosDisksArchiveTester(CrosDisksTester):
             self._test_archive(os.path.join(mount_path, archive_name), want,
                                'password')
 
+    def _test_strict_password(self, mount_path):
+        """Tests that an invalid password is not accidentally accepted.
+           https://crbug.com/1127752
+        """
+        archive_path = os.path.join(mount_path, 'Strict Password.zip')
+        logging.info('Mounting archive %r', archive_path)
+
+        # Trying to mount archive with a wrong password should fail.
+        self.cros_disks.mount(archive_path,
+                              os.path.splitext(archive_path)[1],
+                              [b'password=sample'])
+        self.cros_disks.expect_mount_completion(
+                {'status': 13})  # MOUNT_ERROR_NEED_PASSWORD
+
     def _test_nested(self, incoming_mount_path):
         for archive_name in ['Nested.rar', 'Nested.zip']:
             archive_path = os.path.join(incoming_mount_path, archive_name)
@@ -231,6 +261,34 @@ class CrosDisksArchiveTester(CrosDisksTester):
             logging.info('Unmounting archive')
             self.cros_disks.unmount(mount_path, [])
 
+    def _test_duplicated_filenames(self, mount_path):
+        want = [
+                FilesystemTestFile(b'Simple.txt', b'Simple 1\n'),
+                FilesystemTestFile(b'Simple (1).txt', b'Simple 2 \n'),
+                FilesystemTestFile(b'Simple (2).txt', b'Simple 3  \n'),
+                FilesystemTestFile(b'Suspense...', b'Suspense 1\n'),
+                FilesystemTestFile(b'Suspense... (1)', b'Suspense 2 \n'),
+                FilesystemTestFile(b'Suspense... (2)', b'Suspense 3  \n'),
+                FilesystemTestFile(b'No Dot', b'No Dot 1\n'),
+                FilesystemTestFile(b'No Dot (1)', b'No Dot 2 \n'),
+                FilesystemTestFile(b'No Dot (2)', b'No Dot 3  \n'),
+                FilesystemTestFile(b'.Hidden', b'Hidden 1\n'),
+                FilesystemTestFile(b'.Hidden (1)', b'Hidden 2 \n'),
+                FilesystemTestFile(b'.Hidden (2)', b'Hidden 3  \n'),
+        ]
+
+        self._test_archive(
+                os.path.join(mount_path, 'Duplicate Filenames.zip'),
+                FilesystemTestDirectory(
+                        '',
+                        [
+                                FilesystemTestDirectory(
+                                        'Folder', want, strict=True),
+                                FilesystemTestDirectory(
+                                        'With.Dot', want, strict=True)
+                        ] + want,
+                        strict=True))
+
     def _test_archives(self):
         # Create a FAT filesystem containing all our test archive files.
         logging.info('Creating FAT filesystem holding test archive files')
@@ -244,7 +302,11 @@ class CrosDisksArchiveTester(CrosDisksTester):
 
             logging.debug('Copying archive files to %r', image.mount_dir)
             for archive_name in [
-                    'Encrypted.rar',
+                    'Duplicate Filenames.zip',
+                    'Encrypted Full V4.rar',
+                    'Encrypted Full V5.rar',
+                    'Encrypted Partial V4.rar',
+                    'Encrypted Partial V5.rar',
                     'Encrypted AES-128.zip',
                     'Encrypted AES-192.zip',
                     'Encrypted AES-256.zip',
@@ -261,8 +323,10 @@ class CrosDisksArchiveTester(CrosDisksTester):
                     'Multipart New Style 03.rar',
                     'Nested.rar',
                     'Nested.zip',
+                    'Strict Password.zip',
                     'Symlinks.zip',
                     'Unicode.zip',
+                    'MacOS UTF-8 (Bug 903664).zip',
             ]:
                 logging.debug('Copying %r', archive_name)
                 shutil.copy(os.path.join(self._data_dir, archive_name),
@@ -274,28 +338,36 @@ class CrosDisksArchiveTester(CrosDisksTester):
             # archive files on a removable drive, and ensures they are in a
             # location CrosDisks expects them to be in.
             loop_device = image.loop_device
-            logging.info('Mounting FAT filesystem from %r via CrosDisks',
-                         loop_device)
-            self.cros_disks.mount(loop_device, '',
-                                  ["ro", "nodev", "noexec", "nosuid"])
-            mount_result = self.cros_disks.expect_mount_completion({
-                    'status': 0,
-                    'source_path': loop_device,
-            })
+            self.cros_disks.add_loopback_to_allowlist(loop_device)
+            try:
+                logging.info('Mounting FAT filesystem from %r via CrosDisks',
+                             loop_device)
+                self.cros_disks.mount(loop_device, '',
+                                      ["ro", "nodev", "noexec", "nosuid"])
+                mount_result = self.cros_disks.expect_mount_completion({
+                        'status': 0,
+                        'source_path': loop_device,
+                })
 
-            mount_path = utf8(mount_result['mount_path'])
-            logging.info('FAT filesystem mounted at %r', mount_path)
+                mount_path = utf8(mount_result['mount_path'])
+                logging.info('FAT filesystem mounted at %r', mount_path)
 
-            # Perform tests with the archive files in the mounted FAT filesystem.
-            self._test_unicode(mount_path)
-            self._test_symlinks(mount_path)
-            self._test_multipart(mount_path)
-            self._test_invalid(mount_path)
-            self._test_need_password(mount_path)
-            self._test_nested(mount_path)
+                # Perform tests with the archive files in the mounted FAT
+                # filesystem.
+                self._test_unicode(mount_path)
+                self._test_macos_utf8(mount_path)
+                self._test_symlinks(mount_path)
+                self._test_multipart(mount_path)
+                self._test_invalid(mount_path)
+                self._test_need_password(mount_path)
+                self._test_strict_password(mount_path)
+                self._test_nested(mount_path)
+                self._test_duplicated_filenames(mount_path)
 
-            logging.info('Unmounting FAT filesystem')
-            self.cros_disks.unmount(mount_path, [])
+                logging.info('Unmounting FAT filesystem')
+                self.cros_disks.unmount(mount_path, [])
+            finally:
+                self.cros_disks.remove_loopback_from_allowlist(loop_device)
 
     def get_tests(self):
         return [self._test_archives]

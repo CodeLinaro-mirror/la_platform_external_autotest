@@ -22,7 +22,7 @@ import logging.handlers
 import os
 import subprocess
 import sys
-
+import six
 
 STATEFUL_MOUNT = '/mnt/stateful_partition'
 ENCSTATEFUL_DEV = '/dev/mapper/encstateful'
@@ -47,11 +47,15 @@ def run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
 
     proc = subprocess.Popen(cmd, shell=True, stdout=stdout, stderr=stderr)
     (stdout, stderr) = proc.communicate()
+    if stdout is not None:
+        stdout = six.ensure_text(stdout, errors='replace')
     if stdout:
         if strip:
             stdout = stdout.replace('\x1b[0m', '')
             stdout = stdout.replace('\x1b[1m', '')
         logging.debug('    stdout: %s', repr(stdout))
+    if stderr is not None:
+        stderr = six.ensure_text(stderr, errors='replace')
     if stderr:
         logging.debug('    stderr: %s', repr(stderr))
     if proc.returncode != 0:

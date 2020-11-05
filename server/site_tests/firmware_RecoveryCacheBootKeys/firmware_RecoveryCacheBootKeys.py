@@ -14,6 +14,7 @@ class firmware_RecoveryCacheBootKeys(FirmwareTest):
     cache instead training memory every boot.
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     USED_CACHE_MSG = ('MRC: Hash comparison successful. '
                       'Using data from RECOVERY_MRC_CACHE')

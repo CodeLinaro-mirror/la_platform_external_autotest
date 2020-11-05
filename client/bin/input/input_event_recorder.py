@@ -1,8 +1,12 @@
+# Lint as: python2, python3
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """This module provides functions to record input events."""
+
+from __future__ import division
+from __future__ import print_function
 
 import logging
 import re
@@ -338,15 +342,15 @@ def recording_example():
     """
     device_name = 'Atmel maXTouch Touchpad'
     recorder = InputEventRecorder(device_name)
-    print 'Samus touchpad device name:', recorder.device_name
-    print 'Samus touchpad device node:', recorder.device_node
-    print 'Please make gestures on the touchpad for up to 5 seconds.'
+    print('Samus touchpad device name:', recorder.device_name)
+    print('Samus touchpad device node:', recorder.device_node)
+    print('Please make gestures on the touchpad for up to 5 seconds.')
     recorder.clear_events()
     recorder.start()
     time.sleep(5)
     recorder.stop()
     for e in recorder.get_events():
-        print e
+        print(e)
 
 
 if __name__ == '__main__':

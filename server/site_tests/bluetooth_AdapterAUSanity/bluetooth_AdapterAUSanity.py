@@ -60,8 +60,9 @@ class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
         """A2DP test with sinewaves on the two channels."""
         self._au_a2dp_test(A2DP)
 
-
-    @test_wrapper('A2DP sinewave long test', devices={'BLUETOOTH_AUDIO':1})
+    # The A2DP long test is a stress test. Exclude it from the AVL.
+    @test_wrapper('A2DP sinewave long test', devices={'BLUETOOTH_AUDIO':1},
+                  flags=['Quick Sanity'])
     def au_a2dp_long_test(self, duration=600):
         """A2DP long test with sinewaves on the two channels.
 
@@ -231,7 +232,11 @@ class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
         self.au_avrcp_media_info_test()
 
 
-    def run_once(self, host, num_iterations=1, test_name=None,
+    def run_once(self,
+                 host,
+                 num_iterations=1,
+                 btpeer_args=[],
+                 test_name=None,
                  flag='Quick Sanity'):
         """Run the batch of Bluetooth stand sanity tests
 
@@ -241,6 +246,9 @@ class bluetooth_AdapterAUSanity(BluetoothAdapterQuickTests,
         """
         self.host = host
 
-        self.quick_test_init(host, use_btpeer=True, flag=flag)
+        self.quick_test_init(host,
+                             use_btpeer=True,
+                             flag=flag,
+                             btpeer_args=btpeer_args)
         self.au_sanity_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

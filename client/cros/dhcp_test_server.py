@@ -22,7 +22,7 @@ us.
 Example usage:
 
 # Start up the DHCP server, which will ignore packets until a test is started
-server = DhcpTestServer(interface="veth_master")
+server = DhcpTestServer(interface=interface_name)
 server.start()
 
 # Given a list of handling rules, start a test with a 30 sec timeout.

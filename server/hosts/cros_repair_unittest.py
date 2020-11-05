@@ -44,15 +44,13 @@ CROS_REPAIR_ACTIONS = (
         (cros_repair.ServoResetRepair, 'servoreset', (), (
                 'ssh',
                 'stop_start_ui',
+                'power',
         )),
         (
                 cros_repair.ServoCr50RebootRepair,
                 'cr50_reset',
                 (),
-                (
-                        'ssh',
-                        'stop_start_ui',
-                ),
+                ('ssh', 'stop_start_ui', 'power'),
         ),
         (cros_repair.ServoSysRqRepair, 'sysrq', (), ('ssh', )),
         (cros_repair.LabelCleanupRepair, 'label_cleanup', ('ssh', ),
@@ -77,6 +75,8 @@ CROS_REPAIR_ACTIONS = (
         (cros_repair.ServoInstallRepair, 'usb', ('usb_drive', ),
          ('ssh', 'writable', 'stop_start_ui', 'tpm', 'good_provision', 'ext4',
           'power', 'rwfw', 'python', 'cros', 'dev_default_boot')),
+        (cros_firmware.GeneralFirmwareRepair, 'general_firmware',
+         ('usb_drive', ), ('ssh', )),
 )
 
 MOBLAB_VERIFY_DAG = (

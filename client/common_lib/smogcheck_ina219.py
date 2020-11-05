@@ -20,7 +20,7 @@ Notes:
 """
 
 import logging, re
-from autotest_lib.client.common_lib import i2c_slave
+from autotest_lib.client.common_lib import i2c_node
 
 
 # INA219 registers
@@ -54,29 +54,29 @@ class InaError(Exception):
     """Base class for all errors in this module."""
 
 
-class InaController(i2c_slave.I2cSlave):
+class InaController(i2c_node.I2cNode):
     """Object to control INA219 module on TTCI board."""
 
-    def __init__(self, slave_addr=None, range_dict=None):
+    def __init__(self, node_addr=None, range_dict=None):
         """Constructor.
 
         Mandatory params:
-          slave_addr: slave address to set. Default: None.
+          node_addr: node address to set. Default: None.
 
         Optional param:
           range_dict: desired max/min thresholds for measurement values.
                       Default: DEFAULT_MEAS_RANGE_VALUE.
 
         Args:
-          slave_addr: an integer, address of main or backup power.
+          node_addr: an integer, address of main or backup power.
           range_dict: desired max/min thresholds for measurement values.
 
         Raises:
           InaError: if error initializing INA219 module or invalid range_dict.
         """
         super(InaController, self).__init__()
-        if slave_addr is None:
-            raise InaError('Error slave_addr expected')
+        if node_addr is None:
+            raise InaError('Error node_addr expected')
 
         try:
             if range_dict is None:
@@ -85,7 +85,7 @@ class InaController(i2c_slave.I2cSlave):
                 self._validateRangeDict(DEFAULT_MEAS_RANGE_VALUE, range_dict)
             self.range_dict = range_dict
 
-            self.setSlaveAddress(slave_addr)
+            self.setNodeAddress(node_addr)
             self.writeWord(INA_REG['CONF'], INA_CONF_INIT_VAL)
             self.writeWord(INA_REG['CALIB'], INA_CALIB_INIT_VAL)
         except InaError, e:

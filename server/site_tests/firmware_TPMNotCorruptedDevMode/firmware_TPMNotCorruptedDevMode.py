@@ -20,6 +20,7 @@ class firmware_TPMNotCorruptedDevMode(FirmwareTest):
     image (built by "build_image test").
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     # The "what" of KERNEL_ANTIROLLBACK_SPACE_BYTES, KERNEL_NV_INDEX, and
     # TPM_NVRAM_EXPECTED_VALUES can be understood from

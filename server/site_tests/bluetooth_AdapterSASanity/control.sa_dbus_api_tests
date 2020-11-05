@@ -3,13 +3,12 @@
 # found in the LICENSE file.
 
 from autotest_lib.server import utils
-from autotest_lib.server.cros.bluetooth import bluetooth_test
 
 AUTHOR = 'chromeos-bluetooth'
 NAME = 'bluetooth_AdapterSASanity.sa_dbus_api_tests'
 PURPOSE = ('batch of Bluetooth DBus API tests')
 CRITERIA = ''
-ATTRIBUTES = 'suite:bluetooth, suite:bluetooth_standalone'
+ATTRIBUTES = 'suite:bluetooth, suite:bluetooth_standalone, suite:bluetooth_standalone_cq'
 TIME = 'MEDIUM'
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'bluetooth'

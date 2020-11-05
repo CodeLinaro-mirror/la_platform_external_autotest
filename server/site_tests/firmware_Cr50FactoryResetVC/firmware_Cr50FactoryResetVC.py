@@ -94,7 +94,7 @@ class firmware_Cr50FactoryResetVC(Cr50Test):
         if set_password:
             self.cr50.send_command('ccd testlab open')
             # Set the ccd password
-            self.set_ccd_password('ccd_dummy_pw')
+            self.set_ccd_password(self.CCD_PASSWORD)
         if self.cr50.password_is_reset() == set_password:
             raise error.TestError('Could not %s password' %
                     ('set' if set_password else 'clear'))
