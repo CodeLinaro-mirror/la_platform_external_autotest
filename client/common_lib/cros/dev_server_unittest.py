@@ -6,14 +6,14 @@
 
 """Unit tests for client/common_lib/cros/dev_server.py."""
 
-import httplib
+import six.moves.http_client
 import json
 import mox
 import os
-import StringIO
+import six
+from six.moves import urllib
 import time
 import unittest
-import urllib2
 
 import mock
 
@@ -64,16 +64,16 @@ class MockSshError(error.CmdError):
         self.result_obj = MockSshResponse('error', exit_status=255)
 
 
-E403 = urllib2.HTTPError(url='',
-                         code=httplib.FORBIDDEN,
+E403 = urllib.error.HTTPError(url='',
+                         code=six.moves.http_client.FORBIDDEN,
                          msg='Error 403',
                          hdrs=None,
-                         fp=StringIO.StringIO('Expected.'))
-E500 = urllib2.HTTPError(url='',
-                         code=httplib.INTERNAL_SERVER_ERROR,
+                         fp=six.StringIO('Expected.'))
+E500 = urllib.error.HTTPError(url='',
+                         code=six.moves.http_client.INTERNAL_SERVER_ERROR,
                          msg='Error 500',
                          hdrs=None,
-                         fp=StringIO.StringIO('Expected.'))
+                         fp=six.StringIO('Expected.'))
 CMD_ERROR = error.CmdError('error_cmd', MockSshError().result_obj)
 
 
@@ -88,7 +88,7 @@ class RunCallTest(mox.MoxTestBase):
         self.contents_readline = ['file/one', 'file/two']
         self.save_ssh_config = dev_server.ENABLE_SSH_CONNECTION_FOR_DEVSERVER
         super(RunCallTest, self).setUp()
-        self.mox.StubOutWithMock(urllib2, 'urlopen')
+        self.mox.StubOutWithMock(urllib.request, 'urlopen')
         self.mox.StubOutWithMock(utils, 'run')
 
         sleep = mock.patch('time.sleep', autospec=True)
@@ -107,11 +107,11 @@ class RunCallTest(mox.MoxTestBase):
         (call)."""
         dev_server.ENABLE_SSH_CONNECTION_FOR_DEVSERVER = False
 
-        urllib2.urlopen(mox.StrContains(self.test_call)).AndReturn(
-                StringIO.StringIO(dev_server.ERR_MSG_FOR_DOWN_DEVSERVER))
+        urllib.request.urlopen(mox.StrContains(self.test_call)).AndReturn(
+                six.StringIO(dev_server.ERR_MSG_FOR_DOWN_DEVSERVER))
         time.sleep(mox.IgnoreArg())
-        urllib2.urlopen(mox.StrContains(self.test_call)).AndReturn(
-                StringIO.StringIO(self.contents))
+        urllib.request.urlopen(mox.StrContains(self.test_call)).AndReturn(
+                six.StringIO(self.contents))
         self.mox.ReplayAll()
         response = dev_server.ImageServerBase.run_call(self.test_call)
         self.assertEquals(self.contents, response)
@@ -145,8 +145,8 @@ class RunCallTest(mox.MoxTestBase):
         (call)."""
         dev_server.ENABLE_SSH_CONNECTION_FOR_DEVSERVER = False
 
-        urllib2.urlopen(mox.StrContains(self.test_call)).AndReturn(
-                StringIO.StringIO(self.contents))
+        urllib.request.urlopen(mox.StrContains(self.test_call)).AndReturn(
+                six.StringIO(self.contents))
         self.mox.ReplayAll()
         response = dev_server.ImageServerBase.run_call(self.test_call)
         self.assertEquals(self.contents, response)
@@ -157,8 +157,8 @@ class RunCallTest(mox.MoxTestBase):
         (call, readline=True)."""
         dev_server.ENABLE_SSH_CONNECTION_FOR_DEVSERVER = False
 
-        urllib2.urlopen(mox.StrContains(self.test_call)).AndReturn(
-                StringIO.StringIO('\n'.join(self.contents_readline)))
+        urllib.request.urlopen(mox.StrContains(self.test_call)).AndReturn(
+                six.StringIO('\n'.join(self.contents_readline)))
         self.mox.ReplayAll()
         response = dev_server.ImageServerBase.run_call(
                 self.test_call, readline=True)
@@ -170,8 +170,8 @@ class RunCallTest(mox.MoxTestBase):
         (call, timeout=xxx)."""
         dev_server.ENABLE_SSH_CONNECTION_FOR_DEVSERVER = False
 
-        urllib2.urlopen(mox.StrContains(self.test_call), data=None).AndReturn(
-                StringIO.StringIO(self.contents))
+        urllib.request.urlopen(mox.StrContains(self.test_call), data=None).AndReturn(
+                six.StringIO(self.contents))
         self.mox.ReplayAll()
         response = dev_server.ImageServerBase.run_call(
                 self.test_call, timeout=60)
@@ -235,9 +235,9 @@ class RunCallTest(mox.MoxTestBase):
         """Test dev_server.ImageServerBase.run_call using http with raising
         exception."""
         dev_server.ENABLE_SSH_CONNECTION_FOR_DEVSERVER = False
-        urllib2.urlopen(mox.StrContains(self.test_call)).AndRaise(E500)
+        urllib.request.urlopen(mox.StrContains(self.test_call)).AndRaise(E500)
         self.mox.ReplayAll()
-        self.assertRaises(urllib2.HTTPError,
+        self.assertRaises(urllib.error.HTTPError,
                           dev_server.ImageServerBase.run_call,
                           self.test_call)
 
@@ -262,9 +262,9 @@ class RunCallTest(mox.MoxTestBase):
     def testRunCallByDevServerHTTP(self):
         """Test dev_server.DevServer.run_call, which uses http, and can be
         directly called by CrashServer."""
-        urllib2.urlopen(
+        urllib.request.urlopen(
                 mox.StrContains(self.test_call), data=None).AndReturn(
-                        StringIO.StringIO(self.contents))
+                        six.StringIO(self.contents))
         self.mox.ReplayAll()
         response = dev_server.DevServer.run_call(
                self.test_call, timeout=60)
@@ -290,7 +290,7 @@ class DevServerTest(mox.MoxTestBase):
         self.android_dev_server = dev_server.AndroidBuildServer(
                 DevServerTest._HOST)
         self.mox.StubOutWithMock(dev_server.ImageServerBase, 'run_call')
-        self.mox.StubOutWithMock(urllib2, 'urlopen')
+        self.mox.StubOutWithMock(urllib.request, 'urlopen')
         self.mox.StubOutWithMock(utils, 'run')
         self.mox.StubOutWithMock(os.path, 'exists')
         # Hide local restricted_subnets setting.
@@ -360,7 +360,7 @@ class DevServerTest(mox.MoxTestBase):
         # Mock out bad ping failure to bad_host by raising devserver exception.
         dev_server.ImageServerBase.run_call(
                 argument1, timeout=mox.IgnoreArg()).MultipleTimes().AndRaise(
-                        urllib2.URLError('urlopen connection timeout'))
+                        urllib.error.URLError('urlopen connection timeout'))
 
         # Good host is good.
         dev_server.ImageServerBase.run_call(
@@ -443,7 +443,7 @@ class DevServerTest(mox.MoxTestBase):
         """Should retry on URLError, but pass through real exception."""
         self.mox.StubOutWithMock(time, 'sleep')
 
-        refused = urllib2.URLError('[Errno 111] Connection refused')
+        refused = urllib.error.URLError('[Errno 111] Connection refused')
         dev_server.ImageServerBase.run_call(
                 mox.IgnoreArg()).AndRaise(refused)
         time.sleep(mox.IgnoreArg())

@@ -75,6 +75,8 @@ class cheets_CTS_Instant(tradefed_test.TradefedTest):
                                                     stderr=subprocess.STDOUT))
                 except OSError:
                     logging.error('Can\'t change current PATH directory')
+        # Suppress redundant output from tradefed.
+        cmd.append('--quiet-output=true')
         return cmd
 
     def _get_default_bundle_url(self, bundle):

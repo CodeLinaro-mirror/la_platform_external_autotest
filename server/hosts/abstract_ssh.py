@@ -599,12 +599,6 @@ class AbstractSSHHost(remote.RemoteHost):
             else:
                 logging.debug('skipping scp for empty source list')
 
-        # Make sure newly written files make it to stable storage, in
-        # case the next step of testing involves a reboot through
-        # servo power manipulation.
-        self.run("sync")
-
-
     def verify_ssh_user_access(self):
         """Verify ssh access to this host.
 

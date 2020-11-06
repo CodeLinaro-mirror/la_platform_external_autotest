@@ -131,7 +131,7 @@ class TastTest(unittest.TestCase):
 
     def _init_tast_commands(self, tests, ssp=False, build=False,
                             build_bundle='fakebundle', run_private_tests=False,
-                            run_vars=[], run_varsfiles=None,
+                            run_vars=[], run_varsfiles=[],
                             download_data_lazily=False):
         """Sets fake_tast.py's behavior for 'list' and 'run' commands.
 
@@ -197,10 +197,16 @@ class TastTest(unittest.TestCase):
         return os.path.join(self._test.resultsdir,
                             tast.tast._STREAMED_RESULTS_FILENAME)
 
-    def _run_test(self, ignore_test_failures=False, command_args=[],
-                  ssp=False, build=False, build_bundle='fakebundle',
-                  run_private_tests=False, varsfiles=None,
-                  download_data_lazily=False):
+    def _run_test(self,
+                  ignore_test_failures=False,
+                  command_args=[],
+                  ssp=False,
+                  build=False,
+                  build_bundle='fakebundle',
+                  run_private_tests=False,
+                  varsfiles=[],
+                  download_data_lazily=False,
+                  varslist=[]):
         """Writes fake_tast.py's configuration and runs the test.
 
         @param ignore_test_failures: Passed as the identically-named arg to
@@ -217,6 +223,8 @@ class TastTest(unittest.TestCase):
              in |-varsfile| arguments.
         @param download_data_lazily: Whether to download external data files
             lazily.
+        @param varslist: list of strings to pass to tast run command as |-vars|
+            arguments. Each string should be formatted as "name=value".
         """
         self._test.initialize(self._host,
                               self.TEST_PATTERNS,
@@ -229,7 +237,8 @@ class TastTest(unittest.TestCase):
                               build_bundle=build_bundle,
                               run_private_tests=run_private_tests,
                               varsfiles=varsfiles,
-                              download_data_lazily=download_data_lazily)
+                              download_data_lazily=download_data_lazily,
+                              varslist=varslist)
         self._test.set_fake_now_for_testing(
                 (NOW - tast._UNIX_EPOCH).total_seconds())
 
@@ -605,6 +614,12 @@ class TastTest(unittest.TestCase):
             self._init_tast_commands([TestInfo('pkg.Test', 0, 0)],
                                      run_varsfiles=varsfiles)
             self._run_test(varsfiles=varsfiles)
+
+    def testVarslistOption(self):
+        varslist = ["var1=val1", "var2=val2"]
+        self._init_tast_commands([TestInfo('pkg.Test', 0, 0)],
+                                 run_vars=varslist)
+        self._run_test(varslist=varslist)
 
 
 class TestInfo:

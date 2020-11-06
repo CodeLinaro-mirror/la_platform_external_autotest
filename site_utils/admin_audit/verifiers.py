@@ -52,7 +52,7 @@ class VerifyDutStorage(base._BaseDUTVerifier):
         super(VerifyDutStorage, self).__init__(dut_host)
         self._state = None
 
-    def _verify(self, set_label=True):
+    def _verify(self, set_label=True, run_badblocks=None):
         if not self.host_is_up():
             logging.info('Host is down; Skipping the verification')
             return
@@ -60,7 +60,7 @@ class VerifyDutStorage(base._BaseDUTVerifier):
             validator = storage.StorageStateValidator(self.get_host())
             storage_type = validator.get_type()
             logging.debug('Detected storage type: %s', storage_type)
-            storage_state = validator.get_state()
+            storage_state = validator.get_state(run_badblocks=run_badblocks)
             logging.debug('Detected storage state: %s', storage_state)
             state = self.convert_state(storage_state)
             if state and set_label:

@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 import sys, socket, errno, logging
 from time import time, sleep
 from autotest_lib.client.common_lib import error, utils
@@ -264,9 +265,8 @@ class barrier(object):
             client.send(self._tag + " " + self._hostid)
 
             reply = client.recv(4)
-            reply = reply.strip("\r\n")
+            reply = reply.strip(b"\r\n")
             logging.info("main said: %s", reply)
-
             # Confirm the main accepted the connection.
             if reply != "wait":
                 logging.warning("Bad connection request to main")
@@ -416,7 +416,7 @@ class barrier(object):
                 logging.warning("timeout calling host, retry")
                 sleep(10)
                 pass
-            except socket.error, err:
+            except socket.error as err:
                 (code, str) = err
                 if (code != errno.ECONNREFUSED and
                     code != errno.ETIMEDOUT):

@@ -1,16 +1,25 @@
+# Lint as: python2, python3
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
+from __future__ import print_function
+from __future__ import division
+from __future__ import absolute_import
+
 import dbus, gobject, logging, os, stat
 from dbus.mainloop.glib import DBusGMainLoop
+import six
+from six.moves import zip
 
 import common
+
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import autotemp, error
 from autotest_lib.client.cros import dbus_util
-from mainloop import ExceptionForward
-from mainloop import GenericTesterMainLoop
+from autotest_lib.client.cros.mainloop import ExceptionForward
+from autotest_lib.client.cros.mainloop import GenericTesterMainLoop
 
 
 """This module contains several helper classes for writing tests to verify the
@@ -162,7 +171,7 @@ class DBusClient(object):
         actual_content = self.wait_for_signal(signal_name)
         logging.debug("%s signal: expected=%s actual=%s",
                       signal_name, expected_content, actual_content)
-        for argument, expected_value in expected_content.iteritems():
+        for argument, expected_value in six.iteritems(expected_content):
             if argument not in actual_content:
                 raise error.TestFail(
                     ('%s signal missing "%s": expected=%s, actual=%s') %
@@ -433,10 +442,10 @@ class CrosDisksTester(GenericTesterMainLoop):
         """Exercises each test method in the list returned by get_tests.
         """
         tests = self.get_tests()
-        self.remaining_requirements = set([test.func_name for test in tests])
+        self.remaining_requirements = set([test.__name__ for test in tests])
         for test in tests:
             test()
-            self.requirement_completed(test.func_name)
+            self.requirement_completed(test.__name__)
 
     def reconnect_client(self, timeout_seconds=None):
         """"Reconnect the CrosDisks DBus client.
@@ -548,10 +557,12 @@ class FilesystemTestDirectory(FilesystemTestObject):
         if not os.path.isdir(path):
             return False
 
+        result = True
         seen = set()
+
         for content in self._content:
             if not content.verify(path):
-                return False
+                result = False
             seen.add(content._path)
 
         if self._strict:
@@ -559,17 +570,30 @@ class FilesystemTestDirectory(FilesystemTestObject):
                 if child not in seen:
                     logging.error('Unexpected filesystem entry "%s"',
                                   os.path.join(path, child))
-                    return False
+                    result = False
 
-        return True
+        return result
 
 
 class FilesystemTestFile(FilesystemTestObject):
     """A filesystem test object that represents a file."""
 
-    def __init__(self, path, content, mode=stat.S_IRUSR|stat.S_IWUSR| \
-                 stat.S_IRGRP|stat.S_IROTH):
+    def __init__(self,
+                 path,
+                 content,
+                 mode=stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP \
+                 | stat.S_IROTH,
+                 mtime=None):
+        """Initializes the file.
+
+        Args:
+            path: The name of this file.
+            content: A byte string with the expected file contents.
+            mode: The file permissions given to this file.
+            mtime: If set, the expected file modification timestamp.
+        """
         super(FilesystemTestFile, self).__init__(path, content, mode)
+        self._mtime = mtime
 
     def _create(self, base_dir):
         path = os.path.join(base_dir, self._path)
@@ -584,8 +608,25 @@ class FilesystemTestFile(FilesystemTestObject):
     def _verify(self, base_dir):
         path = os.path.join(base_dir, self._path)
         with ExceptionSuppressor(IOError):
-            with open(path, 'rb') as f:
-                return f.read() == self._content
+            result = True
+
+            if self._content is not None:
+                with open(path, 'rb') as f:
+                    if f.read() != self._content:
+                        logging.error('Mismatched file contents for "%s"',
+                                      path)
+                        result = False
+
+            if self._mtime is not None:
+                st = os.stat(path)
+                if st.st_mtime != self._mtime:
+                    logging.error(
+                            'Mismatched file modification time for "%s": ' +
+                            'want %d, got %d', path, self._mtime, st.st_mtime)
+                    result = False
+
+            return result
+
         return False
 
 

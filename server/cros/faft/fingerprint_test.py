@@ -20,6 +20,10 @@ class FingerprintTest(test.test):
 
     _DISABLE_FP_UPDATER_FILE = '.disable_fp_updater'
 
+    _UPSTART_DIR = '/etc/init'
+    _BIOD_UPSTART_JOB_FILE = 'biod.conf'
+    _STATEFUL_PARTITION_DIR = '/mnt/stateful_partition'
+
     _GENIMAGES_SCRIPT_NAME = 'gen_test_images.sh'
     _GENIMAGES_OUTPUT_DIR_NAME = 'images'
 
@@ -33,6 +37,7 @@ class FingerprintTest(test.test):
         'TEST_IMAGE_DEV_RB_NINE': '%s.dev.rb9'
     }
 
+    _ROLLBACK_ZERO_BLOCK_ID = '0'
     _ROLLBACK_INITIAL_BLOCK_ID = '1'
     _ROLLBACK_INITIAL_MIN_VERSION = '0'
     _ROLLBACK_INITIAL_RW_VERSION = '0'
@@ -85,7 +90,7 @@ class FingerprintTest(test.test):
     _GOLDEN_RO_FIRMWARE_VERSION_MAP = {
             _FP_BOARD_NAME_BLOONCHIPPER: {
                     'hatch': 'bloonchipper_v2.0.4277-9f652bb3',
-                    'zork': 'bloonchipper_v2.0.4478-22ad3ce2',
+                    'zork': 'bloonchipper_v2.0.5938-197506c1',
             },
             _FP_BOARD_NAME_DARTMONKEY: 'dartmonkey_v2.0.2887-311310808',
             _FP_BOARD_NAME_NOCTURNE: 'nocturne_fp_v2.2.64-58cf5974e',
@@ -111,10 +116,10 @@ class FingerprintTest(test.test):
                 _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.4277-9f652bb3',
                 _FIRMWARE_VERSION_KEY_ID: '1c590ef36399f6a2b2ef87079c135b69ef89eb60',
             },
-            'bloonchipper_v2.0.4478-22ad3ce2-RO_v2.0.5762-157d30f9-RW.bin': {
-                _FIRMWARE_VERSION_SHA256SUM: '3e796aa11fb7dbe40a09a9327e359e75ef5b1fa1d7a7d94604a7fb7361f411cc',
-                _FIRMWARE_VERSION_RO_VERSION: 'bloonchipper_v2.0.4478-22ad3ce2',
-                _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.5762-157d30f9',
+            'bloonchipper_v2.0.5938-197506c1.bin': {
+                _FIRMWARE_VERSION_SHA256SUM: 'dc62e4b05eaf4fa8ab5546dcf18abdb30c8e64e9bf0fbf377ebc85155c7c3a47',
+                _FIRMWARE_VERSION_RO_VERSION: 'bloonchipper_v2.0.5938-197506c1',
+                _FIRMWARE_VERSION_RW_VERSION: 'bloonchipper_v2.0.5938-197506c1',
                 _FIRMWARE_VERSION_KEY_ID: '1c590ef36399f6a2b2ef87079c135b69ef89eb60',
             },
         },
@@ -203,17 +208,6 @@ class FingerprintTest(test.test):
         self.fp_board = self.get_fp_board()
         self._build_fw_file = self.get_build_fw_file()
 
-        if filesystem_util.is_rootfs_writable(self.host):
-            if self.get_host_board() == 'zork':
-                logging.warning('rootfs is writable')
-            else:
-                raise error.TestFail('rootfs is writable')
-
-        if not self.fp_updater_is_enabled():
-            raise error.TestFail(
-                    'Fingerprint firmware updater is disabled at the beginning of test'
-            )
-
     def setup_test(self, test_dir, use_dev_signed_fw=False,
                    enable_hardware_write_protect=True,
                    enable_software_write_protect=True,
@@ -235,6 +229,29 @@ class FingerprintTest(test.test):
         if self._biod_running:
             logging.info('Stopping %s', self._BIOD_UPSTART_JOB_NAME)
             self.host.upstart_stop(self._BIOD_UPSTART_JOB_NAME)
+
+        # On some platforms an AP reboot is needed after flashing firmware to
+        # rebind the driver.
+        self._dut_needs_reboot = self.get_host_board() == 'zork'
+
+        if filesystem_util.is_rootfs_writable(self.host):
+            if self._dut_needs_reboot:
+                logging.warning('rootfs is writable')
+            else:
+                raise error.TestFail('rootfs is writable')
+
+        if not self.biod_upstart_job_enabled():
+            raise error.TestFail(
+                    'Biod upstart job is disabled at the beginning of test')
+        if not self.fp_updater_is_enabled():
+            raise error.TestFail(
+                    'Fingerprint firmware updater is disabled at the beginning of test'
+            )
+
+        # Disable biod and updater so that they won't interfere after reboot.
+        if self._dut_needs_reboot:
+            self.disable_biod_upstart_job()
+            self.disable_fp_updater()
 
         # create tmp working directory on device (automatically cleaned up)
         self._dut_working_dir = self.host.get_tmp_dir(
@@ -272,10 +289,14 @@ class FingerprintTest(test.test):
         # original firmware (not dev version) and potentially reset rollback.
         self._initialize_running_fw_version(use_dev_signed_fw=False,
                                             force_firmware_flashing=False)
-        if (self.get_host_board() == 'zork'
-                    and not self.fp_updater_is_enabled()):
-            self.enable_fp_updater()
         self._initialize_fw_entropy()
+        # Re-enable biod and updater after flashing and initializing entropy so
+        # that they don't interfere if there was a reboot.
+        if hasattr(self, '_dut_needs_reboot') and self._dut_needs_reboot:
+            if not self.biod_upstart_job_enabled():
+                self.enable_biod_upstart_job()
+            if not self.fp_updater_is_enabled():
+                self.enable_fp_updater()
         self._initialize_hw_and_sw_write_protect(
             enable_hardware_write_protect=True,
             enable_software_write_protect=True)
@@ -697,18 +718,55 @@ class FingerprintTest(test.test):
                 self.get_rollback_rw_version() ==
                 self._ROLLBACK_INITIAL_RW_VERSION)
 
+    def is_rollback_unset(self):
+        """
+        Returns True if rollbackinfo matches the uninitialized value that it
+        should have after flashing the entire flash.
+        """
+        return (self.get_rollback_id() == self._ROLLBACK_ZERO_BLOCK_ID
+                and self.get_rollback_min_version() ==
+                self._ROLLBACK_INITIAL_MIN_VERSION
+                and self.get_rollback_rw_version() ==
+                self._ROLLBACK_INITIAL_RW_VERSION)
+
+    def biod_upstart_job_enabled(self):
+        """Returns whether biod's upstart job file is at original location."""
+        return self.host.is_file_exists(
+                os.path.join(self._UPSTART_DIR, self._BIOD_UPSTART_JOB_FILE))
+
+    def disable_biod_upstart_job(self):
+        """
+        Disable biod's upstart job so that biod will not run after a reboot.
+        """
+        logging.info('Disabling biod\'s upstart job')
+        filesystem_util.make_rootfs_writable(self.host)
+        cmd = 'mv %s %s' % (os.path.join(
+                self._UPSTART_DIR,
+                self._BIOD_UPSTART_JOB_FILE), self._STATEFUL_PARTITION_DIR)
+        result = self.run_cmd(cmd)
+        if result.exit_status != 0:
+            raise error.TestFail('Unable to disable biod upstart job: %s' %
+                                 result.stderr.strip())
+
+    def enable_biod_upstart_job(self):
+        """
+        Enable biod's upstart job so that biod will run after a reboot.
+        """
+        logging.info('Enabling biod\'s upstart job')
+        filesystem_util.make_rootfs_writable(self.host)
+        cmd = 'mv %s %s' % (os.path.join(
+                self._STATEFUL_PARTITION_DIR,
+                self._BIOD_UPSTART_JOB_FILE), self._UPSTART_DIR)
+        result = self.run_cmd(cmd)
+        if result.exit_status != 0:
+            raise error.TestFail('Unable to enable biod upstart job: %s' %
+                                 result.stderr.strip())
+
     def fp_updater_is_enabled(self):
         """Returns whether the fingerprint firmware updater is disabled."""
-        cmd = 'test -f %s' % os.path.join(self._FINGERPRINT_BUILD_FW_DIR,
-                                          self._DISABLE_FP_UPDATER_FILE)
-        result = self.run_cmd(cmd)
-        # If the magic file isn't there, the updater is enabled.
-        if result.exit_status == 0:
-            logging.info('fp firmware updater is disabled')
-            return False
-        else:
-            logging.info('fp firmware updater is enabled')
-            return True
+        return not self.host.is_file_exists(
+                os.path.join(self._FINGERPRINT_BUILD_FW_DIR,
+                             self._DISABLE_FP_UPDATER_FILE))
 
     def disable_fp_updater(self):
         """Disable the fingerprint firmware updater."""
@@ -743,12 +801,6 @@ class FingerprintTest(test.test):
 
     def flash_rw_ro_firmware(self, fw_path):
         """Flashes *all* firmware (both RO and RW)."""
-        # Disabling the updater should happen before flash_fp_mcu because
-        # removing rootfs verification requires a reboot, which allows the
-        # updater to run.
-        if self.get_host_board() == 'zork' and self.fp_updater_is_enabled():
-            self.disable_fp_updater()
-
         self.set_hardware_write_protect(False)
         flash_cmd = 'flash_fp_mcu' + ' ' + fw_path
         logging.info('Running flash cmd: %s', flash_cmd)
@@ -758,7 +810,7 @@ class FingerprintTest(test.test):
         # Zork cannot rebind cros-ec-uart after flashing, so an AP reboot is
         # needed to talk to FPMCU. See b/170213489.
         # We have to do this even if flashing failed.
-        if self.get_host_board() == 'zork':
+        if self._dut_needs_reboot:
             self.host.reboot()
             if self.fp_updater_is_enabled():
                 raise error.TestFail(
@@ -810,6 +862,8 @@ class FingerprintTest(test.test):
         """Copies files from server to DUT."""
         logging.info('Copying files from (%s) to (%s).', src_dir, dst_dir)
         self.host.send_file(src_dir, dst_dir, delete_dest=True)
+        # Sync the filesystem in case we need to reboot the AP soon.
+        self.run_cmd('sync')
 
     def run_server_cmd(self, command, timeout=60):
         """Runs command on server; return result with output and exit code."""

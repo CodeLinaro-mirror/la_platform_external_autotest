@@ -27,7 +27,7 @@ Please follow the steps to update chameleond version in the lab.
 
 1) Test and update chameleond code
 - Deploy the change in chameleon in a local bt peer
-  and run bluetooth_AdapterQuickSanity against it.
+  and run bluetooth_AdapterQuickHealth against it.
 - Merge the changes
 
 2) After chameleond changes are merged

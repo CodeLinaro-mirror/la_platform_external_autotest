@@ -27,6 +27,7 @@ from autotest_lib.server.cros.dynamic_suite import tools
 from autotest_lib.server.hosts import cros_constants
 from autotest_lib.server.hosts import cros_firmware
 from autotest_lib.server.hosts import repair_utils
+from autotest_lib.site_utils.admin_audit import verifiers as audit_verify
 from autotest_lib.site_utils.admin_audit import constants as audit_const
 from six.moves import range
 
@@ -37,7 +38,7 @@ except ImportError:
 
 from chromite.lib import timeout_util
 
-MIN_BATTERY_LEVEL = 50.0
+MIN_BATTERY_LEVEL = 80.0
 
 DEFAULT_SERVO_RESET_TRIGGER = (
         'ssh',
@@ -106,8 +107,8 @@ class ACPowerVerifier(hosts.Verifier):
     # Battery discharging state in power_supply_info file.
     BATTERY_DISCHARGING = 'Discharging'
     # Power controller can discharge battery any time till 90% for any model.
-    # Setting level to 85% in case we have wearout of it.
-    BATTERY_DISCHARGE_MIN = 85
+    # Setting level to 90% in case we have wearout of it.
+    BATTERY_DISCHARGE_MIN = 90
 
     @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
@@ -141,14 +142,15 @@ class ACPowerVerifier(hosts.Verifier):
 
             # Collect info to determine which battery level is better to call
             # as MIN_BATTERY_LEVEL for DUTs in the lab.
-            battery_level_by_10 = int(math.floor(battery_level / 10.0)) * 10
-            metrics_data = {
-                    'model': host.host_info_store.get().model,
-                    'level': battery_level_by_10,
-                    'mode': charging_state
-            }
-            metrics.Counter('chromeos/autotest/battery/state').increment(
-                    fields=metrics_data)
+            if battery_level < MIN_BATTERY_LEVEL:
+                level_by_10 = int(math.floor(battery_level / 10.0)) * 10
+                metrics_data = {
+                        'host': host.hostname,
+                        'level': level_by_10,
+                        'mode': charging_state
+                }
+                metrics.Counter('chromeos/autotest/battery/state2').increment(
+                        fields=metrics_data)
 
             if (charging_state == self.BATTERY_DISCHARGING
                         and battery_level < self.BATTERY_DISCHARGE_MIN):
@@ -528,6 +530,44 @@ class EnrollmentStateVerifier(hosts.Verifier):
         return 'The enrollment state is clean on the host'
 
 
+class FirmwareTpmVerifier(hosts.Verifier):
+    """Verifier that firmware tpm info is correct.
+
+    For dev-signed firmware, tpm_fwver and tpm_kernver reported from
+    crossystem should always be 0x10001. Firmware update on DUTs with
+    incorrect tmp_fwver or tpm_kernver may fail due to firmware
+    rollback protection.
+    """
+    # A list of field we want check from crossystem and expected value.
+    CHECK_LIST = [
+            ('tpm_fwver', '0x00010001'),
+            ('tpm_kernver', '0x00010001'),
+    ]
+
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    def verify(self, host):
+        # pylint: disable=missing-docstring
+        for field, expected_value in self.CHECK_LIST:
+            result = host.run('crossystem %s' % field, ignore_status=True)
+            if result.exit_status != 0:
+                raise hosts.AutoservNonCriticalVerifyError(
+                        'Unable to get %s from crossystem.' % field)
+            if result.stdout != expected_value:
+                raise hosts.AutoservNonCriticalVerifyError(
+                        'Unexpected %s value: %s, expected: %s. This error'
+                        ' may cause firmware provision fail due to the'
+                        ' rollback protection.' %
+                        (field, result.stdout, expected_value))
+
+    def _is_applicable(self, host):
+        return cros_firmware._is_firmware_testing_device(host)
+
+    @property
+    def description(self):
+        # pylint: disable=missing-docstring
+        return 'Firmware tpm info is correct in crossystem.'
+
+
 class JetstreamTpmVerifier(hosts.Verifier):
     """Verify that Jetstream TPM is in a good state."""
 
@@ -684,6 +724,32 @@ class ServoUSBDriveVerifier(hosts.Verifier):
     @property
     def description(self):
         return 'Ensure USB drive on Servo is in good state.'
+
+
+class DUTStorageVerifier(hosts.Verifier):
+    """Verify that main storage on DUT is good to use.
+
+    Check if DUT drive is providing good SMART stats which not showing any
+    issues on it. The verifier can mark DUT for replacement if SMART stats
+    show outworn data.
+    """
+
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    def verify(self, host):
+        # pylint: disable=missing-docstring
+        verifier = audit_verify.VerifyDutStorage(host)
+        verifier.verify(set_label=True, run_badblocks='NOT')
+        state = verifier.get_state() or audit_const.HW_STATE_UNKNOWN
+        if not state:
+            raise hosts.AutoservNonCriticalVerifyError(
+                    'DUT storage did not detected or state cannot extracted.')
+        if state == audit_const.HW_STATE_NEED_REPLACEMENT:
+            logging.info('Detected issue with storage on the DUT.')
+            host.set_device_needs_replacement()
+
+    @property
+    def description(self):
+        return 'Ensure DUT storage SMART information is in good state.'
 
 
 class _ResetRepairAction(hosts.RepairAction):
@@ -949,13 +1015,13 @@ class ServoInstallRepair(hosts.RepairAction):
         image_name = host.get_cros_repair_image_name()
         update_url = None
         if host._servo_host.validate_image_usbkey() != image_name:
-            logging.info('Downloading %s to usbkey.', image_name)
+            logging.info('Staging image: %s on caching server.', image_name)
             _, update_url = host.stage_image_for_servo()
         else:
             logging.info('Required image %s is already on usbkey,'
                          ' skipping download.', image_name)
         afe_utils.clean_provision_labels(host)
-        host.servo_install(update_url)
+        host.servo_install(update_url, is_repair=True)
         afe_utils.add_provision_labels(host, host.VERSION_PREFIX, image_name)
 
     @property
@@ -1018,6 +1084,7 @@ def _cros_verify_base_dag():
             (WritableVerifier, 'writable', ('ssh', )),
             (TPMStatusVerifier, 'tpm', ('ssh', )),
             (UpdateSuccessVerifier, 'good_provision', ('ssh', )),
+            (FirmwareTpmVerifier, 'faft_tpm', ('ssh', )),
             (FirmwareStatusVerifier, 'fwstatus', ('ssh', )),
             (FirmwareVersionVerifier, 'rwfw', ('ssh', )),
             (PythonVerifier, 'python', ('ssh', )),
@@ -1029,7 +1096,10 @@ def _cros_verify_base_dag():
 
 def _cros_verify_extended_dag():
     """Return the extended verification DAG for a `CrosHost`."""
-    return ((StopStartUIVerifier, 'stop_start_ui', ('ssh', )), )
+    return (
+            (StopStartUIVerifier, 'stop_start_ui', ('ssh', )),
+            (DUTStorageVerifier, 'storage', ('ssh', )),
+    )
 
 
 def _cros_basic_repair_actions(
@@ -1092,8 +1162,18 @@ def _cros_extended_repair_actions(provision_triggers=_CROS_PROVISION_TRIGGERS,
              provision_triggers),
             (PowerWashRepair, 'powerwash', usb_triggers,
              powerwash_triggers + provision_triggers),
-            (ServoInstallRepair, 'usb', usb_dependencies,
-             usb_triggers + powerwash_triggers + provision_triggers),
+            (
+                    ServoInstallRepair,
+                    'usb',
+                    usb_dependencies,
+                    # faft_tpm is a trigger of usb repair action but should not be
+                    # dependence of provision and powerwash repair action, due to
+                    # restriction of current structure, we hardcode it here instead
+                    # of put it into _CROS_USB_TRIGGERS. TODO(xianuowang@) refactor
+                    # the logic to create action/verifier DAG for different host
+                    # type after we decouple infra from test autotest repo.
+                    usb_triggers + powerwash_triggers + provision_triggers +
+                    ('faft_tpm', )),
     )
     return repair_actions
 

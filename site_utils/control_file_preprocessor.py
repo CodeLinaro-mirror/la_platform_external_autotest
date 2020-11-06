@@ -28,7 +28,7 @@ from autotest_lib.site_utils import suite_preprocessor
 
 # A set of SUITES that we choose not to preprocess as they might have tests
 # added later.
-SUITE_BLACKLIST = set(['au'])
+SUITE_DENYLIST = set(['au'])
 
 
 def _get_control_files_to_process(autotest_dir):
@@ -64,7 +64,7 @@ def get_suite_control_files(autotest_dir, external_autotest_dirs=None):
         d = d.rstrip('/')
         for test in _get_control_files_to_process(d):
             for suite_name in test.suite_tag_parts:
-                if suite_name in SUITE_BLACKLIST:
+                if suite_name in SUITE_DENYLIST:
                     continue
 
                 suite_control_files[suite_name].append(

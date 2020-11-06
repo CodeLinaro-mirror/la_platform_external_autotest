@@ -1,7 +1,15 @@
+# Lint as: python2, python3
 # Copyright 2020 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import six
+from six.moves import zip
 
 class AutotestEnum(object):
     """
@@ -52,7 +60,7 @@ class AutotestEnum(object):
 
     def choices(self):
         'Return choice list suitable for Django model choices.'
-        return zip(self.values, self.names)
+        return list(zip(self.values, self.names))
 
 
     def get_value(self, name):
@@ -60,7 +68,7 @@ class AutotestEnum(object):
         Convert a string name to it's corresponding value.  If a value
         is passed in, it is returned.
         """
-        if isinstance(name, (int, long)) and not self.string_values:
+        if isinstance(name, six.integer_types) and not self.string_values:
             # name is already a value
             return name
         return getattr(self, self.get_attr_name(name))

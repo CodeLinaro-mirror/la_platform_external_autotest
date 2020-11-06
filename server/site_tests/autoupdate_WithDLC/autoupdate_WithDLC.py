@@ -22,7 +22,7 @@ class autoupdate_WithDLC(update_engine_test.UpdateEngineTest):
         for dlc_id in installed:
             self._dlc_util.purge(dlc_id)
         # DLCs may be present but not mounted, so they won't be purged above.
-        self._dlc_util.purge(self._dlc_util._DUMMY_DLC_ID, ignore_status=True)
+        self._dlc_util.purge(self._dlc_util._SAMPLE_DLC_ID, ignore_status=True)
 
 
     def cleanup(self):
@@ -49,7 +49,7 @@ class autoupdate_WithDLC(update_engine_test.UpdateEngineTest):
             self.get_payload_for_nebraska(job_repo_url=job_repo_url,
                                           full_payload=full_payload))
 
-        # Payload URLs for dummy-dlc, a test DLC package.
+        # Payload URLs for sample-dlc, a test DLC package.
         # We'll always need a full payload for DLC installation,
         # and optionally a delta payload if required by the test.
         payload_urls.append(
@@ -63,7 +63,7 @@ class autoupdate_WithDLC(update_engine_test.UpdateEngineTest):
 
         active, inactive = kernel_utils.get_kernel_state(self._host)
 
-        # Install and update dummy-dlc, a DLC package made for test purposes.
+        # Install and update sample-dlc, a DLC package made for test purposes.
         self._run_client_test_and_check_result(self._CLIENT_TEST,
                                                payload_urls=payload_urls,
                                                full_payload=full_payload)
@@ -79,8 +79,8 @@ class autoupdate_WithDLC(update_engine_test.UpdateEngineTest):
 
         logging.info('Checking DLC update events')
         self.verify_update_events(
-            self._FORCED_UPDATE,
-            dlc_rootfs_hostlog[self._dlc_util._DUMMY_DLC_ID])
+                self._FORCED_UPDATE,
+                dlc_rootfs_hostlog[self._dlc_util._SAMPLE_DLC_ID])
 
         kernel_utils.verify_boot_expectations(inactive, host=self._host)
 
@@ -91,8 +91,8 @@ class autoupdate_WithDLC(update_engine_test.UpdateEngineTest):
         # 1. the DLC is not being preloaded (|dlcservice_util --install| will
         #    show the same behavior if the DLC is preloaded)
         # 2. the install doesn't hit Omaha/Nebraska, by using a bad omaha_url
-        self._dlc_util.remove_preloaded(self._dlc_util._DUMMY_DLC_ID)
-        self._dlc_util.install(self._dlc_util._DUMMY_DLC_ID,
+        self._dlc_util.remove_preloaded(self._dlc_util._SAMPLE_DLC_ID)
+        self._dlc_util.install(self._dlc_util._SAMPLE_DLC_ID,
                                omaha_url='fake_url')
-        if not self._dlc_util.is_installed(self._dlc_util._DUMMY_DLC_ID):
+        if not self._dlc_util.is_installed(self._dlc_util._SAMPLE_DLC_ID):
             raise error.TestFail('Dummy DLC was not installed.')

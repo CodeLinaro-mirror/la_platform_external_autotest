@@ -1,9 +1,10 @@
+# Lint as: python2, python3
 """Client for Autotest side communcations to the TLS SSH Server."""
 
 
-import cStringIO
 import grpc
 import logging
+import six
 import time
 
 import common_pb2
@@ -62,8 +63,8 @@ class TLSClient(object):
         start_time = time.time()
         response = self._send_cmd(cmd, timeout)
 
-        stdout_buf = cStringIO.StringIO()
-        stderr_buf = cStringIO.StringIO()
+        stdout_buf = six.StringIO()
+        stderr_buf = six.StringIO()
         last_status = 0
 
         if response:

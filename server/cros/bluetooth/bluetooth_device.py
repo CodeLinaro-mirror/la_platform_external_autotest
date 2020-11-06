@@ -38,29 +38,26 @@ class BluetoothDevice(object):
 
     XMLRPC_BRINGUP_TIMEOUT_SECONDS = 60
     XMLRPC_LOG_PATH = '/var/log/bluetooth_xmlrpc_device.log'
+    XMLRPC_REQUEST_TIMEOUT_SECONDS = 180
 
-    def __init__(self, device_host):
+    def __init__(self, device_host, remote_facade_proxy=None):
         """Construct a BluetoothDevice.
 
         @param device_host: host object representing a remote host.
 
         """
         self.host = device_host
+        self._remote_proxy = remote_facade_proxy
+
         # Make sure the client library is on the device so that the proxy code
         # is there when we try to call it.
         client_at = autotest.Autotest(self.host)
         client_at.install()
         self._proxy_lock = threading.Lock()
-        # Start up the XML-RPC proxy on the client.
-        self._proxy = self.host.rpc_server_tracker.xmlrpc_connect(
-                constants.BLUETOOTH_DEVICE_XMLRPC_SERVER_COMMAND,
-                constants.BLUETOOTH_DEVICE_XMLRPC_SERVER_PORT,
-                command_name=
-                  constants.BLUETOOTH_DEVICE_XMLRPC_SERVER_CLEANUP_PATTERN,
-                ready_test_name=
-                  constants.BLUETOOTH_DEVICE_XMLRPC_SERVER_READY_METHOD,
-                timeout_seconds=self.XMLRPC_BRINGUP_TIMEOUT_SECONDS,
-                logfile=self.XMLRPC_LOG_PATH)
+
+        # If remote facade wasn't already created, connect directly here
+        if not self._remote_proxy:
+            self._connect_xmlrpc_directly()
 
         # Get some static information about the bluetooth adapter.
         properties = self.get_adapter_properties()
@@ -68,6 +65,41 @@ class BluetoothDevice(object):
         self.address = properties.get('Address')
         self.bluetooth_class = properties.get('Class')
         self.UUIDs = properties.get('UUIDs')
+
+    def _connect_xmlrpc_directly(self):
+        """Connects to the bluetooth native facade directly via xmlrpc."""
+        proxy = self.host.rpc_server_tracker.xmlrpc_connect(
+                constants.BLUETOOTH_DEVICE_XMLRPC_SERVER_COMMAND,
+                constants.BLUETOOTH_DEVICE_XMLRPC_SERVER_PORT,
+                command_name=constants.
+                BLUETOOTH_DEVICE_XMLRPC_SERVER_CLEANUP_PATTERN,
+                ready_test_name=constants.
+                BLUETOOTH_DEVICE_XMLRPC_SERVER_READY_METHOD,
+                timeout_seconds=self.XMLRPC_BRINGUP_TIMEOUT_SECONDS,
+                logfile=self.XMLRPC_LOG_PATH,
+                request_timeout_seconds=self.XMLRPC_REQUEST_TIMEOUT_SECONDS)
+
+        self._bt_direct_proxy = proxy
+        return proxy
+
+    @property
+    def _proxy(self):
+        """Gets the proxy to the DUT bluetooth facade.
+
+        @return XML RPC proxy to DUT bluetooth facade.
+
+        """
+        # When the xmlrpc server is already created (using the
+        # RemoteFacadeFactory), we will use the BluetoothNativeFacade inside the
+        # remote proxy. Otherwise, we will use the xmlrpc server started from
+        # this class. Currently, there are a few users outside of the Bluetooth
+        # autotests that use this and this can be removed once those users
+        # migrate to using the RemoteFacadeFactory to generate the xmlrpc
+        # connection.
+        if self._remote_proxy:
+            return self._remote_proxy.bluetooth
+        else:
+            return self._bt_direct_proxy
 
     @proxy_thread_safe
     def set_debug_log_levels(self, dispatcher_vb, newblue_vb, bluez_vb,
@@ -102,7 +134,7 @@ class BluetoothDevice(object):
                 self._proxy.log_message(msg)
 
             if peer:
-                for btpeer in self.host.peer_list:
+                for btpeer in self.host.btpeer_list:
                     btpeer.log_message(msg)
         except Exception as e:
             logging.error("Exception '%s' in log_message '%s'", str(e), msg)
@@ -983,6 +1015,65 @@ class BluetoothDevice(object):
         """
         return self._proxy.advmon_reset_event_count(app_id, monitor_id, event)
 
+    @proxy_thread_safe
+    def advmon_interleave_scan_logger_start(self):
+        """ Start interleave logger recording
+        """
+        self._proxy.advmon_interleave_scan_logger_start()
+
+    @proxy_thread_safe
+    def advmon_interleave_scan_logger_stop(self):
+        """ Stop interleave logger recording
+
+        @returns: True if logs were successfully collected,
+                  False otherwise.
+
+        """
+        return self._proxy.advmon_interleave_scan_logger_stop()
+
+    @proxy_thread_safe
+    def advmon_interleave_scan_logger_get_records(self):
+        """ Get records in previous log collections
+
+        @returns: a list of records, where each item is a record of
+                  interleave |state| and the |time| the state starts.
+                  |state| could be {'no filter', 'allowlist'}
+                  |time| is kernel time in sec
+
+        """
+        return self._proxy.advmon_interleave_scan_logger_get_records()
+
+    @proxy_thread_safe
+    def advmon_interleave_scan_logger_get_cancel_events(self):
+        """ Get cancel events in previous log collections
+
+        @returns: a list of cancel |time| when a interleave cancel event log
+                  was found.
+                  |time| is kernel time in sec
+
+        """
+        return self._proxy.advmon_interleave_scan_logger_get_cancel_events()
+
+    @proxy_thread_safe
+    def messages_start(self):
+        """Start messages monitoring."""
+        self._proxy.messages_start()
+
+    @proxy_thread_safe
+    def messages_stop(self):
+        """Stop messages monitoring."""
+        self._proxy.messages_stop()
+
+    @proxy_thread_safe
+    def messages_find(self, pattern_str):
+        """Find if a pattern string exists in messages output.
+
+        @param pattern_str: the pattern string to find.
+
+        @returns: True on success. False otherwise.
+
+        """
+        return self._proxy.messages_find(pattern_str)
 
     @proxy_thread_safe
     def register_advertisement(self, advertisement_data):
@@ -1619,6 +1710,6 @@ class BluetoothDevice(object):
         # This kills the RPC server.
         if close_host:
             self.host.close()
-        else:
+        elif self._bt_direct_proxy:
             self.host.rpc_server_tracker.disconnect(
                     constants.BLUETOOTH_DEVICE_XMLRPC_SERVER_PORT)

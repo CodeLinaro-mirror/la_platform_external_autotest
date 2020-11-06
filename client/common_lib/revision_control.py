@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 """
 Module with abstraction layers to revision control systems.
 
@@ -5,8 +6,15 @@ With this library, autotest developers can handle source code checkouts and
 updates on both client as well as server code.
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os, warnings, logging
-import error, utils
+import six
+
+from autotest_lib.client.common_lib import error
+from autotest_lib.client.common_lib import utils
 from autotest_lib.client.bin import os_dep
 
 
@@ -497,7 +505,7 @@ class GitRepo(object):
         if not self.is_repo_initialized():
             self.get()
 
-        assert(isinstance(remote, basestring))
+        assert(isinstance(remote, six.string_types))
         if local:
             cmd = 'checkout -b %s %s' % (local, remote)
         else:

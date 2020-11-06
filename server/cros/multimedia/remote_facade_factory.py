@@ -21,7 +21,7 @@ from autotest_lib.client.cros import constants
 from autotest_lib.server import autotest
 from autotest_lib.server.cros.multimedia import assistant_facade_adapter
 from autotest_lib.server.cros.multimedia import audio_facade_adapter
-from autotest_lib.server.cros.multimedia import bluetooth_hid_facade_adapter
+from autotest_lib.server.cros.multimedia import bluetooth_facade_adapter
 from autotest_lib.server.cros.multimedia import browser_facade_adapter
 from autotest_lib.server.cros.multimedia import cfm_facade_adapter
 from autotest_lib.server.cros.multimedia import display_facade_adapter
@@ -83,8 +83,12 @@ class RemoteFacadeProxy(object):
     XMLRPC_RETRY_DELAY = 10
     REBOOT_TIMEOUT = 60
 
-    def __init__(self, host, no_chrome, extra_browser_args=None,
-                 disable_arc=False):
+    def __init__(self,
+                 host,
+                 no_chrome,
+                 extra_browser_args=None,
+                 disable_arc=False,
+                 retry_rpc=True):
         """Construct a RemoteFacadeProxy.
 
         @param host: Host object representing a remote host.
@@ -92,6 +96,7 @@ class RemoteFacadeProxy(object):
         @param extra_browser_args: A list containing extra browser args passed
                                    to Chrome in addition to default ones.
         @param disable_arc: True to disable ARC++.
+        @param retry_rpc: True to retry rpc calls in call_proxy.
 
         """
         self._client = host
@@ -199,8 +204,11 @@ class RemoteFacadeProxy(object):
                             extra_browser_args=self._extra_browser_args,
                             disable_arc=self._disable_arc)
                 # Try again.
-                logging.warning('Retrying RPC %s.', rpc)
-                return call_rpc_with_log()
+                if self.retry_rpc:
+                    logging.warning('Retrying RPC %s.', rpc)
+                    return call_rpc_with_log()
+                else:
+                    raise
         except:
             # Process the log if any. It is helpful for debug.
             process_log()
@@ -319,8 +327,14 @@ class RemoteFacadeFactory(object):
 
     """
 
-    def __init__(self, host, no_chrome=False, install_autotest=True,
-                 results_dir=None, extra_browser_args=None, disable_arc=False):
+    def __init__(self,
+                 host,
+                 no_chrome=False,
+                 install_autotest=True,
+                 results_dir=None,
+                 extra_browser_args=None,
+                 disable_arc=False,
+                 retry_rpc=True):
         """Construct a RemoteFacadeFactory.
 
         @param host: Host object representing a remote host.
@@ -332,6 +346,7 @@ class RemoteFacadeFactory(object):
         @param disable_arc: True to disable ARC++.
         If it is not None, we will get multimedia init log to the results_dir.
 
+        @param retry_rpc: True to retry rpc calls in call_proxy.
         """
         self._client = host
         if install_autotest:
@@ -344,7 +359,8 @@ class RemoteFacadeFactory(object):
                     host=self._client,
                     no_chrome=no_chrome,
                     extra_browser_args=extra_browser_args,
-                    disable_arc=disable_arc)
+                    disable_arc=disable_arc,
+                    retry_rpc=retry_rpc)
         finally:
             if results_dir:
                 host.get_file(constants.MULTIMEDIA_XMLRPC_SERVER_LOG_FILE,
@@ -395,9 +411,9 @@ class RemoteFacadeFactory(object):
         return browser_facade_adapter.BrowserFacadeRemoteAdapter(self._proxy)
 
 
-    def create_bluetooth_hid_facade(self):
-        """"Creates a bluetooth hid facade object."""
-        return bluetooth_hid_facade_adapter.BluetoothHIDFacadeRemoteAdapter(
+    def create_bluetooth_facade(self):
+        """"Creates a bluetooth facade object."""
+        return bluetooth_facade_adapter.BluetoothFacadeRemoteAdapter(
                 self._client, self._proxy)
 
 
@@ -413,8 +429,8 @@ class RemoteFacadeFactory(object):
 
 
     def create_kiosk_facade(self):
-         """"Creates a kiosk facade object."""
-         return kiosk_facade_adapter.KioskFacadeRemoteAdapter(
+        """"Creates a kiosk facade object."""
+        return kiosk_facade_adapter.KioskFacadeRemoteAdapter(
                 self._client, self._proxy)
 
 

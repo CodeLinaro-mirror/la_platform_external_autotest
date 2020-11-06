@@ -28,8 +28,8 @@ def run_TS(machine):
         target_module='gts-dev',
         target_plan='waivers',
         load_waivers=False,
-        uri='gs://chromeos-arc-images/cts/bundle/android-gts-8-R2-P-Preview05-6834175.zip',
+        uri='gs://chromeos-arc-images/cts/bundle/android-gts-8-R2-P-Preview10-6924226.zip',
         use_jdk9=True,
-        timeout=1080)
+        timeout=3600)
 
 parallel_simple(run_TS, machines)

@@ -2,6 +2,10 @@
 #pylint: disable-msg=C0111
 """Unit Tests for autotest.client.common_lib.test"""
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 __author__ = 'gps@google.com (Gregory P. Smith)'
 
 import json
@@ -11,8 +15,11 @@ import common
 import mock as pymock
 import os
 import shutil
+from six.moves import range
+
 from autotest_lib.client.common_lib import test
 from autotest_lib.client.common_lib.test_utils import mock
+
 
 class TestTestCase(unittest.TestCase):
     class _neutered_base_test(test.base_test):
@@ -36,6 +43,10 @@ class TestTestCase(unittest.TestCase):
             self.before_iteration_hooks = []
             self.after_iteration_hooks = []
 
+            self.crash_reporter_dir = tempfile.mkdtemp()
+            # Make a temp dir for the test-in-prog file to be created.
+            self.test_in_prog_file = os.path.join(self.crash_reporter_dir,
+                                                  "test-in-prog")
 
     def setUp(self):
         self.god = mock.mock_god()
@@ -44,6 +55,7 @@ class TestTestCase(unittest.TestCase):
 
     def tearDown(self):
         self.god.unstub_all()
+        shutil.rmtree(self.test.crash_reporter_dir)
 
 
 
@@ -115,7 +127,7 @@ class Test_base_test_execute(TestTestCase):
         self.test.postprocess.expect_call()
         self.test.process_failed_constraints.expect_call()
 
-        fake_time = iter(xrange(4)).next
+        fake_time = iter(range(4)).next
         self.test.execute(iterations=1, test_length=3, _get_time=fake_time)
         self.god.check_playback()
 
@@ -165,7 +177,7 @@ class Test_base_test_execute(TestTestCase):
     def test_execute_default_profile_only(self):
         # test that profile_only=True works.
         self.god.stub_function(self.test, 'drop_caches_between_iterations')
-        for _ in xrange(3):
+        for _ in range(3):
             self.test.drop_caches_between_iterations.expect_call()
             self.test.run_once_profiling.expect_call(None)
         self.test.postprocess.expect_call()
@@ -422,10 +434,11 @@ class Test_base_test_execute(TestTestCase):
 
 
         for (config_tag, ap_config_tag, bt_tag, drop) in test_data:
-          self.test.output_perf_value(config_tag + '_' + bt_tag + '_drop',
-                                      drop, units='percent_drop',
-                                      higher_is_better=False,
-                                      graph=ap_config_tag + '_drop')
+            self.test.output_perf_value(config_tag + '_' + bt_tag + '_drop',
+                                        drop,
+                                        units='percent_drop',
+                                        higher_is_better=False,
+                                        graph=ap_config_tag + '_drop')
         f = open(self.test.resultsdir + "/results-chart.json")
         expected_result = {
           "ch006_mode11B_none_drop": {
@@ -534,6 +547,8 @@ class mocktest(test.base_test):
         resultdir = os.path.join(self.workdir, 'results')
         tmpdir = os.path.join(self.workdir, 'tmp')
 
+        self.test_in_prog_file = os.path.join(tmpdir, "test-in-prog")
+
         os.makedirs(os.path.join(testdir, self.testname))
         os.makedirs(os.path.join(resultdir, self.testname))
         os.makedirs(tmpdir)
@@ -550,7 +565,11 @@ class mocktest(test.base_test):
 
     def test_runtest(self):
         all_args = {'host': 'hostvalue', 'arg1': 'value1', 'arg2': 'value2'}
-        test.runtest(self.job, self.testname, '', (), all_args)
+        test.runtest(self.job,
+                     self.testname,
+                     '', (),
+                     all_args,
+                     override_test_in_prog_file=self.test_in_prog_file)
         self.job.initialize_mock.assert_called_with('hostvalue', 'value1')
         self.job.warmup_mock.assert_called_with('hostvalue')
         self.job.run_once_mock.assert_called_with('value2')

@@ -179,14 +179,14 @@ class PlatformNamesTestCase(unittest.TestCase):
 
     def runTest(self):
         """
-        For each JSON config file (except DEFAULTS), verify that there is an
+        For each platform JSON config file, verify that there is an
         attribute 'platform' whose value exactly matches the file's basename.
         For example, rambi.json should contain {'platform': 'rambi'}
         """
         for filename in os.listdir(config._CONFIG_DIR):
             filepath = os.path.join(config._CONFIG_DIR, filename)
             platform_name, ext = os.path.splitext(filename)
-            if ext != '.json' or platform_name == 'DEFAULTS':
+            if ext != '.json' or platform_name in ('DEFAULTS', 'CONSOLIDATED'):
                 continue
             with open(filepath) as f:
                 d = json.load(f)

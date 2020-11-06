@@ -170,57 +170,19 @@ class FirmwareRepair(hosts.RepairAction):
 
     This repair method only applies to DUTs used for FAFT.
     """
-    def _get_stable_build(self, host):
-        raise NotImplementedError(
-                  'Class %s does not implement _get_stable_build()'
-                  % type(self).__name__)
 
-    def _run_repair(self, host, build):
-        raise NotImplementedError(
-                  'Class %s does not implement _run_repair()'
-                  % type(self).__name__)
-
-    def repair(self, host):
-        repair_utils.require_servo(host, ignore_state=True)
-        build = self._get_stable_build(host)
-        if not build:
-            raise hosts.AutoservRepairError(
-                  'Failed to find stable firmware build for %s, if the DUT is'
-                  ' in faft-*pool, faft stable_version needs to be set.'
-                   % host.hostname, 'cannot find firmware stable_version')
-        self._run_repair(host, build)
-
-
-class FaftFirmwareRepair(FirmwareRepair):
-    """
-    Reinstall the firmware for DUTs in faft related pool.
-    """
-    def _get_stable_build(self, host):
+    def _get_faft_stable_build(self, host):
         info = host.host_info_store.get()
         return afe_utils.get_stable_faft_version_v2(info)
 
-    def _run_repair(self, host, build):
-        host.firmware_install(build)
-
-    def _is_applicable(self, host):
-        return _is_firmware_testing_device(host)
-
-    @property
-    def description(self):
-        return 'Re-install the stable firmware(faft) via servo'
-
-
-class GeneralFirmwareRepair(FirmwareRepair):
-    """Reinstall the firmware for non-faft DUTs.
-    We need different RepairAction for non firmware testing DUT because
-    we want only try re-install firmware if all other RepairAction could
-    not restore ssh capability to the DUT.
-    """
-    def _get_stable_build(self, host):
+    def _get_os_stable_build(self, host):
         # Use firmware in current stable os build.
         return host.get_cros_repair_image_name()
 
-    def _run_repair(self, host, build):
+    def _run_faft_repair(self, host, build):
+        host.firmware_install(build)
+
+    def _run_general_repair(self, host, build):
         # As GeneralFirmwareRepair is the last repair action, we expect
         # stable_version os image is loaded on usbkey during other repair
         # action runs. And there is also no point to repeat and waste time if
@@ -263,10 +225,53 @@ class GeneralFirmwareRepair(FirmwareRepair):
         host.run('crossystem disable_dev_request=1', ignore_status=True)
         host.reboot()
 
+
+class FaftFirmwareRepair(FirmwareRepair):
+    """
+    Reinstall the firmware for DUTs in faft related pool.
+    """
+
+    def repair(self, host):
+        repair_utils.require_servo(host, ignore_state=True)
+        build = self._get_faft_stable_build(host)
+        if build:
+            self._run_faft_repair(host, build)
+        else:
+            logging.info('Cannot find faft stable_version, falling back to'
+                         ' use firmware on OS stable_version.')
+            build = self._get_os_stable_build(host)
+            if not build:
+                raise hosts.AutoservRepairError(
+                        'Failed to find stable_version from host_info.',
+                        'cannot find stable_version')
+            self._run_general_repair(host, build)
+
+    def _is_applicable(self, host):
+        return _is_firmware_testing_device(host)
+
+    @property
+    def description(self):
+        return 'Re-install the stable firmware(faft) via servo'
+
+
+class GeneralFirmwareRepair(FirmwareRepair):
+    """Reinstall the firmware for non-faft DUTs.
+    We need different RepairAction for non firmware testing DUT because
+    we want only try re-install firmware if all other RepairAction could
+    not restore ssh capability to the DUT.
+    """
+
+    def repair(self, host):
+        repair_utils.require_servo(host, ignore_state=True)
+        build = self._get_os_stable_build(host)
+        if not build:
+            raise hosts.AutoservRepairError(
+                    'Failed to find stable_version from host_info.',
+                    'cannot find stable_version')
+        self._run_general_repair(host, build)
+
     def _is_applicable(self, host):
         if _is_firmware_testing_device(host):
-            logging.info('GeneralFirmwareRepair is not applicable to DUTs'
-                         ' in faft pools.')
             return False
         if not host.servo:
             logging.info(
@@ -291,7 +296,7 @@ class GeneralFirmwareRepair(FirmwareRepair):
                     ' count: %s', repair_fail_count)
             return False
         flashed_build = dhp.get_firmware_stable_version()
-        candidate_build = self._get_stable_build(host)
+        candidate_build = self._get_os_stable_build(host)
         # If we had an success firmware flash in this repair loop,
         # there is no need to retry flash the same firmware build.
         if (dhp.get_succeed_repair_action(self.tag) > 0

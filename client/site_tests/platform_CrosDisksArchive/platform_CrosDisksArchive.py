@@ -125,19 +125,24 @@ class CrosDisksArchiveTester(CrosDisksTester):
         self._test_archive(
                 os.path.join(mount_path, 'MacOS UTF-8 (Bug 903664).zip'),
                 FilesystemTestDirectory('', [
-                        FilesystemTestFile('ファイル.dat', 'This is a file.\n'),
+                        FilesystemTestFile('ファイル.dat',
+                                           'This is a file.\n',
+                                           mtime=1541735375),
                         FilesystemTestDirectory('日本語フォルダ', [
                                 FilesystemTestFile('新しいテキストドキュメント.txt',
-                                                   '新しいテキストドキュメントです。\n')
+                                                   '新しいテキストドキュメントです。\n',
+                                                   mtime=1541735341)
                         ])
                 ]))
 
     def _test_symlinks(self, mount_path):
         self._test_archive(
                 os.path.join(mount_path, 'Symlinks.zip'),
-                FilesystemTestDirectory(
-                        '', [FilesystemTestFile('textfile', 'sample text\n')],
-                        strict=True))
+                FilesystemTestDirectory('', [
+                        FilesystemTestFile(
+                                'textfile', 'sample text\n', mtime=1357584423)
+                ],
+                                        strict=True))
 
     def _test_multipart(self, mount_path):
         # Test multipart RARs.
@@ -181,15 +186,20 @@ class CrosDisksArchiveTester(CrosDisksTester):
 
         fs2 = FilesystemTestDirectory('', [
                 FilesystemTestFile('ClearText.txt',
-                                   'This is not encrypted.\n'),
+                                   'This is not encrypted.\n',
+                                   mtime=1598592138),
                 FilesystemTestFile('Encrypted AES-128.txt',
-                                   'This is encrypted with AES-128.\n'),
+                                   'This is encrypted with AES-128.\n',
+                                   mtime=1598592200),
                 FilesystemTestFile('Encrypted AES-192.txt',
-                                   'This is encrypted with AES-192.\n'),
+                                   'This is encrypted with AES-192.\n',
+                                   mtime=1598592206),
                 FilesystemTestFile('Encrypted AES-256.txt',
-                                   'This is encrypted with AES-256.\n'),
+                                   'This is encrypted with AES-256.\n',
+                                   mtime=1598592213),
                 FilesystemTestFile('Encrypted ZipCrypto.txt',
-                                   'This is encrypted with ZipCrypto.\n'),
+                                   'This is encrypted with ZipCrypto.\n',
+                                   mtime=1598592187),
         ])
 
         for archive_name, want in [
@@ -262,19 +272,34 @@ class CrosDisksArchiveTester(CrosDisksTester):
             self.cros_disks.unmount(mount_path, [])
 
     def _test_duplicated_filenames(self, mount_path):
+        mtime = 1600602814
         want = [
-                FilesystemTestFile(b'Simple.txt', b'Simple 1\n'),
-                FilesystemTestFile(b'Simple (1).txt', b'Simple 2 \n'),
-                FilesystemTestFile(b'Simple (2).txt', b'Simple 3  \n'),
-                FilesystemTestFile(b'Suspense...', b'Suspense 1\n'),
-                FilesystemTestFile(b'Suspense... (1)', b'Suspense 2 \n'),
-                FilesystemTestFile(b'Suspense... (2)', b'Suspense 3  \n'),
-                FilesystemTestFile(b'No Dot', b'No Dot 1\n'),
-                FilesystemTestFile(b'No Dot (1)', b'No Dot 2 \n'),
-                FilesystemTestFile(b'No Dot (2)', b'No Dot 3  \n'),
-                FilesystemTestFile(b'.Hidden', b'Hidden 1\n'),
-                FilesystemTestFile(b'.Hidden (1)', b'Hidden 2 \n'),
-                FilesystemTestFile(b'.Hidden (2)', b'Hidden 3  \n'),
+                FilesystemTestFile(b'Simple.txt', b'Simple 1\n', mtime=mtime),
+                FilesystemTestFile(b'Simple (1).txt',
+                                   b'Simple 2 \n',
+                                   mtime=mtime),
+                FilesystemTestFile(b'Simple (2).txt',
+                                   b'Simple 3  \n',
+                                   mtime=mtime),
+                FilesystemTestFile(b'Suspense...',
+                                   b'Suspense 1\n',
+                                   mtime=mtime),
+                FilesystemTestFile(b'Suspense... (1)',
+                                   b'Suspense 2 \n',
+                                   mtime=mtime),
+                FilesystemTestFile(b'Suspense... (2)',
+                                   b'Suspense 3  \n',
+                                   mtime=mtime),
+                FilesystemTestFile(b'No Dot', b'No Dot 1\n', mtime=mtime),
+                FilesystemTestFile(b'No Dot (1)', b'No Dot 2 \n', mtime=mtime),
+                FilesystemTestFile(b'No Dot (2)', b'No Dot 3  \n',
+                                   mtime=mtime),
+                FilesystemTestFile(b'.Hidden', b'Hidden 1\n', mtime=mtime),
+                FilesystemTestFile(b'.Hidden (1)', b'Hidden 2 \n',
+                                   mtime=mtime),
+                FilesystemTestFile(b'.Hidden (2)',
+                                   b'Hidden 3  \n',
+                                   mtime=mtime),
         ]
 
         self._test_archive(

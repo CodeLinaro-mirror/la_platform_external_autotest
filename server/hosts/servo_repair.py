@@ -22,6 +22,7 @@ from autotest_lib.server.cros.servo import servo
 from autotest_lib.server.hosts import cros_constants
 from autotest_lib.server.hosts import repair_utils
 from autotest_lib.server.hosts import servo_constants
+from autotest_lib.server.cros.servo.topology import servo_topology
 import six
 
 try:
@@ -313,6 +314,42 @@ class _ServodControlVerifier(hosts.Verifier):
         return 'Basic servod control is working'
 
 
+class _Cr50ConsoleVerifier(hosts.Verifier):
+    """Verifier to check if cr50 console is present and working.
+
+    Validating based by running commands and expect they will not fail.
+    If any command fail then console is not working as expected.
+    """
+
+    COMMAND_TO_CHECK_CONSOLE = (
+            'cr50_ccd_level',
+            'cr50_testlab',
+            'cr50_ccd_state_flags',
+    )
+
+    @ignore_exception_for_non_cros_host
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    def verify(self, host):
+        try:
+            for command in self.COMMAND_TO_CHECK_CONSOLE:
+                if host.get_servo().has_control(command):
+                    # Response of command is not important.
+                    host.get_servo().get(command)
+        except Exception as e:
+            six.reraise(hosts.AutoservNonCriticalVerifyError, str(e),
+                        sys.exc_info()[2])
+
+    def _is_applicable(self, host):
+        if host.get_servo():
+            # Only when DUT connect by type-c.
+            return host.get_servo().get_main_servo_device() == 'ccd_cr50'
+        return False
+
+    @property
+    def description(self):
+        return 'CR50 console is working'
+
+
 class _CCDTestlabVerifier(hosts.Verifier):
     """
     Verifier to check that ccd testlab is enabled.
@@ -335,11 +372,6 @@ class _CCDTestlabVerifier(hosts.Verifier):
         if status == 'on':
             # ccd testlab enabled
             return
-        data = {'port': host.servo_port,
-                'host': host.get_dut_hostname() or host.hostname,
-                'board': host.servo_board or ''}
-        metrics.Counter(
-            'chromeos/autotest/repair/ccd_testlab').increment(fields=data)
         raise hosts.AutoservNonCriticalVerifyError(
             'The ccd testlab is disabled; DUT requires manual work '
             'to enable it (go/ccd-setup).')
@@ -550,6 +582,37 @@ class _DUTConnectionVerifier(hosts.Verifier):
         return 'Ensure the Servo connected to the DUT.'
 
 
+class _TopologyVerifier(hosts.Verifier):
+    """Verifier that all servo component is presented."""
+
+    @ignore_exception_for_non_cros_host
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    def verify(self, host):
+        topology = servo_topology.ServoTopology(host)
+        topology.read(host.get_dut_host_info())
+        try:
+            topology.validate(raise_error=True,
+                              dual_set=host.is_dual_setup(),
+                              compare=True)
+        except servo_topology.ServoTopologyError as e:
+            six.reraise(hosts.AutoservVerifyError, str(e), sys.exc_info()[2])
+
+    def _is_applicable(self, host):
+        if host.is_localhost():
+            logging.info('Target servo is not in a lab,'
+                         ' action is not applicable.')
+            return False
+        if not host.is_servo_topology_supported():
+            logging.info('Target servo-topology is not supported,'
+                         ' action is not applicable.')
+            return False
+        return True
+
+    @property
+    def description(self):
+        return 'Ensure all Servo component present.'
+
+
 class _PowerButtonVerifier(hosts.Verifier):
     """
     Verifier to check sanity of the `pwr_button` signal.
@@ -578,7 +641,7 @@ class _PowerButtonVerifier(hosts.Verifier):
                 'Check ribbon cable: \'pwr_button\' is stuck')
 
     def _is_applicable(self, host):
-        return host.get_servo().main_device_is_flex()
+        return (host.get_servo() and host.get_servo().main_device_is_flex())
 
     @property
     def description(self):
@@ -890,6 +953,7 @@ def create_servo_repair_strategy():
             (_BoardConfigVerifier, 'brd_config', ['servo_ssh']),
             (_SerialConfigVerifier, 'ser_config', ['servo_ssh']),
             (_ServodJobVerifier, 'servod_job', config + ['disk_space']),
+            (_TopologyVerifier, 'servo_topology', ['servod_job']),
             (_ServodConnectionVerifier, 'servod_connection', ['servod_job']),
             (_ServodControlVerifier, 'servod_control', ['servod_connection']),
             (_DUTConnectionVerifier, 'dut_connected', ['servod_connection']),
@@ -897,14 +961,15 @@ def create_servo_repair_strategy():
             (_BatteryVerifier, 'battery', ['dut_connected']),
             (_LidVerifier, 'lid_open', ['dut_connected']),
             (_EcBoardVerifier, 'ec_board', ['dut_connected']),
-            (_CCDTestlabVerifier, 'ccd_testlab', ['dut_connected']),
+            (_Cr50ConsoleVerifier, 'cr50_console', ['dut_connected']),
+            (_CCDTestlabVerifier, 'ccd_testlab', ['cr50_console']),
             (_CCDPowerDeliveryVerifier, 'power_delivery',
              ['servod_connection']),
     ]
 
     servod_deps = [
-            'servod_job', 'servod_connection', 'servod_control',
-            'dut_connected', 'pwr_button'
+            'servod_job', 'servo_topology', 'servod_connection',
+            'servod_control', 'dut_connected', 'pwr_button', 'cr50_console'
     ]
     repair_actions = [
             (_DiskCleanupRepair, 'disk_cleanup', ['servo_ssh'], ['disk_space'

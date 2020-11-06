@@ -413,7 +413,6 @@ class atest(object):
         self.kill_on_failure = False
         self.web_server = ''
         self.verbose = False
-        self.no_confirmation = False
         # Whether the topic or command supports skylab inventory repo.
         self.allow_skylab = False
         self.enforce_skylab = False
@@ -434,9 +433,9 @@ class atest(object):
                                help='Delimiter to use to separate the '
                                'key=value fields', default='|')
         self.parser.add_option('--no-confirmation',
-                               help=('Skip all confirmation in when function '
-                                     'require_confirmation is called.'),
-                               action='store_true', default=False)
+                               help='Skip prompt_confirmation from the user',
+                               action='store_true',
+                               default=False)
         self.parser.add_option('-v', '--verbose',
                                action='store_true', default=False)
         self.parser.add_option('-w', '--web',
@@ -741,41 +740,6 @@ class atest(object):
         return KEYS_CONVERT.get(type, str)(value)
 
 
-    def print_fields_std(self, items, keys, title=None):
-        """Print the keys in each item, one on each line.
-
-        @param items: Items to print.
-        @param keys: Name of the keys to look up each item in items.
-        @param title: Title of the output, default to None.
-        """
-        if not items:
-            return
-        if title:
-            print(title)
-        for item in items:
-            for key in keys:
-                print('%s: %s' % (KEYS_TO_NAMES_EN[key],
-                                  self.__conv_value(key,
-                                                    _get_item_key(item, key))))
-
-
-    def print_fields_parse(self, items, keys, title=None):
-        """Print the keys in each item as comma separated name=value
-
-        @param items: Items to print.
-        @param keys: Name of the keys to look up each item in items.
-        @param title: Title of the output, default to None.
-        """
-        for item in items:
-            values = ['%s=%s' % (KEYS_TO_NAMES_EN[key],
-                                  self.__conv_value(key,
-                                                    _get_item_key(item, key)))
-                      for key in keys
-                      if self.__conv_value(key,
-                                           _get_item_key(item, key)) != '']
-            print(self.parse_delim.join(values))
-
-
     def __find_justified_fmt(self, items, keys):
         """Find the max length for each field.
 
@@ -842,96 +806,6 @@ class atest(object):
                 print('\n')
 
 
-    def print_table_parse(self, items, keys_header, sublist_keys=()):
-        """Print a mix of header and lists in a user readable format.
-
-        @param items: Items to print.
-        @param keys_header: Header of the keys, use to look up in items.
-        @param sublist_keys: Keys for sublist in each item.
-        """
-        for item in items:
-            values = ['%s=%s' % (KEYS_TO_NAMES_EN[key],
-                                 self.__conv_value(key, _get_item_key(item, key)))
-                      for key in keys_header
-                      if self.__conv_value(key,
-                                           _get_item_key(item, key)) != '']
-
-            if sublist_keys:
-                [values.append('%s=%s'% (KEYS_TO_NAMES_EN[key],
-                                         ','.join(_get_item_key(item, key))))
-                 for key in sublist_keys
-                 if len(_get_item_key(item, key))]
-
-            print(self.parse_delim.join(values))
-
-
-    def print_by_ids_std(self, items, title=None, line_before=False):
-        """Prints ID & names of items in a user readable form.
-
-        @param items: Items to print.
-        @param title: Title of the output, default to None.
-        @param line_before: True to print an empty line before the output,
-                            default to False.
-        """
-        if not items:
-            return
-        if line_before:
-            print()
-        if title:
-            print(title + ':')
-        self.print_table_std(items, keys_header=['id', 'name'])
-
-
-    def print_by_ids_parse(self, items, title=None, line_before=False):
-        """Prints ID & names of items in a parseable format.
-
-        @param items: Items to print.
-        @param title: Title of the output, default to None.
-        @param line_before: True to print an empty line before the output,
-                            default to False.
-        """
-        if not items:
-            return
-        if line_before:
-            print()
-        if title:
-            print(title + '='),
-        values = []
-        for item in items:
-            values += ['%s=%s' % (KEYS_TO_NAMES_EN[key],
-                                  self.__conv_value(key,
-                                                    _get_item_key(item, key)))
-                       for key in ['id', 'name']
-                       if self.__conv_value(key,
-                                            _get_item_key(item, key)) != '']
-        print(self.parse_delim.join(values))
-
-
-    def print_list_std(self, items, key):
-        """Print a wrapped list of results
-
-        @param items: Items to to lookup for given key, could be a nested
-                      dictionary.
-        @param key: Name of the key to look up for value.
-        """
-        if not items:
-            return
-        print(' '.join(_get_item_key(item, key) for item in items))
-
-
-    def print_list_parse(self, items, key):
-        """Print a wrapped list of results.
-
-        @param items: Items to to lookup for given key, could be a nested
-                      dictionary.
-        @param key: Name of the key to look up for value.
-        """
-        if not items:
-            return
-        print('%s=%s' % (KEYS_TO_NAMES_EN[key],
-                         ','.join(_get_item_key(item, key) for item in items)))
-
-
     @staticmethod
     def prompt_confirmation(message=None):
         """Prompt a question for user to confirm the action before proceeding.
@@ -950,36 +824,3 @@ class atest(object):
         else:
             print('User did not confirm. Aborting...')
             return False
-
-
-    @staticmethod
-    def require_confirmation(message=None):
-        """Decorator to prompt a question for user to confirm action before
-        proceeding.
-
-        If user chooses not to proceed, do not call the function.
-
-        @param message: A detailed message to explain possible impact of the
-                        action.
-
-        @return: A decorator wrapper for calling the actual function.
-        """
-        def deco_require_confirmation(func):
-            """Wrapper for the decorator.
-
-            @param func: Function to be called.
-
-            @return: the actual decorator to call the function.
-            """
-            def func_require_confirmation(*args, **kwargs):
-                """Decorator to prompt a question for user to confirm.
-
-                @param message: A detailed message to explain possible impact of
-                                the action.
-                """
-                if (args[0].no_confirmation or
-                    atest.prompt_confirmation(message)):
-                    func(*args, **kwargs)
-
-            return func_require_confirmation
-        return deco_require_confirmation

@@ -4,6 +4,7 @@
 # found in the LICENSE file.
 
 import logging
+import time
 import re
 
 from autotest_lib.client.common_lib import error
@@ -15,8 +16,11 @@ STORAGE_TYPE_MMC = 'mmc'
 
 # Storage states supported
 STORAGE_STATE_NORMAL = 'normal'
-STORAGE_STATE_WARNING = 'warming'
+STORAGE_STATE_WARNING = 'warning'
 STORAGE_STATE_CRITICAL = 'critical'
+
+BADBLOCK_CHECK_RO = 'RO'
+BADBLOCK_CHECK_RW = 'RW'
 
 
 class StorageError(error.TestFail):
@@ -37,7 +41,7 @@ class StorageStateValidator(object):
     The class supporting SSD, NVME and MMC storage types.
     The state detection and set state as:
     - normal - drive in a good shape
-    - warming - drive close to the worn out state by any metrics
+    - warning - drive close to the worn out state by any metrics
     - critical - drive is worn out and has errors
     """
 
@@ -88,10 +92,15 @@ class StorageStateValidator(object):
             self._storage_type = self._get_storage_type()
         return self._storage_type
 
-    def get_state(self):
+    def get_state(self, run_badblocks=None):
         """Determine the type of the storage on the host.
 
-        @returns storage state (normal|warming|critical)
+        @param run_badblocks: string key to run badblock check.
+                                None - check if we can run it
+                                "NOT" - do not run check
+                                "RW" - run read-write if booted from USB
+                                "RO"  - run read-only check
+        @returns storage state (normal|warning|critical)
 
         @raises StorageError: if type not supported or state cannot
                             be determine
@@ -104,10 +113,32 @@ class StorageStateValidator(object):
                 self._storage_state = self._get_state_for_mms()
             elif storage_type == STORAGE_TYPE_NVME:
                 self._storage_state = self._get_state_for_nvme()
-        if self._storage_state != STORAGE_STATE_CRITICAL:
+        if (run_badblocks != 'NOT'
+                    and self._storage_state != STORAGE_STATE_CRITICAL
+                    and self._support_health_profile()):
             # run badblocks if storage not in critical state
             # if bad block found then mark storage as bad
-            self._run_badblocks_check()
+            logging.info('Trying run badblocks on device')
+            dhp = self._host.health_profile
+            usb_boot = self._host.is_boot_from_external_device()
+            if run_badblocks is None:
+                if _is_time_to_run_badblocks_ro(dhp):
+                    run_badblocks = BADBLOCK_CHECK_RO
+                # Blocked for now till we confirm that SMART stats is not
+                # detect is before we do.
+                # if usb_boot and _is_time_to_run_badblocks_rw(dhp):
+                #     run_badblocks = BADBLOCK_CHECK_RW
+            logging.debug('run_badblocks=%s', run_badblocks)
+            if usb_boot and run_badblocks == BADBLOCK_CHECK_RW:
+                self._run_read_write_badblocks_check()
+                dhp.refresh_badblocks_rw_run_time()
+                # RO is subclass of RW so update it too
+                dhp.refresh_badblocks_ro_run_time()
+            if run_badblocks == BADBLOCK_CHECK_RO:
+                # SMART stats sometimes is not giving issue if blocks
+                # bad for reading. So we run RO check.
+                self._run_readonly_badblocks_check()
+                dhp.refresh_badblocks_ro_run_time()
         return self._storage_state
 
     def _get_storage_type(self):
@@ -189,7 +220,7 @@ class StorageStateValidator(object):
         # Ex "Pre EOL information [PRE_EOL_INFO: 0x01]"
         # 0x00 - not defined
         # 0x01 - Normal
-        # 0x02 - Warming, consumed 80% of the reserved blocks
+        # 0x02 - Warning, consumed 80% of the reserved blocks
         # 0x03 - Urgent, consumed 90% of the reserved blocks
         mmc_fail_eol = r".*(?P<param>PRE_EOL_INFO.)]?: 0x0(?P<val>\d)"
 
@@ -256,45 +287,43 @@ class StorageStateValidator(object):
             raise StorageError('Storage state cannot be detected')
         if used_value < 91:
             return STORAGE_STATE_NORMAL
-        if used_value < 99:
-            return STORAGE_STATE_WARNING
-        return STORAGE_STATE_CRITICAL
+        # Stop mark device as bad when they reached 100% usage
+        # TODO(otabek) crbug.com/1140507 re-evaluate the max usage
+        return STORAGE_STATE_WARNING
 
-    def _get_storage_path(self):
+    def _get_device_storage_path(self):
         """Find and return the path to the device storage.
 
-        Method support detection of the device when it booted from USB.
-        The return path like '/dev/sda'.
+        Method support detection even when the device booted from USB.
+
+        @returns path to the main device like '/dev/XXXX'
         """
         # find the name of device storage
-        cmd = ('. /usr/share/misc/chromeos-common.sh;'
-                ' list_fixed_nvme_disks;'
-                ' list_fixed_ata_disks;'
-                ' list_fixed_mmc_disks')
+        cmd = ('. /usr/sbin/write_gpt.sh;'
+               ' . /usr/share/misc/chromeos-common.sh;'
+               ' load_base_vars; get_fixed_dst_drive')
         cmd_result = self._host.run(cmd,
                                     ignore_status=True,
                                     timeout=60)
         if cmd_result.exit_status != 0:
             logging.debug('Failed to detect path to the device storage')
             return None
-        return '/dev/' + cmd_result.stdout.strip()
+        return cmd_result.stdout.strip()
 
-    def _run_badblocks_check(self):
-        """Run backblocks verification on device storage.
+    def _run_readonly_badblocks_check(self):
+        """Run backblocks readonly verification on device storage.
 
-        The blocksize set as 512 based on .
+        The blocksize set as 512 based.
         """
-        path = self._get_storage_path()
+        path = self._get_device_storage_path()
         if not path:
             # cannot continue if storage was not detected
             return
-        logging.info("Running badblocks on storage; path=%s", path)
+        logging.info("Running readonly badblocks check; path=%s", path)
         cmd = 'badblocks -e 1 -s -b 512 %s' % path
         try:
             # set limit in 1 hour but expecting to finish it up 30 minutes
-            cmd_result = self._host.run(cmd,
-                                        ignore_status=True,
-                                        timeout=3600)
+            cmd_result = self._host.run(cmd, ignore_status=True, timeout=3600)
             if cmd_result.exit_status != 0:
                 logging.debug('Failed to detect path to the device storage')
                 return
@@ -307,3 +336,69 @@ class StorageStateValidator(object):
             if 'Timeout encountered:' in str(e):
                 logging.info('Timeout during running action')
             logging.debug(str(e))
+
+    def _run_read_write_badblocks_check(self):
+        """Run non-destructive read-write check on device storage.
+
+        The blocksize set as 512 based.
+        We can run this test only when DUT booted from USB.
+        """
+        path = self._get_device_storage_path()
+        if not path:
+            # cannot continue if storage was not detected
+            return
+        logging.info("Running read-write badblocks check; path=%s", path)
+        cmd = 'badblocks -e 1 -nsv -b 4096 %s' % path
+        try:
+            # set limit in 90 minutes but expecting to finish it up 50 minutes
+            cmd_result = self._host.run(cmd, ignore_status=True, timeout=5400)
+            if cmd_result.exit_status != 0:
+                logging.debug('Failed to detect path to the device storage')
+                return
+            result = cmd_result.stdout.strip()
+            if result:
+                logging.debug("Check result: '%s'", result)
+                # So has result is Bad and empty is Good.
+                self._storage_state = STORAGE_STATE_CRITICAL
+        except Exception as e:
+            if 'Timeout encountered:' in str(e):
+                logging.info('Timeout during running action')
+            logging.info('(Not critical) %s', e)
+
+    def _support_health_profile(self):
+        return (hasattr(self._host, 'health_profile')
+                and self._host.health_profile)
+
+
+def _is_time_to_run_badblocks_ro(dhp):
+    """Verify that device can proceed to run read-only badblocks check.
+    The RO check can be executed not often then one per 6 days.
+
+    @returns True if can proceed, False if not
+    """
+    today_time = int(time.time())
+    last_check = dhp.get_badblocks_ro_run_time_epoch()
+    can_run = today_time > (last_check + (6 * 24 * 60 * 60))
+    if not can_run:
+        logging.info(
+                'Run RO badblocks not allowed because we have run it recently,'
+                ' last run %s. RO check allowed to run only once per 6 days',
+                dhp.get_badblocks_ro_run_time())
+    return can_run
+
+
+def _is_time_to_run_badblocks_rw(dhp):
+    """Verify that device can proceed to run read-write badblocks check.
+    The RW check can be executed not often then one per 60 days.
+
+    @returns True if can proceed, False if not
+    """
+    today_time = int(time.time())
+    last_check = dhp.get_badblocks_rw_run_time_epoch()
+    can_run = today_time > (last_check + (60 * 24 * 60 * 60))
+    if not can_run:
+        logging.info(
+                'Run RW badblocks not allowed because we have run it recently,'
+                ' last run %s. RW check allowed to run only once per 60 days',
+                dhp.get_badblocks_rw_run_time())
+    return can_run

@@ -59,7 +59,7 @@ class firmware_WriteProtectFunc(FirmwareTest):
                 self.set_hardware_write_protect(current_hw_wp)
             # Recover HW WP status.
             if hasattr(self, '_original_hw_wp'):
-              self.set_hardware_write_protect(self._original_hw_wp)
+                self.set_hardware_write_protect(self._original_hw_wp)
         except Exception as e:
             logging.error('Caught exception: %s', str(e))
 
@@ -141,6 +141,13 @@ class firmware_WriteProtectFunc(FirmwareTest):
         # Enable WP
         for target in self._targets:
             self._set_write_protect(target, True)
+
+        # Check WP is properly enabled at the start
+        for target in self._targets:
+            sw_wp_dict = self._rpcs[target].get_write_protect_status()
+            if not sw_wp_dict['enabled']:
+                raise error.TestFail('Failed to enable %s SW WP at '
+                                     'test start' % target.upper())
 
         reboots = (('shutdown cmd', lambda:self.run_shutdown_process(
                                         lambda:self.run_shutdown_cmd())),

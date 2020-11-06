@@ -59,6 +59,7 @@ class firmware_Cr50ConsoleCommands(Cr50Test):
     MP_BRANCH_STR = 'cr50_v1.9308_87_mp.'
     PREPVT_BRANCH_STR = 'cr50_v1.9308_B.'
     TOT_STR = 'cr50_v2.0.'
+    OPTIONAL_EXT = '_optional'
 
     def initialize(self, host, cmdline_args, full_args):
         super(firmware_Cr50ConsoleCommands, self).initialize(host, cmdline_args,
@@ -145,7 +146,13 @@ class firmware_Cr50ConsoleCommands(Cr50Test):
                 # now and if they didn't exist, they don't exist now.
                 for k, v in match.groupdict().iteritems():
                     old_val = self.past_matches.get(k, [v, v])[0]
-                    if old_val and not v:
+
+                    # If there's an optional key, then the value may or may not
+                    # match. Save any value that's not none, so the test can
+                    # verify boards correctly exclude optional lines.
+                    if self.OPTIONAL_EXT in k:
+                        self.past_matches[k] = [old_val or v, regexp]
+                    elif old_val and not v:
                         missing.append('%s:%s' % (k, regexp))
                     elif not old_val and v:
                         extra.append('%s:%s' % (k, v))
@@ -239,6 +246,9 @@ class firmware_Cr50ConsoleCommands(Cr50Test):
                 missing_labels.append(label)
         extra_labels = []
         for label in self.exclude:
+            if label in self.past_matches and self.past_matches[label][0]:
+                extra_labels.append(label)
+            label = label + self.OPTIONAL_EXT
             if label in self.past_matches and self.past_matches[label][0]:
                 extra_labels.append(label)
         if missing_labels:

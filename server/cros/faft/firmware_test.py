@@ -179,10 +179,10 @@ class FirmwareTest(test.test):
                 self.faft_client.system.get_platform_name(),
                 self.faft_client.system.get_model_name())
         self.checkers = FAFTCheckers(self)
-        self.switcher = mode_switcher.create_mode_switcher(self)
 
         if self.faft_config.chrome_ec:
             self.ec = chrome_ec.ChromeEC(self.servo)
+        self.switcher = mode_switcher.create_mode_switcher(self)
         # Check for presence of a USBPD console
         if self.faft_config.chrome_usbpd:
             self.usbpd = chrome_ec.ChromeUSBPD(self.servo)
@@ -707,6 +707,25 @@ class FirmwareTest(test.test):
         if self._needed_restore_servo_v4_role:
             self.servo.set_servo_v4_role('src')
 
+    def set_dut_low_power_idle_delay(self, delay):
+        """Set EC low power idle delay
+
+        @param delay: Delay in seconds
+        """
+        if not self.ec.has_command('dsleep'):
+            logging.info("Can't set low power idle delay.")
+            return
+        self._previous_ec_low_power_delay = int(
+                self.ec.send_command_get_output("dsleep",
+                ["timeout:\s+(\d+)\ssec"])[0][1])
+        self.ec.send_command("dsleep " + str(delay))
+
+    def restore_dut_low_power_idle_delay(self):
+        """Restore EC low power idle delay"""
+        if getattr(self, '_previous_ec_low_power_delay', None):
+            self.ec.send_command("dsleep " + str(
+                    self._previous_ec_low_power_delay))
+
     def get_usbdisk_path_on_dut(self):
         """Get the path of the USB disk device plugged-in the servo on DUT.
 
@@ -1002,7 +1021,9 @@ class FirmwareTest(test.test):
         if enable:
             # Set write protect flag and reboot to take effect.
             self.ec.set_flash_write_protect(enable)
-            self.sync_and_ec_reboot(flags='hard')
+            self.sync_and_ec_reboot(
+                    flags='hard',
+                    extra_sleep=self.faft_config.ec_boot_to_wp_en)
         else:
             # Reboot after deasserting hardware write protect pin to deactivate
             # write protect. And then remove software write protect flag.
@@ -1395,17 +1416,19 @@ class FirmwareTest(test.test):
             internal_dev = self.faft_client.system.get_internal_device()
             self.do_blocking_sync(internal_dev)
 
-    def sync_and_ec_reboot(self, flags=''):
+    def sync_and_ec_reboot(self, flags='', extra_sleep=0):
         """Request the client sync and do a EC triggered reboot.
 
         @param flags: Optional, a space-separated string of flags passed to EC
                       reboot command, including:
                           default: EC soft reboot;
                           'hard': EC cold/hard reboot.
+        @param extra_sleep: Optional, int or float for extra wait time for EC
+                            reboot in seconds.
         """
         self.blocking_sync(freeze_for_reset=True)
         self.ec.reboot(flags)
-        time.sleep(self.faft_config.ec_boot_to_console)
+        time.sleep(self.faft_config.ec_boot_to_console + extra_sleep)
         self.check_lid_and_power_on()
 
     def reboot_and_reset_tpm(self):

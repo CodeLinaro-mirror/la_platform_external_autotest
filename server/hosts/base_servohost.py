@@ -14,6 +14,8 @@ import six.moves.http_client
 import logging
 import socket
 import six.moves.xmlrpc_client
+import time
+import os
 
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import autotest_enum
@@ -336,6 +338,21 @@ class BaseServoHost(ssh_host.SSHHost):
         # here is unexpected, and could signal a bug, the point of
         # the exercise is to paper over problems; allowing this to
         # fail would defeat the purpose.
+
+        # Preserve critical files before reboot since post-provision
+        # clobbering will wipe the stateful partition.
+        # TODO(xianuowang@) Remove this logic once we have updated to
+        # a image with https://crrev.com/c/2485908.
+        path_to_preserve = [
+                '/var/lib/servod',
+                '/var/lib/device_health_profile',
+        ]
+        safe_location = '/mnt/stateful_partition/unencrypted/preserve/'
+        for item in path_to_preserve:
+            dest = os.path.join(safe_location, item.split('/')[-1])
+            self.run('rm -rf %s' % dest, ignore_status=True)
+            self.run('mv %s %s' % (item, safe_location), ignore_status=True)
+
         self.run('crossystem clear_tpm_owner_request=1', ignore_status=True)
         self._servo_host_reboot()
         logging.debug('Cleaning up autotest directories if exist.')
@@ -345,6 +362,13 @@ class BaseServoHost(ssh_host.SSHHost):
         except autotest.AutodirNotFoundError:
             logging.debug('No autotest installed directory found.')
 
+        # Recover preserved files to original location.
+        # TODO(xianuowang@) Remove this logic once we have updated to
+        # a image with https://crrev.com/c/2485908.
+        for item in path_to_preserve:
+            src = os.path.join(safe_location, item.split('/')[-1])
+            dest = '/'.join(item.split('/')[:-1])
+            self.run('mv %s %s' % (src, dest), ignore_status=True)
 
     def power_cycle(self):
         """Cycle power to this host via PoE(servo v3) or RPM(labstation)
@@ -557,3 +581,25 @@ class BaseServoHost(ssh_host.SSHHost):
         """
         result = self.run('umount %s' % mount_path, ignore_status=True)
         return result.exit_status == 0
+
+    def wait_ready(self, required_uptime=300):
+        """Wait ready for a servohost if it has been rebooted recently.
+
+        It may take a few minutes until all servos and their componments
+        re-enumerated and become ready after a servohost(especially labstation
+        as it supports multiple servos) reboot, so we need to make sure the
+        servohost has been up for a given a mount of time before trying to
+        start any actions.
+
+        @param required_uptime: Minimum uptime in seconds that we can
+                                consdier a servohost be ready.
+        """
+        uptime = float(self.check_uptime())
+        # To prevent unexpected output from check_uptime() that causes long
+        # sleep, make sure the maximum wait time <= required_uptime.
+        diff = min(required_uptime - uptime, required_uptime)
+        if diff > 0:
+            logging.info(
+                    'The servohost was just rebooted, wait %s'
+                    ' seconds for it to become ready', diff)
+            time.sleep(diff)

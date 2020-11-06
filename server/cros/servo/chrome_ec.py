@@ -38,6 +38,18 @@ HOSTEVENT_INVALID           = 0x80000000
 # Time to wait after sending keypress commands.
 KEYPRESS_RECOVERY_TIME = 0.5
 
+# Wakemask types, copied from:
+#     ec/include/ec_commands.h
+EC_HOST_EVENT_MAIN = 0
+EC_HOST_EVENT_B = 1
+EC_HOST_EVENT_SCI_MASK = 2
+EC_HOST_EVENT_SMI_MASK = 3
+EC_HOST_EVENT_ALWAYS_REPORT_MASK = 4
+EC_HOST_EVENT_ACTIVE_WAKE_MASK = 5
+EC_HOST_EVENT_LAZY_WAKE_MASK_S0IX = 6
+EC_HOST_EVENT_LAZY_WAKE_MASK_S3 = 7
+EC_HOST_EVENT_LAZY_WAKE_MASK_S5 = 8
+
 
 class ChromeConsole(object):
     """Manages control of a Chrome console.
@@ -198,6 +210,29 @@ class ChromeConsole(object):
         self.clear_uart_regex()
 
         return rv
+
+
+    def is_dfp(self, port=0):
+        """This function checks if EC is DFP
+
+        Args:
+          port: Port of EC to check
+
+        Returns:
+          True: if EC is DFP
+          False: if EC is not DFP
+        """
+        is_dfp = None
+        try:
+            # After reboot, EC should be UFP, but workaround in servod
+            # can perform PD Data Swap in workaroud so check that
+            ret = self.send_command_get_output("pd %d state" % port, ["DFP"])
+            is_dfp = True
+        except Exception as e:
+            # EC is UFP
+            is_dfp = False
+
+        return is_dfp
 
 
 class ChromeEC(ChromeConsole):

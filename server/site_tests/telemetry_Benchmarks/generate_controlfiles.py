@@ -27,38 +27,20 @@ import re
 # haddowk in the change.
 
 PERF_PER_BUILD_TESTS = (
-    'cros_ui_smoothness',
-    'jetstream',
-    'kraken',
     'loading.desktop',
-    'octane',
     'rendering.desktop',
-    'speedometer',
     'speedometer2',
 )
 
 PERF_DAILY_RUN_TESTS = (
     'blink_perf.image_decoder',
-    'cros_tab_switching.typical_24',
-    'dromaeo',
-    'media.desktop',
-    'memory.desktop',
-    'smoothness.tough_pinch_zoom_cases',
-    'system_health.memory_desktop',
-    'webrtc',
 )
 
-PERF_WEEKLY_RUN_TESTS = (
-)
-
-ALL_TESTS = (PERF_PER_BUILD_TESTS +
-             PERF_DAILY_RUN_TESTS +
-             PERF_WEEKLY_RUN_TESTS)
+ALL_TESTS = (PERF_PER_BUILD_TESTS + PERF_DAILY_RUN_TESTS)
 
 EXTRA_ARGS_MAP = {
     'loading.desktop': '--story-tag-filter=typical',
     'rendering.desktop': '--story-tag-filter=top_real_world_desktop',
-    'system_health.memory_desktop': '--pageset-repeat=1',
 }
 
 DEFAULT_YEAR = str(datetime.now().year)
@@ -107,8 +89,6 @@ def _get_suite(test):
         return 'ATTRIBUTES = \'suite:crosbolt_perf_perbuild\''
     elif test in PERF_DAILY_RUN_TESTS:
         return 'ATTRIBUTES = \'suite:crosbolt_perf_nightly\''
-    elif test in PERF_WEEKLY_RUN_TESTS:
-        return 'ATTRIBUTES = \'suite:crosbolt_perf_weekly\''
     return ''
 
 

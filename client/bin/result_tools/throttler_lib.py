@@ -4,14 +4,10 @@
 
 """Help functions used by different throttlers."""
 
-from __future__ import print_function
-from __future__ import division
-from __future__ import absolute_import
-
 import os
 import re
 
-from . import utils_lib
+import utils_lib
 
 
 # A list of file names that should not be throttled, that is, not modified by

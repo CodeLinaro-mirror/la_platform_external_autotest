@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -151,7 +152,7 @@ class gtest_parser(object):
 
     def SuppressionHashes(self):
         """Returns list of suppression hashes found in the log."""
-        return self._suppressions.keys()
+        return list(self._suppressions.keys())
 
     def Suppression(self, suppression_hash):
         """Returns a list containing the suppression for a given hash.

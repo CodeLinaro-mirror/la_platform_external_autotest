@@ -50,8 +50,7 @@ class cheets_GTS(tradefed_test.TradefedTest):
         if not utils.is_in_container():
             logging.info('Running outside of lab, adding extra debug options.')
             cmd.append('--log-level-display=DEBUG')
-        # See b/150418360. This is needed to get the output our parser expects.
-        cmd.append('--quiet-output=false')
+
         return cmd
 
     def _get_default_bundle_url(self, bundle):
@@ -79,6 +78,7 @@ class cheets_GTS(tradefed_test.TradefedTest):
                  target_plan=None,
                  needs_push_media=False,
                  enable_default_apps=False,
+                 executable_test_count=None,
                  precondition_commands=[],
                  login_precondition_commands=[],
                  authkey=None,
@@ -99,6 +99,7 @@ class cheets_GTS(tradefed_test.TradefedTest):
         @param target_module: the name of test module to run.
         @param target_plan: the name of the test plan to run.
         @param needs_push_media: need to push test media streams.
+        @param executable_test_count: the known number of tests in the run.
         @param timeout: time after which tradefed can be interrupted.
         @param precondition_commands: a list of scripts to be run on the
         dut before the test is run, the scripts must already be installed.
@@ -123,6 +124,7 @@ class cheets_GTS(tradefed_test.TradefedTest):
                     _GTS_MEDIA_URI if needs_push_media else None,
                     _GTS_MEDIA_LOCALPATH),
                 enable_default_apps=enable_default_apps,
+                executable_test_count=executable_test_count,
                 login_precondition_commands=login_precondition_commands,
                 precondition_commands=precondition_commands,
                 prerequisites=prerequisites)

@@ -175,9 +175,48 @@ def verify_battery_status(host):
     status = host.run(cmd, timeout=30, ignore_status=True).stdout.strip()
     if status not in ['Charging', 'Discharging', 'Full']:
         raise Exception(
-                'Unexpected battery status. Please verify that DUT prepared '
-                'for deployment.')
+                'Unexpected battery status. Please verify that DUT prepared'
+                ' for deployment.')
+    if status in ['Discharging']:
+        raise Exception(
+                'Unexpected battery status. Please verify that DUT connected'
+                ' to power and charging.')
     logging.info("Battery status verification passed!")
+
+
+def verify_servo(host):
+    """Verify that we have good Servo.
+
+    The servo_topology and servo_type will be clean up when initiate the
+    deploy process by run add-dut or update-dut.
+    """
+    host_info = host.host_info_store.get()
+    if host_info.os == 'labstation':
+        # skip labstation because they do not have servo
+        return
+    servo_host = host._servo_host
+    if not servo_host:
+        raise Exception('Servo host is not initialized. All DUTs need to have'
+                        ' a stable and working servo.')
+    if host._servo_host.is_servo_topology_supported():
+        servo_topology = host._servo_host.get_topology()
+        if not servo_topology or servo_topology.is_empty():
+            raise Exception(
+                    'Servo topology is not initialized. All DUTs need to have'
+                    ' a stable and working servo.')
+    servo_type = host.servo.get_servo_type()
+    if not servo_type:
+        raise Exception(
+                'The servo_type did not received from Servo. Please verify'
+                ' that Servo is in good state. All DUTs need to have a stable'
+                ' and working servo.')
+    if not host.is_servo_in_working_state():
+        raise Exception(
+                'Servo is not initialized properly or did not passed one or'
+                ' more verifiers. All DUTs need to have a stable and working'
+                ' servo.')
+    host._set_servo_topology()
+    logging.info("Servo initialized and working as expected.")
 
 
 def verify_ccd_testlab_enable(host):
@@ -379,8 +418,15 @@ def install_firmware(host):
     _wait_firmware_update_process(host, pid)
     _check_firmware_update_result(host, fw_update_log)
 
-    # Get us out of dev-mode and clear GBB flags.  GBB flags are
-    # non-zero because boot from USB was enabled.
+    try:
+        host.reboot()
+    except Exception as e:
+        logging.debug('Failed to reboot the DUT after update firmware; %s', e)
+        try_reset_by_servo(host)
+
+    # Once we confirmed DUT can boot from new firmware, get us out of
+    # dev-mode and clear GBB flags.  GBB flags are non-zero because
+    # boot from USB was enabled.
     logging.info("Resting gbb flags and disable dev mode.")
     host.run('/usr/share/vboot/bin/set_gbb_flags.sh 0',
              ignore_status=True)
@@ -391,9 +437,10 @@ def install_firmware(host):
     try:
         host.reboot()
     except Exception as e:
-        logging.debug('Failed to reboot from host side; %s', e)
+        logging.debug(
+                'Failed to reboot the DUT after switch to'
+                ' non-dev mode; %s', e)
         try_reset_by_servo(host)
-
     logging.info("Install firmware completed successfully.")
 
 

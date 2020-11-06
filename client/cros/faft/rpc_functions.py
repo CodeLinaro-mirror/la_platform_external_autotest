@@ -7,11 +7,15 @@ These will be exposed via an xmlrpc server running on the DUT.
 
 @note: When adding categories, please also update server/cros/faft/rpc_proxy.pyi
 """
+
+from __future__ import print_function
+
 import binascii
 import httplib
 import logging
 import os
 import signal
+import six
 import sys
 import tempfile
 import traceback
@@ -139,7 +143,7 @@ class FaftXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                             traceback.format_exception_only(exc_class, exc))
                     exc = xmlrpclib.Fault(
                             fault_code, '%s. %s' % (message, exc_str.rstrip()))
-                raise exc, None, tb
+                six.reraise(exc, None, tb)
             finally:
                 del exc_info
                 del tb

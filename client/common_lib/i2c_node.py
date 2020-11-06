@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2011 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -64,7 +65,7 @@ class I2cNode(object):
         logging.info('Attempt to load shared library %s', self.load_lib)
         try:
             return ctypes.cdll.LoadLibrary(self.load_lib)
-        except OSError, e:
+        except OSError as e:
             raise I2cError('Error loading C library %s: %s' %
                             (self.load_lib, e))
         logging.info('Successfully loaded shared library %s', self.load_lib)

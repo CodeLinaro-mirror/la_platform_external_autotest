@@ -27,6 +27,8 @@ args_dict['tot_test_run'] = 'true'
 
 def run_test(machine):
     host = hosts.create_host(machine, servo_args=servo_args)
-    job.run_test('firmware_Cr50U2fCommands', host=host)
+    iterations = int(args_dict.get("iterations", 1))
+    job.run_test('firmware_Cr50U2fCommands', host=host, cmdline_args=args,
+                 iterations=iterations)
 
 parallel_simple(run_test, machines)

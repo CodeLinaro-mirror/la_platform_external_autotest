@@ -26,9 +26,9 @@ class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
     batch_wrapper = BluetoothAdapterQuickTests.quick_test_batch_decorator
 
 
-    @test_wrapper('Monitor Object Sanity Tests')
-    def advmon_monitor_sanity_tests(self):
-        """Tests advertisement monitor object sanity."""
+    @test_wrapper('Monitor Object Health Tests')
+    def advmon_monitor_health_tests(self):
+        """Tests advertisement monitor object health."""
         self.advmon_test_monitor_creation()
         self.advmon_test_monitor_validity()
 
@@ -50,6 +50,11 @@ class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
         self.advmon_test_fg_bg_combination()
 
 
+    @test_wrapper('Interleave Scan Tests', devices={'BLE_MOUSE': 1})
+    def advmon_interleaved_scan(self):
+        """Tests interleave scan."""
+        self.advmon_test_interleaved_scan()
+
     @batch_wrapper('Advertisement Monitor API')
     def advmon_batch_run(self, num_iterations=1, test_name=None):
         """Run the Advertisement Monitor test batch or a specific given test.
@@ -64,17 +69,18 @@ class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
                              whole batch.
 
         """
-        self.advmon_monitor_sanity_tests()
+        self.advmon_monitor_health_tests()
         self.advmon_single_client_tests()
         self.advmon_fg_bg_combination_tests()
-
+        self.advmon_interleaved_scan()
 
     def run_once(self,
                  host,
                  num_iterations=1,
+                 peer_required=True,
                  btpeer_args=[],
                  test_name=None,
-                 flag='Quick Sanity'):
+                 flag='Quick Health'):
         """Run the batch of Bluetooth Advertisement Monitor API tests.
 
         @param host: the DUT, usually a chromebook.
@@ -85,7 +91,7 @@ class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
 
         # Initialize and run the test batch or the requested specific test.
         self.quick_test_init(host,
-                             use_btpeer=True,
+                             use_btpeer=peer_required,
                              flag=flag,
                              btpeer_args=btpeer_args)
         self.advmon_batch_run(num_iterations, test_name)

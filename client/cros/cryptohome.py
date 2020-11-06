@@ -1,11 +1,19 @@
+# Lint as: python2, python3
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import dbus, gobject, logging, os, random, re, shutil, string, sys, time
 from dbus.mainloop.glib import DBusGMainLoop
+from six.moves import map
 
-import common, constants
+import common
+
+from autotest_lib.client.cros import constants
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros.cros_disks import DBusClient
@@ -539,7 +547,7 @@ def crash_cryptohomed():
     pid = __run_cmd('pgrep cryptohomed')
     try:
         pid = int(pid)
-    except ValueError, e:  # empty or invalid string
+    except ValueError as e:  # empty or invalid string
         raise error.TestError('Cryptohomed was not running')
     utils.system('kill -ABRT %d' % pid)
     # CONT just in case cryptohomed had a spurious STOP.
@@ -665,7 +673,7 @@ class CryptohomeProxy(DBusClient):
     def __call(self, method, *args):
         try:
             return method(*args, timeout=180)
-        except dbus.exceptions.DBusException, e:
+        except dbus.exceptions.DBusException as e:
             if e.get_dbus_name() == 'org.freedesktop.DBus.Error.NoReply':
                 logging.error('Cryptohome is not responding. Sending ABRT')
                 crash_cryptohomed()
@@ -684,7 +692,7 @@ class CryptohomeProxy(DBusClient):
       except utils.TimeoutError:
           return {}
       for k in data.keys():
-          if not result.has_key(k) or result[k] != data[k]:
+          if k not in result or result[k] != data[k]:
             return {}
       return result
 
@@ -705,14 +713,14 @@ class CryptohomeProxy(DBusClient):
                     self.ASYNC_CALL_STATUS_SIGNAL, {'async_id' : out}),
                 timeout=180,
                 desc='matching %s signal' % self.ASYNC_CALL_STATUS_SIGNAL)
-        except utils.TimeoutError, e:
+        except utils.TimeoutError as e:
             logging.error('Cryptohome timed out. Sending ABRT.')
             crash_cryptohomed()
             raise ChromiumOSError('cryptohomed aborted. Check crashes!')
         return result
 
 
-    def mount(self, user, password, create=False, async=True, key_label='bar'):
+    def mount(self, user, password, create=False, key_label='bar'):
         """Mounts a cryptohome.
 
         Returns True if the mount succeeds or False otherwise.
@@ -764,7 +772,7 @@ class CryptohomeProxy(DBusClient):
         utils.require_mountpoint(system_path(user))
 
 
-    def remove(self, user, async=True):
+    def remove(self, user):
         """Removes a users cryptohome.
 
         Returns True if the operation succeeds or False otherwise.

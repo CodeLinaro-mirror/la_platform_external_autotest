@@ -49,13 +49,14 @@ CONFIG['CTS_MAX_RETRIES'] = {}
 # Modules that run very long are encoded here.
 CONFIG['CTS_TIMEOUT_DEFAULT'] = 0.2
 CONFIG['CTS_TIMEOUT'] = {
-    'GtsExoPlayerTestCases': 1.5,
-    'GtsGmscoreHostTestCases': 1.0,
-    'GtsMediaTestCases': 4,
-    'GtsYouTubeTestCases': 1.0,
-    _ALL: 24,
-    _COLLECT: 0.5,
-    _PUBLIC_COLLECT: 0.5,
+        'GtsExoPlayerTestCases': 1.5,
+        'GtsGmscoreHostTestCases': 1.0,
+        'GtsMediaTestCases': 4,
+        'GtsNetworkWatchlistTestCases': 1.0,
+        'GtsYouTubeTestCases': 1.0,
+        _ALL: 24,
+        _COLLECT: 0.5,
+        _PUBLIC_COLLECT: 0.5,
 }
 
 # Any test that runs as part as blocking BVT needs to be stable and fast. For
@@ -154,4 +155,3 @@ from generate_controlfiles_common import main
 
 if __name__ == '__main__':
     main(CONFIG)
-

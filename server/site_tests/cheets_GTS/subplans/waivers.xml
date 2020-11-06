@@ -23,4 +23,5 @@
   <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testL3With360P30" />
   <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testL3With480P30" />
   <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testL3With480P30ProfileMainLevel30" />
+  <Entry include="GtsNetworkWatchlistTestCases com.google.android.watchlist.gts.NetworkWatchlistTest#testNetworkWatchlistReports_visitWikipedia" />
 </SubPlan>

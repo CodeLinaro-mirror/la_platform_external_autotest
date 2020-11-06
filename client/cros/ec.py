@@ -1,9 +1,15 @@
+# Lint as: python2, python3
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import logging
 import os
 import re
+from six.moves import range
 import time
 
 from autotest_lib.client.bin import utils
@@ -518,7 +524,7 @@ class EC_USBPD(EC_Common):
         if (self.get_num_ports() == 0):
             raise error.TestNAError("Device has no USB-PD ports")
 
-        for i in xrange(self._num_ports):
+        for i in range(self._num_ports):
             self.ports.append(EC_USBPD_Port(i))
 
     def get_num_ports(self):

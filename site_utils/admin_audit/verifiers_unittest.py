@@ -27,7 +27,7 @@ class StubStorageStateValidator(object):
     def get_type(self):
         return "some_type"
 
-    def get_state(self):
+    def get_state(self, run_badblocks=None):
         return storage.STORAGE_STATE_WARNING
 
 

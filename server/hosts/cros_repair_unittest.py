@@ -28,12 +28,14 @@ CROS_VERIFY_DAG = (
         (cros_repair.WritableVerifier, 'writable', ('ssh', )),
         (cros_repair.TPMStatusVerifier, 'tpm', ('ssh', )),
         (cros_repair.UpdateSuccessVerifier, 'good_provision', ('ssh', )),
+        (cros_repair.FirmwareTpmVerifier, 'faft_tpm', ('ssh', )),
         (cros_firmware.FirmwareStatusVerifier, 'fwstatus', ('ssh', )),
         (cros_firmware.FirmwareVersionVerifier, 'rwfw', ('ssh', )),
         (cros_repair.PythonVerifier, 'python', ('ssh', )),
         (repair_utils.LegacyHostVerifier, 'cros', ('ssh', )),
         (cros_repair.CrosVerisionVerifier, 'cros_version_label', ('ssh', )),
         (cros_repair.StopStartUIVerifier, 'stop_start_ui', ('ssh', )),
+        (cros_repair.DUTStorageVerifier, 'storage', ('ssh', )),
 )
 
 CROS_REPAIR_ACTIONS = (
@@ -74,7 +76,7 @@ CROS_REPAIR_ACTIONS = (
           'dev_default_boot')),
         (cros_repair.ServoInstallRepair, 'usb', ('usb_drive', ),
          ('ssh', 'writable', 'stop_start_ui', 'tpm', 'good_provision', 'ext4',
-          'power', 'rwfw', 'python', 'cros', 'dev_default_boot')),
+          'power', 'rwfw', 'python', 'cros', 'dev_default_boot', 'faft_tpm')),
         (cros_firmware.GeneralFirmwareRepair, 'general_firmware',
          ('usb_drive', ), ('ssh', )),
 )
@@ -104,6 +106,7 @@ JETSTREAM_VERIFY_DAG = (
         (cros_repair.WritableVerifier, 'writable', ('ssh', )),
         (cros_repair.TPMStatusVerifier, 'tpm', ('ssh', )),
         (cros_repair.UpdateSuccessVerifier, 'good_provision', ('ssh', )),
+        (cros_repair.FirmwareTpmVerifier, 'faft_tpm', ('ssh', )),
         (cros_firmware.FirmwareStatusVerifier, 'fwstatus', ('ssh', )),
         (cros_firmware.FirmwareVersionVerifier, 'rwfw', ('ssh', )),
         (cros_repair.PythonVerifier, 'python', ('ssh', )),
@@ -153,10 +156,22 @@ JETSTREAM_REPAIR_ACTIONS = (
          ('tpm', 'good_provision', 'ext4', 'power', 'rwfw', 'python', 'cros',
           'dev_default_boot', 'jetstream_tpm', 'jetstream_attestation',
           'jetstream_services')),
-        (cros_repair.ServoInstallRepair, 'usb', ('usb_drive', ),
-         ('ssh', 'writable', 'tpm', 'good_provision', 'ext4', 'power', 'rwfw',
-          'python', 'cros', 'dev_default_boot', 'jetstream_tpm',
-          'jetstream_attestation', 'jetstream_services')),
+        (cros_repair.ServoInstallRepair, 'usb', ('usb_drive', ), (
+                'ssh',
+                'writable',
+                'tpm',
+                'good_provision',
+                'ext4',
+                'power',
+                'rwfw',
+                'python',
+                'cros',
+                'dev_default_boot',
+                'jetstream_tpm',
+                'jetstream_attestation',
+                'jetstream_services',
+                'faft_tpm',
+        )),
 )
 
 CRYPTOHOME_STATUS_OWNED = """{

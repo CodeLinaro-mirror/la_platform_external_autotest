@@ -27,29 +27,41 @@ class power_MeetClient(power_test.power_Test):
     video_url = 'http://meet.google.com'
     doc_url = 'http://doc.new'
 
-    def initialize(self, seconds_period=5., pdash_note='',
+    def initialize(self,
+                   seconds_period=5.,
+                   pdash_note='',
                    force_discharge=False):
         """initialize method."""
         super(power_MeetClient, self).initialize(
                 seconds_period=seconds_period,
                 pdash_note=pdash_note,
                 force_discharge=force_discharge)
-        self._username = power_load_util.get_meet_username()
-        self._password = power_load_util.get_meet_password()
 
-    def run_once(self, meet_code, duration=180, layout='Tiled'):
+    def run_once(self,
+                 meet_code,
+                 duration=180,
+                 layout='Tiled',
+                 username=None,
+                 password=None):
         """run_once method.
 
         @param meet_code: Meet code generated in power_MeetCall.
         @param duration: duration in seconds.
         @param layout: string of meet layout to use.
+        @param username: Google account to use.
+        @param password: password for Google account.
         """
+        if not username and not password:
+            username = power_load_util.get_meet_username()
+            password = power_load_util.get_meet_password()
+        if not username or not password:
+            raise error.TestFail('Need to supply both username and password.')
         extra_browser_args = self.get_extra_browser_args_for_camera_test()
         with keyboard.Keyboard() as keys,\
              chrome.Chrome(init_network_controller=True,
                            gaia_login=True,
-                           username=self._username,
-                           password=self._password,
+                           username=username,
+                           password=password,
                            extra_browser_args=extra_browser_args,
                            autotest_ext=True) as cr:
 
@@ -111,6 +123,11 @@ class power_MeetClient(power_test.power_Test):
             end_time = self._start_time + duration
 
             # Collect stat
+            if not tab.EvaluateJavaScript('window.hasOwnProperty("realtime")'):
+                logging.info('Account %s is not in allowlist for MediaInfoAPI',
+                             username)
+                return
+
             meet_data = tab.EvaluateJavaScript(
                 'realtime.media.getMediaInfoDataPoints()')
 

@@ -4,7 +4,7 @@
 # found in the LICENSE file.
 
 """
-This class provides wrapper functions for Bluetooth quick sanity test
+This class provides wrapper functions for Bluetooth quick health test
 batches or packages
 """
 
@@ -27,7 +27,7 @@ from autotest_lib.client.bin import utils
 from six.moves import range
 
 class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
-    """This class provide wrapper function for Bluetooth quick sanity test
+    """This class provide wrapper function for Bluetooth quick health test
     batches or packages.
     The Bluetooth quick test infrastructure provides a way to quickly run a set
     of tests. As for today, auto-test ramp up time per test is about 90-120
@@ -101,61 +101,43 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
         logging.info('=======================================================')
 
 
-    def quick_test_init(self, host, use_btpeer=True, use_chameleon=False,
-                        flag='Quick Sanity', btpeer_args=[],
+    def quick_test_init(self,
+                        host,
+                        use_btpeer=True,
+                        flag='Quick Health',
+                        btpeer_args=[],
                         start_browser=False):
         """Inits the test batch"""
         self.host = host
         self.start_browser = start_browser
         self.in_lab = site_utils.host_in_lab(self.host.hostname)
+        self.use_btpeer = use_btpeer
         #factory can not be declared as local variable, otherwise
         #factory._proxy.__del__ will be invoked, which shutdown the xmlrpc
         # server, which log out the user.
 
         self.factory = remote_facade_factory.RemoteFacadeFactory(
-                host, no_chrome=not self.start_browser, disable_arc=True)
-        self.bluetooth_facade = self.factory.create_bluetooth_hid_facade()
+                host,
+                no_chrome=not self.start_browser,
+                disable_arc=True,
+                retry_rpc=False)
+        try:
+            self.bluetooth_facade = self.factory.create_bluetooth_facade()
+        except Exception as e:
+            logging.error('Exception %s while creating bluetooth_facade',
+                          str(e))
+            raise error.TestFail('Unable to create bluetooth_facade')
 
-        # Common list to track old/new Bluetooth peers
-        # Adding chameleon to btpeer_list causes issue in cros_labels
-        self.host.peer_list = []
 
-        # Keep use_chameleon for any unmodified tests
-        # TODO(b:149637050) Remove use_chameleon
-        self.use_btpeer = use_btpeer or use_chameleon
         if self.use_btpeer:
-            self.host.initialize_btpeer(btpeer_args=btpeer_args)
             self.input_facade = self.factory.create_input_facade()
-            self.check_btpeer()
 
-            #
-            # During the transition period in the lab, Bluetooth peer can be
-            # name <hostname>-btpeer[1-4] or <hostname>-chameleon OR can be
-            # specified on cmd line using btpeer_host or chameleon_host.
-            #
-            # TODO(b:149637050) Cleanup this code after M83 is in stable
-            #
+            self.host.initialize_btpeer(btpeer_args=btpeer_args)
             logging.info('%s Bluetooth peers found',
                          len(self.host.btpeer_list))
-
-            self.host.peer_list = self.host.btpeer_list[:]
-
-            if (self.host._chameleon_host is not None and
-                self.host.chameleon is not None):
-                logging.info('Chameleon Bluetooth peer found')
-                # If there is a peer named <hostname>-chameleon, append to the
-                # peer list
-                self.host.peer_list.append(self.host.chameleon)
-                self.host.btpeer = self.host.peer_list[0]
-            else:
-                logging.info('chameleon Btpeer not found')
-
-            logging.info('Total of %d peers. Peer list %s',
-                         len(self.host.peer_list),
-                         self.host.peer_list)
             logging.info('labels: %s', self.host.get_labels())
 
-            if len(self.host.peer_list) == 0:
+            if len(self.host.btpeer_list) == 0:
                 raise error.TestFail('Unable to find a Bluetooth peer')
 
             # Check the chameleond version on the peer and update if necessary
@@ -168,8 +150,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
             # Query connected devices on our btpeer at init time
             self.available_devices = self.list_devices_available()
 
-
-            for btpeer in self.host.peer_list:
+            for btpeer in self.host.btpeer_list:
                 btpeer.register_raspPi_log(self.outputdir)
 
             self.btpeer_group = dict()
@@ -238,7 +219,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                              in the following test.
            @param flags: list of string to describe who should run the
                          test. The string could be one of the following:
-                         ['AVL', 'Quick Sanity', 'All'].
+                         ['AVL', 'Quick Health', 'All'].
            @param model_testNA: If the current platform is in this list,
                                 failures are emitted as TestNAError.
            @param model_testWarn: If the current platform is in this list,
@@ -281,12 +262,12 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
 
                 # Check if there are enough peers
                 total_num_devices = sum(devices.values()) + shared_devices_count
-                if total_num_devices > len(self.host.peer_list):
+                if total_num_devices > len(self.host.btpeer_list):
                     logging.info('SKIPPING TEST %s', test_name)
-                    logging.info('Number of devices required %s is greater'
-                                 'than number of peers available %d',
-                                 total_num_devices,
-                                 len(self.host.peer_list))
+                    logging.info(
+                            'Number of devices required %s is greater'
+                            'than number of peers available %d',
+                            total_num_devices, len(self.host.btpeer_list))
                     self._print_delimiter()
                     return False
                 return True
@@ -333,6 +314,9 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                                 test_method.__name__, str(e)))
                 except error.TestNAError as e:
                     self.fails.append('[--- SKIPPED: {}]'.format(str(e)))
+                except Exception as e:
+                    self.fails.append('[--- unknown error {} ({})]'.format(
+                            test_method.__name__, str(e)))
 
                 self.quick_test_test_end(model_testNA=model_testNA,
                                          model_testWarn=model_testWarn)
@@ -358,7 +342,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
         self.initialize()
         # Start and peer HID devices
         self.start_peers(devices)
-        self.shared_peers = self.host.peer_list[-shared_devices_count:]
+        self.shared_peers = self.host.btpeer_list[-shared_devices_count:]
 
         if test_name is not None:
             time.sleep(self.TEST_SLEEP_SECS)
