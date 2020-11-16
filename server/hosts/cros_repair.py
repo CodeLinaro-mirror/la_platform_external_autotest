@@ -38,8 +38,6 @@ except ImportError:
 
 from chromite.lib import timeout_util
 
-MIN_BATTERY_LEVEL = 80.0
-
 DEFAULT_SERVO_RESET_TRIGGER = (
         'ssh',
         'stop_start_ui',
@@ -142,7 +140,7 @@ class ACPowerVerifier(hosts.Verifier):
 
             # Collect info to determine which battery level is better to call
             # as MIN_BATTERY_LEVEL for DUTs in the lab.
-            if battery_level < MIN_BATTERY_LEVEL:
+            if battery_level < cros_constants.MIN_BATTERY_LEVEL:
                 level_by_10 = int(math.floor(battery_level / 10.0)) * 10
                 metrics_data = {
                         'host': host.hostname,
@@ -175,8 +173,8 @@ class ACPowerVerifier(hosts.Verifier):
                     'chromeos/autotest/repair/chargecontrol_fixed'
                 ).increment(fields=metrics_data)
 
-            if (battery_level < MIN_BATTERY_LEVEL and
-                charging_state == self.BATTERY_DISCHARGING):
+            if (battery_level < cros_constants.MIN_BATTERY_LEVEL
+                        and charging_state == self.BATTERY_DISCHARGING):
                 # TODO(@xianuowang) remove metrics here once we have device
                 # health profile to collect history of DUT's metrics.
                 metrics_data = {'host': host.hostname,
@@ -184,9 +182,10 @@ class ACPowerVerifier(hosts.Verifier):
                 metrics.Counter(
                     'chromeos/autotest/repair/verifier/power').increment(
                         fields=metrics_data)
-                raise hosts.AutoservVerifyError('Battery is in discharging'
-                        ' state and current level is less than %s%%' %
-                        MIN_BATTERY_LEVEL)
+                raise hosts.AutoservVerifyError(
+                        'Battery is in discharging state and current level'
+                        ' is less than %s%%' %
+                        cros_constants.MIN_BATTERY_LEVEL)
         except (KeyError, ValueError):
             logging.warning('Cannot determine battery state -'
                             ' skipping check.')

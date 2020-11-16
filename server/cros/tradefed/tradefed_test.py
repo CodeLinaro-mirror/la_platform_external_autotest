@@ -32,7 +32,6 @@ import urlparse
 
 from autotest_lib.client.bin import utils as client_utils
 from autotest_lib.client.common_lib import error
-from autotest_lib.client.common_lib.cros import dev_server
 from autotest_lib.server import test
 from autotest_lib.server import utils
 from autotest_lib.server.cros.tradefed import cts_expected_failure_parser
@@ -787,6 +786,7 @@ class TradefedTest(test.test):
         match = re.search(r'Saved log to /tmp/(tradefed_global_log_.*\.txt)',
                           result.stdout)
         if not match:
+            logging.debug(result.stdout)
             logging.error('no tradefed_global_log file is found')
             return
 

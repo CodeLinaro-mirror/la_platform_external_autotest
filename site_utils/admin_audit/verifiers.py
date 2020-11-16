@@ -118,24 +118,23 @@ class VerifyServoUsb(base._BaseServoVerifier):
         if not usb:
             self._set_state(constants.HW_STATE_NOT_DETECTED)
             return
+        # basic readonly check
 
-        servo = self.get_host().get_servo()
+        # path to USB if DUT is sshable
+        logging.info('Starting verification of USB drive...')
+        dut_usb = None
+        if self.host_is_up():
+            dut_usb = self._usb_path_on_dut()
         state = None
         try:
-            # The USB will be format during checking to the bad blocks.
-            command = 'badblocks -sw -e 1 -t 0xff %s' % usb
-            logging.info('Running command: %s', command)
-            # The response is the list of bad block on USB.
-            # Extended time for 2 hour to run USB verification.
-            # TODO (otabek@) (b:153661014#comment2) bring F3 to run
-            # check faster if badblocks cannot finish in 2 hours.
-            result = servo.system_output(command, timeout=7200)
-            logging.info("Check result: '%s'", result)
-            if result:
-                # So has result is Bad and empty is Good.
-                state = constants.HW_STATE_NEED_REPLACEMENT
+            if dut_usb:
+                logging.info('Try run check on DUT side.')
+                state = self._run_check_on_host(self._dut_host, dut_usb)
             else:
-                state = constants.HW_STATE_NORMAL
+                logging.info('Try run check on ServoHost side.')
+                servo = self.get_host().get_servo()
+                servo_usb = servo.probe_host_usb_dev()
+                state = self._run_check_on_host(self.get_host(), servo_usb)
         except Exception as e:
             if 'Timeout encountered:' in str(e):
                 logging.info('Timeout during running action')
@@ -149,19 +148,57 @@ class VerifyServoUsb(base._BaseServoVerifier):
             logging.debug(str(e))
 
         self._set_state(state)
+        logging.info('Finished verification of USB drive.')
 
+        self._install_stable_image()
+
+    def _usb_path_on_dut(self):
+        """Return path to the USB detected on DUT side."""
+        servo = self.get_host().get_servo()
+        servo.switch_usbkey('dut')
+        result = self._dut_host.run('ls /dev/sd[a-z]')
+        for path in result.stdout.splitlines():
+            cmd = ('. /usr/share/misc/chromeos-common.sh; get_device_type %s' %
+                   path)
+            check_run = self._dut_host.run(cmd, timeout=30, ignore_status=True)
+            if check_run.stdout.strip() == 'USB':
+                logging.info('USB drive detected on DUT side as %s', path)
+                return path
+        return None
+
+    def _run_check_on_host(self, host, usb):
+        """Run badblocks on the provided host.
+
+        @params host:   Host where USB drive mounted
+        @params usb:    Path to USB drive. (e.g. /dev/sda)
+        """
+        command = 'badblocks -w -e 5 -b 4096 -t random %s' % usb
+        logging.info('Running command: %s', command)
+        # The response is the list of bad block on USB.
+        # Extended time for 2 hour to run USB verification.
+        # TODO (otabek@) (b:153661014#comment2) bring F3 to run
+        # check faster if badblocks cannot finish in 2 hours.
+        result = host.run(command, timeout=7200).stdout.strip()
+        logging.info("Check result: '%s'", result)
+        if result:
+            # So has result is Bad and empty is Good.
+            return constants.HW_STATE_NEED_REPLACEMENT
+        return constants.HW_STATE_NORMAL
+
+    def _install_stable_image(self):
+        """Install stable image to the USB drive."""
         # install fresh image to the USB because badblocks formats it
         # https://crbug.com/1091406
         try:
             logging.debug('Started to install test image to USB-drive')
             _, image_path = self._dut_host.stage_image_for_servo()
-            servo.image_to_servo_usb(image_path, power_off_dut=False)
+            self.get_host().get_servo().image_to_servo_usb(image_path,
+                                                           power_off_dut=False)
             logging.debug('Finished installing test image to USB-drive')
         except:
             # ignore any error which happined during install image
             # it not relative to the main goal
-            logging.debug('Fail to install test image to USB-drive')
-            pass
+            logging.info('Fail to install test image to USB-drive')
 
     def _set_state(self, state):
         if state:

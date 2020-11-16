@@ -1,11 +1,18 @@
+# Lint as: python2, python3
 # Copyright 2019 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import collections
 import logging
 import operator
 import re
+from six.moves import map
+from six.moves import range
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils
@@ -362,9 +369,9 @@ class IwRunner(object):
                     elif center_chan_two != '0':
                         vht = WIDTH_VHT80_80
             if line.startswith('WPA'):
-               supported_securities.append(SECURITY_WPA)
+                supported_securities.append(SECURITY_WPA)
             if line.startswith('RSN'):
-               supported_securities.append(SECURITY_WPA2)
+                supported_securities.append(SECURITY_WPA2)
         security = self.determine_security(supported_securities)
         bss_list.append(IwBss(bss, frequency, ssid, security,
                               vht if vht else ht, signal))
@@ -881,7 +888,7 @@ class IwRunner(object):
             freq_param = ' freq %s' % ' '.join(map(str, frequencies))
         ssid_param = ''
         if ssids:
-           ssid_param = ' ssid "%s"' % '" "'.join(ssids)
+            ssid_param = ' ssid "%s"' % '" "'.join(ssids)
 
         iw_command = '%s dev %s scan%s%s' % (self._command_iw,
                 interface, freq_param, ssid_param)
@@ -1031,9 +1038,8 @@ class IwRunner(object):
 
         # get all IWBSSes from the scan that match any of the desired
         # ssids or bsses passed in
-        matching_iwbsses = filter(
-                lambda iwbss: iwbss.ssid in ssids or iwbss.bss in bsses,
-                scan_results)
+        matching_iwbsses = [iwbss for iwbss in scan_results
+                if iwbss.ssid in ssids or iwbss.bss in bsses]
         if wait_for_all:
             found_bsses = [iwbss.bss for iwbss in matching_iwbsses]
             found_ssids = [iwbss.ssid for iwbss in matching_iwbsses]

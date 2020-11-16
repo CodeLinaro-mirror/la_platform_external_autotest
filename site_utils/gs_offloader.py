@@ -419,19 +419,10 @@ def _upload_cts_testresult(dir_entry, multiprocessing):
                             (gts_v2_path, CTS_V2_RESULT_PATTERN)]:
             for path in glob.glob(result_path):
                 try:
-                    # CTS results from bvt-arc and bvt-perbuild suites need
-                    # to be only uploaded to APFE from its designated gs bucket
-                    # for early EDI entries in APFE. These results need to
-                    # copied only into APFE bucket. Copying to results bucket
-                    # is not required.
-                    if 'bvt-arc' in path or 'bvt-perbuild' in path:
-                        _upload_files(host, path, result_pattern,
-                                      multiprocessing,
-                                      None,
-                                      DEFAULT_CTS_BVT_APFE_GSURI)
-                        return
-                    # Non-bvt CTS results need to be uploaded to standard gs
-                    # buckets.
+                    # Treat BVT and non-BVT CTS test results same, offload them
+                    # to APFE and result buckets. More details in b/172869794.
+                    # We will make this more structured when moving to
+                    # synchronous offloading.
                     _upload_files(host, path, result_pattern,
                                   multiprocessing,
                                   DEFAULT_CTS_RESULTS_GSURI,

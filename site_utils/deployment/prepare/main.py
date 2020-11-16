@@ -18,7 +18,9 @@ import sys
 
 import common
 from autotest_lib.client.common_lib import autotest_enum
+from autotest_lib.client.common_lib import logging_manager
 from autotest_lib.server import afe_utils
+from autotest_lib.server import server_logging_config
 from autotest_lib.server.hosts import file_store
 from autotest_lib.site_utils.deployment.prepare import dut as preparedut
 from autotest_lib.server.hosts import factory
@@ -36,6 +38,8 @@ RETURN_CODES = autotest_enum.AutotestEnum(
         'OTHER_FAILURES',
 )
 
+_SERVO_UART_LOGS = 'servo_uart'
+
 
 class DutPreparationError(Exception):
     """Generic error raised during DUT preparation."""
@@ -44,8 +48,11 @@ class DutPreparationError(Exception):
 def main():
     """Tool to (re)prepare a DUT for lab deployment."""
     opts = _parse_args()
-    _configure_logging('prepare_dut', os.path.join(opts.results_dir,
-                                                   _LOG_FILE))
+
+    # Create logging setting
+    logging_manager.configure_logging(
+            server_logging_config.ServerLoggingConfig(),
+            results_dir=opts.results_dir)
 
     try:
         host_info = _read_store(opts.host_info_file)
@@ -120,10 +127,6 @@ def main():
     return RETURN_CODES.OK
 
 
-_LOG_FILE = 'prepare_dut.log'
-_DUT_LOGS_DIR = 'dut_logs'
-
-
 def _parse_args():
     parser = argparse.ArgumentParser(
             description='Prepare / validate DUT for lab deployment.')
@@ -166,48 +169,6 @@ def _parse_args():
     return parser.parse_args()
 
 
-def _configure_logging(name, tee_file):
-    """Configure logging globally.
-
-    @param name: Name to prepend to log messages.
-                 This should be the name of the program.
-    @param tee_file: File to tee logs to, in addition to stderr.
-    """
-    logging.config.dictConfig({
-        'version': 1,
-        'formatters': {
-            'stderr': {
-                'format': ('{name}: '
-                           '%(asctime)s:%(levelname)s'
-                           ':%(module)s:%(funcName)s:%(lineno)d'
-                           ': %(message)s'
-                           .format(name=name)),
-            },
-            'tee_file': {
-                'format': ('%(asctime)s:%(levelname)s'
-                           ':%(module)s:%(funcName)s:%(lineno)d'
-                           ': %(message)s'),
-            },
-        },
-        'handlers': {
-            'stderr': {
-                'class': 'logging.StreamHandler',
-                'formatter': 'stderr',
-            },
-            'tee_file': {
-                'class': 'logging.FileHandler',
-                'formatter': 'tee_file',
-                'filename': tee_file,
-            },
-        },
-        'root': {
-            'level': 'DEBUG',
-            'handlers': ['stderr', 'tee_file'],
-        },
-        'disable_existing_loggers': False,
-    })
-
-
 def _read_store(path):
     """Read a HostInfo from a file at path."""
     store = file_store.FileStore(path)
@@ -239,7 +200,7 @@ def create_host(hostname, host_info, results_dir):
         if 'servo_port' not in info.attributes:
             raise DutPreparationError('No servo_port in DUT attributes')
 
-        dut_logs_dir = os.path.join(results_dir, _DUT_LOGS_DIR)
+        dut_logs_dir = os.path.join(results_dir, _SERVO_UART_LOGS)
         try:
             os.makedirs(dut_logs_dir)
         except OSError as e:
@@ -249,6 +210,7 @@ def create_host(hostname, host_info, results_dir):
     return factory.create_target_host(hostname,
                                       host_info_store=host_info,
                                       try_lab_servo=need_servo,
+                                      try_servo_repair=need_servo,
                                       servo_uart_logs_dir=dut_logs_dir)
 
 

@@ -103,7 +103,7 @@ class bluetooth_AdapterAdvHealth(BluetoothAdapterQuickTests,
     def run_once(self,
                  host,
                  num_iterations=1,
-                 btpeer_args=[],
+                 args_dict=None,
                  test_name=None,
                  flag='Quick Health',
                  peer_required=True):
@@ -116,6 +116,6 @@ class bluetooth_AdapterAdvHealth(BluetoothAdapterQuickTests,
         self.quick_test_init(host,
                              use_btpeer=peer_required,
                              flag=flag,
-                             btpeer_args=btpeer_args)
+                             args_dict=args_dict)
         self.adv_health_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

@@ -87,8 +87,7 @@ class RemoteFacadeProxy(object):
                  host,
                  no_chrome,
                  extra_browser_args=None,
-                 disable_arc=False,
-                 retry_rpc=True):
+                 disable_arc=False):
         """Construct a RemoteFacadeProxy.
 
         @param host: Host object representing a remote host.
@@ -96,7 +95,6 @@ class RemoteFacadeProxy(object):
         @param extra_browser_args: A list containing extra browser args passed
                                    to Chrome in addition to default ones.
         @param disable_arc: True to disable ARC++.
-        @param retry_rpc: True to retry rpc calls in call_proxy.
 
         """
         self._client = host
@@ -183,6 +181,9 @@ class RemoteFacadeProxy(object):
 
             return value
 
+        # Pop the no_retry flag (since rpcs won't expect it)
+        no_retry = dargs.pop('__no_retry', False)
+
         try:
             # TODO(ihf): This logs all traffic from server to client. Make
             # the spew optional.
@@ -203,12 +204,15 @@ class RemoteFacadeProxy(object):
                             reconnect=True, retry=False,
                             extra_browser_args=self._extra_browser_args,
                             disable_arc=self._disable_arc)
-                # Try again.
-                if self.retry_rpc:
+
+                # Try again unless we explicitly disable retry for this rpc.
+                # If we're not retrying, re-raise the exception
+                if no_retry:
+                    logging.warning('Not retrying RPC %s.', rpc)
+                    raise
+                else:
                     logging.warning('Retrying RPC %s.', rpc)
                     return call_rpc_with_log()
-                else:
-                    raise
         except:
             # Process the log if any. It is helpful for debug.
             process_log()
@@ -333,8 +337,7 @@ class RemoteFacadeFactory(object):
                  install_autotest=True,
                  results_dir=None,
                  extra_browser_args=None,
-                 disable_arc=False,
-                 retry_rpc=True):
+                 disable_arc=False):
         """Construct a RemoteFacadeFactory.
 
         @param host: Host object representing a remote host.
@@ -346,7 +349,6 @@ class RemoteFacadeFactory(object):
         @param disable_arc: True to disable ARC++.
         If it is not None, we will get multimedia init log to the results_dir.
 
-        @param retry_rpc: True to retry rpc calls in call_proxy.
         """
         self._client = host
         if install_autotest:
@@ -359,8 +361,7 @@ class RemoteFacadeFactory(object):
                     host=self._client,
                     no_chrome=no_chrome,
                     extra_browser_args=extra_browser_args,
-                    disable_arc=disable_arc,
-                    retry_rpc=retry_rpc)
+                    disable_arc=disable_arc)
         finally:
             if results_dir:
                 host.get_file(constants.MULTIMEDIA_XMLRPC_SERVER_LOG_FILE,

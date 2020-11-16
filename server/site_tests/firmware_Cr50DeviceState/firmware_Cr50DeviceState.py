@@ -107,8 +107,8 @@ class firmware_Cr50DeviceState(Cr50Test):
     MEM_SLEEP_S0IX = 'echo %s > %s ; sleep 1' % ('s2idle', MEM_SLEEP_PATH)
     MEM_SLEEP_S3 = 'echo %s > %s ; sleep 1' % ('deep', MEM_SLEEP_PATH)
     POWER_STATE_PATH = '/sys/power/state'
-    POWER_STATE_S0IX = 'echo %s > %s &' % ('freeze', POWER_STATE_PATH)
-    POWER_STATE_S3 = 'echo %s > %s &' % ('mem', POWER_STATE_PATH)
+    POWER_STATE_S0IX = 'echo %s > %s' % ('freeze', POWER_STATE_PATH)
+    POWER_STATE_S3 = 'echo %s > %s' % ('mem', POWER_STATE_PATH)
 
 
     def initialize(self, host, cmdline_args, full_args):
@@ -395,16 +395,19 @@ class firmware_Cr50DeviceState(Cr50Test):
 
     def enter_state(self, state):
         """Get the command to enter the power state"""
+        block = True
         if state == 'S0':
             self.trigger_s0()
         else:
             if state == 'S0ix':
                 full_command = self._s0ix_cmds
+                block = False
             elif state == 'S3':
                 full_command = self._s3_cmds
+                block = False
             elif state == 'G3':
                 full_command = 'poweroff'
-            self.faft_client.system.run_shell_command(full_command)
+            self.faft_client.system.run_shell_command(full_command, block)
 
         time.sleep(self.SHORT_WAIT);
         # check state transition

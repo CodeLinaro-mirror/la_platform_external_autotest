@@ -1212,8 +1212,9 @@ class FirmwareTest(test.test):
 
     def suspend(self):
         """Suspends the DUT."""
-        cmd = '(sleep %d; powerd_dbus_suspend) &' % self.EC_SUSPEND_DELAY
-        self.faft_client.system.run_shell_command(cmd)
+        cmd = 'sleep %d; powerd_dbus_suspend' % self.EC_SUSPEND_DELAY
+        block = False
+        self.faft_client.system.run_shell_command(cmd, block)
         time.sleep(self.EC_SUSPEND_DELAY)
 
     def _record_faft_client_log(self):

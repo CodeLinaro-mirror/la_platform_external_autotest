@@ -161,6 +161,13 @@ class _WrapServoErrors(object):
         """
         return re.sub('^.*>:', '', xmlexc.faultString)
 
+    @staticmethod
+    def _log_exception(exc_type, exc_val, exc_tb):
+        """Log exception information"""
+        if exc_val is not None:
+            logging.debug(
+                    'Wrapped exception:', exc_info=(exc_type, exc_val, exc_tb))
+
     def __enter__(self):
         """Enter the context"""
         return self
@@ -168,12 +175,8 @@ class _WrapServoErrors(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Exit the context, handling the exception if there was one"""
         try:
-            if exc_val is not None:
-                logging.debug(
-                        'Wrapped exception:',
-                        exc_info=(exc_type, exc_val, exc_tb))
-
             if isinstance(exc_val, six.moves.http_client.BadStatusLine):
+                self._log_exception(exc_type, exc_val, exc_tb)
                 if exc_val.line in ('', "''"):
                     err = ServodEmptyResponse(self.description, exc_val.line)
                 else:
@@ -181,6 +184,7 @@ class _WrapServoErrors(object):
                 six.reraise(err.__class__, err, exc_tb)
 
             if isinstance(exc_val, seven.SOCKET_ERRORS):
+                self._log_exception(exc_type, exc_val, exc_tb)
                 err = ServodConnectionError(self.description, exc_val.args[0],
                                             exc_val.args[1], self.servo_name)
                 six.reraise(err.__class__, err, exc_tb)
@@ -191,6 +195,7 @@ class _WrapServoErrors(object):
                 unknown_ctrl = re.search(NO_CONTROL_RE, err_str)
                 if not unknown_ctrl:
                     # Log the full text for errors, except unavailable controls.
+                    self._log_exception(exc_type, exc_val, exc_tb)
                     logging.debug(err_msg)
                 if unknown_ctrl:
                     # The error message for unavailable controls is huge, since
@@ -546,6 +551,9 @@ class Servo(object):
     # large (>500MB) firmware archives taking longer than expected to
     # extract firmware on the lab host machines (b/149419503).
     EXTRACT_TIMEOUT_SECS = 180
+
+    # The VBUS voltage threshold used to detect if VBUS is supplied
+    VBUS_THRESHOLD = 3000.0
 
     def __init__(self, servo_host, servo_serial=None):
         """Sets up the servo communication infrastructure.
@@ -1790,3 +1798,16 @@ class Servo(object):
         self.set_nocheck('ec_uart_flush', 'off')
         self.set_nocheck('ec_uart_cmd', 'reboot')
         self.set_nocheck('ec_uart_flush', 'on')
+
+    def get_vbus_voltage(self):
+        """Get the voltage of VBUS'.
+
+        @returns The voltage of VBUS, if vbus_voltage is supported.
+                 None               , if vbus_voltage is not supported.
+        """
+        if not self.has_control('vbus_voltage'):
+            logging.debug('Servo does not have vbus_voltage control,'
+                          'unable to get vbus voltage')
+            return None
+
+        return self.get('vbus_voltage')

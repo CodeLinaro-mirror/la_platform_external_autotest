@@ -30,9 +30,6 @@ def run_TS(machine):
         target_plan=None,
         retry_manual_tests=True,
         use_jdk9=True,
-        # This module has a known waived abort bug (b/166052755). As long as the
-        # executed test count matches the known number, assume all tests ran.
-        executable_test_count=[3343, 4997, 6686],
         warn_on_test_retry=False,
         timeout=1800)
 

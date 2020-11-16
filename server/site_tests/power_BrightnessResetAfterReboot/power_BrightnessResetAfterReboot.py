@@ -33,10 +33,9 @@ class power_BrightnessResetAfterReboot(test.test):
         cmd = 'check_powerd_config --ambient_light_sensor'
         num_als_pref = int(host.run_output(cmd, ignore_status=True))
 
-        cmd = 'backlight_tool --get_ambient_light_path'
+        cmd = 'backlight_tool --get_ambient_light_lux'
         result = host.run(cmd, ignore_status=True)
         als_exists = not result.exit_status # 0 is cmd success.
-        als_path = result.stdout.rstrip()
 
         if num_als_pref and not als_exists:
             model = host.get_platform()
@@ -50,8 +49,7 @@ class power_BrightnessResetAfterReboot(test.test):
 
         initial_lux = -1
         if als_exists:
-            cmd = 'cat %s' % als_path
-            initial_lux = int(host.run_output(cmd))
+            initial_lux = int(result.stdout.rstrip())
             lux_domain = [initial_lux / 2, initial_lux * 2]
             brightness_range = \
                     [get_backlight(host, lux) for lux in lux_domain]

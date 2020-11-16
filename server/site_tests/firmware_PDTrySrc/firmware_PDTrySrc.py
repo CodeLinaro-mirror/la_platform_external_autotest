@@ -4,6 +4,7 @@
 
 import logging
 import random
+import time
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
@@ -25,6 +26,7 @@ class firmware_PDTrySrc(FirmwareTest):
     version = 1
     CONNECT_ITERATIONS = 20
     PD_DISCONNECT_TIME = 1
+    PD_STABLE_DELAY = 3
     SNK = 0
     SRC = 1
     TRYSRC_OFF_THRESHOLD = 15.0
@@ -66,6 +68,8 @@ class firmware_PDTrySrc(FirmwareTest):
                 elif pdtester_dev.is_src(state):
                     stats[self.SRC] += 1
                     logging.info('Power Role = SRC')
+                # Wait a bit before the next iteration, in case any PR_Swap
+                time.sleep(self.PD_STABLE_DELAY)
             except NotImplementedError:
                 raise error.TestFail('TrySRC disconnect requires PDTester')
         logging.info('SNK = %d: SRC = %d: Total = %d',

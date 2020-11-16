@@ -810,7 +810,7 @@ class FingerprintTest(test.test):
         # Zork cannot rebind cros-ec-uart after flashing, so an AP reboot is
         # needed to talk to FPMCU. See b/170213489.
         # We have to do this even if flashing failed.
-        if self._dut_needs_reboot:
+        if hasattr(self, '_dut_needs_reboot') and self._dut_needs_reboot:
             self.host.reboot()
             if self.fp_updater_is_enabled():
                 raise error.TestFail(

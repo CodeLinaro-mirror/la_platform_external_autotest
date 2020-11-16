@@ -16,8 +16,11 @@ class firmware_RecoveryCacheBootKeys(FirmwareTest):
     version = 1
     NEEDS_SERVO_USB = True
 
-    USED_CACHE_MSG = ('MRC: Hash comparison successful. '
-                      'Using data from RECOVERY_MRC_CACHE')
+    # Message in older mrc_cache driver code
+    USED_CACHE_MSG1 = ('MRC: Hash comparison successful. '
+                       'Using data from RECOVERY_MRC_CACHE')
+    # Message in newer mrc_cache driver code
+    USED_CACHE_MSG2 = ('MRC: Hash idx 0x100b comparison successful.')
     REBUILD_CACHE_MSG = "MRC: cache data 'RECOVERY_MRC_CACHE' needs update."
     RECOVERY_CACHE_SECTION = 'RECOVERY_MRC_CACHE'
     FIRMWARE_LOG_CMD = 'cbmem -1' + ' | grep ' + REBUILD_CACHE_MSG[:3]
@@ -72,8 +75,10 @@ class firmware_RecoveryCacheBootKeys(FirmwareTest):
         """
         logging.info('Checking if cache was used.')
 
-        return self.faft_client.system.run_shell_command_check_output(
-                self.FIRMWARE_LOG_CMD, self.USED_CACHE_MSG)
+        return (self.faft_client.system.run_shell_command_check_output(
+                self.FIRMWARE_LOG_CMD, self.USED_CACHE_MSG1)
+                or self.faft_client.system.run_shell_command_check_output(
+                        self.FIRMWARE_LOG_CMD, self.USED_CACHE_MSG2))
 
     def check_cache_rebuilt(self):
         """Checks the firmware log to ensure that the recovery cache was rebuilt

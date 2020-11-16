@@ -18,7 +18,7 @@ import logging
 import multiprocessing
 import os
 import re
-from socket import error as SocketError
+import socket
 import threading
 import time
 
@@ -576,9 +576,18 @@ def test_retry_and_log(test_method_or_retry_flag,
                             test_method.__name__, str(instance.results))
                     logging.error(fail_msg)
                     instance.fails.append(fail_msg)
-            # Do not catch TestError or TestNA since those are intended to skip
-            # out of the testcase entirely (and shouldn't indicate a single
-            # expression failed)
+            # Log TestError and TestNA and let the quicktest wrapper catch it.
+            # Those errors should skip out of the testcase entirely.
+            except error.TestNAError as e:
+                fail_msg = '[--- TESTNA {} ({})]'.format(
+                        test_method.__name__, str(e))
+                logging.error(fail_msg)
+                raise
+            except error.TestError as e:
+                fail_msg = '[--- ERROR {} ({})]'.format(
+                        test_method.__name__, str(e))
+                logging.error(fail_msg)
+                raise
             except error.TestFail as e:
                 fail_msg = '[--- failed {} ({})]'.format(
                         test_method.__name__, str(e))
@@ -834,7 +843,7 @@ class BluetoothAdapterTests(test.test):
         try:
             device.ResetStack()
 
-        except SocketError as e:
+        except socket.error as e:
             # Ignore conn reset, expected during stack reset
             if e.errno != errno.ECONNRESET:
                 raise
@@ -1029,10 +1038,7 @@ class BluetoothAdapterTests(test.test):
         if hasattr(self, 'input_facade'):
             del self.input_facade
         self.factory = remote_facade_factory.RemoteFacadeFactory(
-                self.host,
-                disable_arc=True,
-                no_chrome=not self.start_browser,
-                retry_rpc=False)
+                self.host, disable_arc=True, no_chrome=not self.start_browser)
         self.bluetooth_facade = self.factory.create_bluetooth_facade()
         self.input_facade = self.factory.create_input_facade()
 
@@ -1980,7 +1986,7 @@ class BluetoothAdapterTests(test.test):
     def _test_discover_by_device(self, device):
         return device.Discover(self.bluetooth_facade.address)
 
-    @test_retry_and_log(False)
+    @test_retry_and_log(False, messages_start=False, messages_stop=False)
     def test_discover_by_device(self, device):
         """Test that the device could discover the adapter address.
 
@@ -2017,7 +2023,7 @@ class BluetoothAdapterTests(test.test):
         }
         return any(self.results.values())
 
-    @test_retry_and_log(False)
+    @test_retry_and_log(False, messages_start=False, messages_stop=False)
     def test_discover_by_device_fails(self, device):
         """Test that the device could not discover the adapter address.
 
@@ -2030,7 +2036,7 @@ class BluetoothAdapterTests(test.test):
         }
         return not any(self.results.values())
 
-    @test_retry_and_log(False)
+    @test_retry_and_log(False, messages_start=False, messages_stop=False)
     def test_device_set_discoverable(self, device, discoverable):
         """Test that we could set the peer device to discoverable. """
         try:
@@ -2282,7 +2288,7 @@ class BluetoothAdapterTests(test.test):
                 'connection_seen_by_adapter': connection_seen_by_adapter}
         return all(self.results.values())
 
-    @test_retry_and_log
+    @test_retry_and_log(True, messages_start=False, messages_stop=False)
     def test_connection_by_device_only(self, device, adapter_address):
         """Test that the device could connect to adapter successfully.
 
@@ -4031,8 +4037,9 @@ class BluetoothAdapterTests(test.test):
         suspend.start()
         try:
             self.host.test_wait_for_sleep(sleep_timeout)
-        except:
+        except Exception as e:
             suspend.join()
+            self.results = {'exception': str(e)}
             return False
 
         return True
@@ -4057,10 +4064,55 @@ class BluetoothAdapterTests(test.test):
 
         @return True if suspend sub-process completed without error.
         """
-        success = True
+        success = False
+        results = {}
+
+        def _check_timeout(delta):
+            if delta > timedelta(seconds=resume_timeout):
+                return not fail_on_timeout
+            else:
+                return not fail_early_wake
+
+        def _check_suspend_attempt_or_raise(wait_from, wake_at):
+            """Make sure suspend attempt was recent or raise TestNA.
+
+            If we're looking at a previous suspend attempt, it means the test
+            didn't trigger a suspend properly (i.e. no powerd call)
+
+            @param wait_from: When we started waiting for resume.
+            @param wake_at: When powerd suspend resumed.
+
+            @raises: error.TestNAError if found suspend occurred before we
+                     started waiting for resume.
+            """
+            if wake_at < wait_from:
+                raise error.TestNAError(
+                        'No recent suspend attempt found. '
+                        'Start waiting at {} but last suspend ended at {}'.
+                        format(wait_from, wake_at))
+
+            return True
+
+        def _check_retcode_or_raise(retcode):
+            """Make sure powerd return was successful.
+
+            @param retcode: Return code of powerd_suspend.
+
+            @raises: error.TestNAError if failed suspend due to non-BT
+            @return: False if BT woke us, True otherwise
+            """
+            if retcode:
+                if self.bluetooth_facade.bt_caused_last_resume():
+                    return False
+                else:
+                    raise error.TestNAError(
+                            'Failed suspend due to non-BT wake')
+
+            return True
 
         # Sometimes it takes longer to resume from suspend; give some leeway
         resume_timeout = resume_timeout + resume_slack
+        results['resume timeout'] = resume_timeout
         try:
             start = datetime.now()
 
@@ -4069,14 +4121,36 @@ class BluetoothAdapterTests(test.test):
             self.host.test_wait_for_resume(
                 boot_id, resume_timeout=self.RESUME_INTERNAL_TIMEOUT_SECS)
 
-            # As of now, a timeout in test_wait_for_resume doesn't raise. Force
-            # a failure here instead by checking against the start time.
-            delta = datetime.now() - start
-            if delta > timedelta(seconds=resume_timeout):
-                success = not fail_on_timeout
+            results['device accessible on resume'] = True
+
+            # As of now, a timeout in test_wait_for_resume doesn't raise. Start
+            # by first measuring the delta until network is back up to the dut.
+            network_delta = datetime.now() - start
+
+            # Use powerd logs to see how much time we actually spent in suspend
+            # If the network went down during suspend, we will have spent less
+            # time in suspend than expected. If we can't find info via powerd,
+            # we can use measured time instead.
+            info = self.bluetooth_facade.find_last_suspend_via_powerd_logs()
+            if info:
+                (start_suspend_at, end_suspend_at, retcode) = info
+                actual_delta = end_suspend_at - start_suspend_at
+                results['powerd time to resume'] = actual_delta.total_seconds()
+                results['powerd retcode'] = retcode
+
+                # Resume is successful if suspend occurred correctly and woke up
+                # within the timeout. One significant caveat is that we only
+                # fail here if BT blocked suspend, not if we woke spuriously.
+                # This is by design (we depend on the timeout to check for
+                # spurious wakeup).
+                success = _check_suspend_attempt_or_raise(
+                        start, end_suspend_at) and _check_retcode_or_raise(
+                                retcode) and _check_timeout(actual_delta)
             else:
-                success = not fail_early_wake
+                results['time to resume'] = network_delta.total_seconds()
+                success = _check_timeout(network_delta)
         except error.TestFail as e:
+            results['device accessible on resume'] = False
             success = False
             logging.error('wait_for_resume: %s', e)
 
@@ -4087,12 +4161,11 @@ class BluetoothAdapterTests(test.test):
         finally:
             suspend.join()
 
-        self.results = {
-            'resume_success': success,
-            'suspend_result': suspend.exitcode == 0
-        }
+        results['success'] = success
+        results['suspend exit code'] = suspend.exitcode
+        self.results = results
 
-        return all(self.results.values())
+        return all([success, suspend.exitcode == 0])
 
 
     def suspend_async(self, suspend_time, expect_bt_wake=False):
@@ -4106,7 +4179,17 @@ class BluetoothAdapterTests(test.test):
         """
 
         def _action_suspend():
-            self.bluetooth_facade.do_suspend(suspend_time, expect_bt_wake)
+            try:
+                self.bluetooth_facade.do_suspend(suspend_time, expect_bt_wake)
+            except socket.error as e:
+                # Socket errors may occur after suspend if the underlying
+                # connection is lost during suspend (happens if usb-ethernet
+                # disconnects and reconnects on resume). Catch all these errors
+                # and swallow them.
+                logging.warning(
+                        'Socket error on suspend. Swallowing error: %s',
+                        str(e))
+            return 0
 
         proc = multiprocessing.Process(target=_action_suspend)
         proc.daemon = True

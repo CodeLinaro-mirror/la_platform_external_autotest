@@ -3300,6 +3300,36 @@ class BluetoothFacadeNative(object):
                 self._system_bus.get_object(self.BLUEZ_SERVICE_NAME, path),
                 self.BLUEZ_PLUGIN_DEVICE_IFACE)
 
+    def _powerd_last_resume_details(self, before=5, after=0):
+        """ Look at powerd logs for last suspend/resume attempt.
+
+        Note that logs are in reverse order (chronologically). Keep that in mind
+        for the 'before' and 'after' parameters.
+
+        @param before: Number of context lines before search item to show.
+        @param after: Number of context lines after search item to show.
+
+        @return Most recent lines containing suspend resume details or ''.
+        """
+        event_file = '/var/log/power_manager/powerd.LATEST'
+
+        # Each powerd_suspend wakeup has a log "powerd_suspend returned 0",
+        # with the return code of the suspend. We search for the last
+        # occurrence in the log, and then find the collocated event_count log,
+        # indicating the wakeup cause. -B option for grep will actually grab the
+        # *next* 5 logs in time, since we are piping the powerd file backwards
+        # with tac command
+        resume_indicator = 'powerd_suspend returned'
+        cmd = 'tac {} | grep -A {} -B {} -m1 "{}"'.format(
+                event_file, after, before, resume_indicator)
+
+        try:
+            return utils.run(cmd).stdout
+        except error.CmdError:
+            logging.error('Could not locate recent suspend')
+
+        return ''
+
     def bt_caused_last_resume(self):
         """Checks if last resume from suspend was caused by bluetooth
 
@@ -3317,33 +3347,87 @@ class BluetoothFacadeNative(object):
 
         bt_wake_path = bt_wake_path.replace('/power/wakeup', '')
 
-        event_file = '/var/log/power_manager/powerd.LATEST'
+        last_resume_details = self._powerd_last_resume_details()
 
-        # Each powerd_suspend wakeup has a log "powerd_suspend returned 0",
-        # with the return code of the suspend. We search for the last
-        # occurrence in the log, and then find the collocated event_count log,
-        # indicating the wakeup cause. -B option for grep will actually grab the
-        # *next* 5 logs in time, since we are piping the powerd file backwards
-        # with tac command
-        resume_indicator = 'powerd_suspend returned'
-        cmd = 'tac {} | grep -B 5 -m1 "{}"'.format(event_file,
-                                                   resume_indicator)
-
-        try:
-            last_resume_details = utils.run(cmd).stdout
-
-            # If BT caused wake, there will be a line describing the bt wake
-            # path's event_count before and after the resume
-            for line in last_resume_details.split('\n'):
-                if 'event_count' in line:
-                    logging.info('Checking wake event: {}'.format(line))
-                    if bt_wake_path in line:
-                        return True
-
-        except error.CmdError:
-            logging.error('Could not locate recent suspend')
+        # If BT caused wake, there will be a line describing the bt wake
+        # path's event_count before and after the resume
+        for line in last_resume_details.split('\n'):
+            if 'event_count' in line:
+                logging.info('Checking wake event: {}'.format(line))
+                if bt_wake_path in line:
+                    return True
 
         return False
+
+    def find_last_suspend_via_powerd_logs(self):
+        """ Finds the last suspend attempt via powerd logs.
+
+        Finds the last suspend attempt using powerd logs by searching backwards
+        through the logs to find the latest entries with 'powerd_suspend'. If we
+        can't find a suspend attempt, we return None.
+
+        @return: Tuple (suspend start time, suspend end time, suspend result) or
+                None if we can't find a suspend attempt
+        """
+        # Logs look like this:
+        # [1102/202036.973853:INFO:daemon.cc(704)] powerd_suspend returned 0
+        # ... stuff in between ...
+        # [1102/202025.785372:INFO:suspender.cc(574)] Starting suspend
+
+        # Date format for strptime and strftime
+        date_format = '%m%d/%H%M%S.%f'
+        out_date_format = '%Y-%m-%d %H:%M:%S.%f'
+        date_group_re = '(?P<date>[0-9]+/[0-9]+[.][0-9]+)'
+
+        finish_suspend_re = re.compile(
+                '^\\[{date_regex}'
+                '.*daemon.*powerd_suspend returned '
+                '(?P<exitcode>[0-9]+)'.format(date_regex=date_group_re))
+        start_suspend_re = re.compile(
+                '^\\[{date_regex}.*suspender.*'
+                'Starting suspend'.format(date_regex=date_group_re))
+
+        now = datetime.now()
+        last_resume_details = self._powerd_last_resume_details(before=0,
+                                                               after=8)
+        if last_resume_details:
+            start_time, end_time, ret = None, None, None
+            try:
+                for line in last_resume_details.split('\n'):
+                    logging.debug('Last suspend search: %s', line)
+                    m = finish_suspend_re.match(line)
+                    if m:
+                        logging.debug('Found suspend end: date(%s) ret(%s)',
+                                      m.group('date'), m.group('exitcode'))
+                        end_time = datetime.strptime(
+                                m.group('date'),
+                                date_format).replace(year=now.year)
+                        ret = int(m.group('exitcode'))
+
+                    m = start_suspend_re.match(line)
+                    if m:
+                        logging.debug('Found suspend start: date(%s)',
+                                      m.group('date'))
+                        start_time = datetime.strptime(
+                                m.group('date'),
+                                date_format).replace(year=now.year)
+                        break
+
+                if all([x is not None for x in [start_time, end_time, ret]]):
+                    # Return dates in string format due to inconsistency between
+                    # python2/3 usage on host and dut
+                    return (start_time.strftime(out_date_format),
+                            end_time.strftime(out_date_format), ret)
+                else:
+                    logging.error(
+                            'Failed to parse details from last suspend. %s %s %s',
+                            str(start_time), str(end_time), str(ret))
+            except Exception as e:
+                logging.error('Failed to parse last suspend: %s', str(e))
+        else:
+            logging.error('No powerd_suspend attempt found')
+
+        return None
 
     def do_suspend(self, seconds, expect_bt_wake):
         """Suspend DUT using the power manager.

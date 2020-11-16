@@ -51,7 +51,7 @@ class bluetooth_AdapterLEBetterTogether(BluetoothAdapterBetterTogether):
     def run_once(self,
                  host,
                  num_iterations=1,
-                 btpeer_args=[],
+                 args_dict=None,
                  test_name=None,
                  flag='Quick Health'):
         """Run the batch of Bluetooth LE tests for Better Together
@@ -65,6 +65,6 @@ class bluetooth_AdapterLEBetterTogether(BluetoothAdapterBetterTogether):
         self.quick_test_init(host,
                              use_btpeer=True,
                              flag=flag,
-                             btpeer_args=btpeer_args)
+                             args_dict=args_dict)
         self.better_together_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

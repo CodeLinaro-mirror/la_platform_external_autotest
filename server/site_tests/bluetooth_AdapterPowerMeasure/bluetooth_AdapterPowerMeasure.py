@@ -186,7 +186,7 @@ class bluetooth_AdapterPowerMeasure(BluetoothAdapterQuickTests):
     def run_once(self,
                  host,
                  num_iterations=1,
-                 btpeer_args=[],
+                 args_dict=None,
                  test_name=None,
                  max_power_mw=3,
                  suspend_time_secs=30,
@@ -208,6 +208,6 @@ class bluetooth_AdapterPowerMeasure(BluetoothAdapterQuickTests):
         self.quick_test_init(host,
                              use_btpeer=True,
                              flag=flag,
-                             btpeer_args=btpeer_args)
+                             args_dict=args_dict)
         self.pw_health_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

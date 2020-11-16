@@ -151,7 +151,8 @@ class platform_StageAndRecover(test.test):
             # Install the test image back on DUT and reboot
             if self.wait_for_dut_ping_after('TEST_IMAGE RECOVERY BOOT FROM USB',
                                             self._TEST_IMAGE_BOOT_DELAY):
-                self.host.run('chromeos-install --yes', ignore_status=True,
+                if self.host.wait_up(timeout=self._TEST_IMAGE_BOOT_DELAY):
+                    self.host.run('chromeos-install --yes', ignore_status=True,
                               timeout=self._INSTALL_DELAY_TIMEOUT)
                 self.host.reboot()
         except error.AutoservRunError:
