@@ -9,7 +9,8 @@ PURPOSE = "Tests an N-to-N update with Nebraska."
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "platform"
 TEST_TYPE = "server"
-ATTRIBUTES = "suite:au-perbuild"
+ATTRIBUTES = "suite:bvt-inline"
+JOB_RETRIES = 2
 DOC = """
 This tests an N-to-N update. That means it will update to the same version
 that the DUT was provisioned with. This test will be used in the CQ to ensure

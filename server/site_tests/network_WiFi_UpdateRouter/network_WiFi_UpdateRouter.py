@@ -47,6 +47,10 @@ class network_WiFi_UpdateRouter(test.test):
                               '13310.54.2020_08_19_1536'),
     }
 
+    # List of files to remove.
+    FILES_TO_REMOVE = ['/var/spool/crash/*', '/tmp/*',
+                       '/var/lib/metrics/uma-events']
+
 
     def get_release_version(self, host):
         result = host.run('cat /etc/lsb-release')
@@ -74,6 +78,16 @@ class network_WiFi_UpdateRouter(test.test):
         self._router_hostname_from_cmdline = cmdline_args.get(
                 wifi_test_context_manager.WiFiTestContextManager. \
                         CMDLINE_ROUTER_ADDR)
+
+
+    def freeup_disk_space(self, device_host):
+        """Remove files to free up disk space.
+
+        @param device_host: router / pcap host object
+
+        """
+        for path in self.FILES_TO_REMOVE:
+            device_host.run('rm -rf %s' % path, ignore_status=True)
 
 
     def run_once(self, host, is_pcap=False):
@@ -105,6 +119,8 @@ class network_WiFi_UpdateRouter(test.test):
         device_host = hosts.create_host(device_hostname,
                                         host_class=hosts.CrosHost,
                                         allow_failure=True)
+        # Remove un-wanted files to freeup diskspace before starting update.
+        self.freeup_disk_space(device_host)
         self.update_device(device_host)
 
 

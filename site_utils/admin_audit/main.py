@@ -52,9 +52,10 @@ VERIFIER_MAP = {
 
 # Actions required Servod service
 ACTIONS_REQUIRED_SERVOD = set([
-    ACTION_VERIFY_SERVO_USB,
-    ACTION_FLASH_SERVO_KEYBOARD_MAP,
-    ACTION_VERIFY_DUT_MACADDR,
+        ACTION_VERIFY_DUT_STORAGE,
+        ACTION_VERIFY_SERVO_USB,
+        ACTION_FLASH_SERVO_KEYBOARD_MAP,
+        ACTION_VERIFY_DUT_MACADDR,
 ])
 
 # Actions required ServoHost without Servod process
@@ -109,7 +110,8 @@ def main():
             except Exception as err:
                 logging.error("fail to init servo host: %s", err)
                 return RETURN_CODES.OTHER_FAILURES
-
+        if hasattr(host, 'setup_device_health_profile'):
+            host.setup_device_health_profile()
         for action in opts.actions:
             if opts.dry_run:
                 logging.info('DRY RUN: Would have run actions %s', action)

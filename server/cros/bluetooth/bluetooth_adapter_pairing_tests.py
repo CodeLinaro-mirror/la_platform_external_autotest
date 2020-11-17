@@ -72,6 +72,9 @@ class BluetoothAdapterPairingTests(
         # connection is done.
         self.test_device_name(device.address, device.name)
 
+        # Run hid test to make sure profile is connected
+        check_connected_method(device)
+
         # Test if the device is still connected after suspend/resume.
         if suspend_resume:
             self.suspend_resume()

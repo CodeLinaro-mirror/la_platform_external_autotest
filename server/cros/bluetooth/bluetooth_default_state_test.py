@@ -15,7 +15,7 @@ from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
 DEVICE_ADDRESS = '01:02:03:04:05:06'
 ADDRESS_TYPE = 0
 
-class bluetooth_Sanity_DefaultStateTest(
+class bluetooth_Health_DefaultStateTest(
         bluetooth_adapter_tests.BluetoothAdapterTests):
     """
     This class implements the default state test

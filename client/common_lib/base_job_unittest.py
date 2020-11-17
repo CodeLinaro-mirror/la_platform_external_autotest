@@ -2,9 +2,14 @@
 
 # pylint: disable=missing-docstring
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import logging
 import os
 import shutil
+from six.moves import range
 import stat
 import tempfile
 import unittest
@@ -316,21 +321,21 @@ class test_job_directory(unittest.TestCase):
 
 
     def test_fails_if_writable_and_no_permission_to_create(self):
-        os.mkdir('testing8', 0555)
+        os.mkdir('testing8', 0o555)
         self.assert_(os.path.isdir('testing8'))
         self.assertRaises(base_job.job_directory.UncreatableDirectoryException,
                           base_job.job_directory, 'testing8/subdir', True)
 
 
     def test_passes_if_not_is_writable_and_dir_not_writable(self):
-        os.mkdir('testing9', 0555)
+        os.mkdir('testing9', 0o555)
         self.assert_(os.path.isdir('testing9'))
         self.assert_(not os.access('testing9', os.W_OK))
         jd = base_job.job_directory('testing9')
 
 
     def test_fails_if_is_writable_but_dir_not_writable(self):
-        os.mkdir('testing10', 0555)
+        os.mkdir('testing10', 0o555)
         self.assert_(os.path.isdir('testing10'))
         self.assert_(not os.access('testing10', os.W_OK))
         self.assertRaises(base_job.job_directory.UnwritableDirectoryException,
@@ -1147,7 +1152,7 @@ class test_status_logger(unittest.TestCase):
 
 
     def test_writes_toplevel_log(self):
-        entries = [self.make_dummy_entry('LINE%d' % x) for x in xrange(3)]
+        entries = [self.make_dummy_entry('LINE%d' % x) for x in range(3)]
         for entry in entries:
             self.logger.record_entry(entry)
         self.assertEqual('LINE0\nLINE1\nLINE2\n', open('status').read())
@@ -1243,7 +1248,7 @@ class test_status_logger(unittest.TestCase):
 
 
     def test_hook_is_called(self):
-        entries = [self.make_dummy_entry('LINE%d' % x) for x in xrange(5)]
+        entries = [self.make_dummy_entry('LINE%d' % x) for x in range(5)]
         recorded_entries = []
         def hook(entry):
             recorded_entries.append(entry)

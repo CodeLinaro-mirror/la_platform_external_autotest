@@ -8,6 +8,7 @@ TIME = 'MEDIUM'
 TEST_TYPE = 'Server'
 ATTRIBUTES = 'suite:bvt-tast-informational, suite:chrome-informational'
 MAX_RESULT_SIZE_KB = 1024 * 1024
+JOB_RETRIES = 0  # Do not retry informational tests.
 
 # tast.py uses binaries installed from autotest_server_package.tar.bz2.
 REQUIRE_SSP = True
@@ -33,11 +34,12 @@ def run(machine):
                  test_exprs=['('
                              '"group:mainline" && '
                              'informational && '
+                             '!"name:crostini.*" && '
                              '"dep:chrome" && '
                              '!"dep:android*"'
                              ')'],
                  ignore_test_failures=True,
-                 max_run_sec=5*60*60,
+                 max_run_sec=3*60*60,
                  command_args=args,
                  clear_tpm=True)
 

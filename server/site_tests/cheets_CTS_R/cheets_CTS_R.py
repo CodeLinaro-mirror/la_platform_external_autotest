@@ -30,6 +30,13 @@ _CTS_URI = {
 _CTS_MEDIA_URI = _PUBLIC_CTS + 'android-cts-media-1.5.zip'
 _CTS_MEDIA_LOCALPATH = '/tmp/android-cts-media'
 
+# Internal uprev for all CTS modules.
+_INTERNAL_CTS = 'gs://chromeos-arc-images/cts/bundle/R/'
+_CTS_LATEST_URI = {
+        'arm': _INTERNAL_CTS + 'android-cts-6945308-linux_x86-arm.zip',
+        'x86': _INTERNAL_CTS + 'android-cts-6945308-linux_x86-x86.zip',
+}
+
 
 class cheets_CTS_R(tradefed_test.TradefedTest):
     """Sets up tradefed to run CTS tests."""
@@ -53,6 +60,9 @@ class cheets_CTS_R(tradefed_test.TradefedTest):
 
     def _get_default_bundle_url(self, bundle):
         return _CTS_URI[bundle]
+
+    def _get_latest_bundle_url(self, bundle):
+        return _CTS_LATEST_URI[bundle]
 
     def _get_tradefed_base_dir(self):
         return 'android-cts'

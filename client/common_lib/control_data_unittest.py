@@ -1,8 +1,14 @@
 #!/usr/bin/python2
 # pylint: disable-msg=C0111
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import json
 import os, unittest
+import six
+from six.moves import range
 
 import common
 
@@ -178,7 +184,7 @@ class ParseControlFileBugTemplate(unittest.TestCase):
             doesn't match the value in self.bug_template.
         @raises KeyError: If a key in either bug template is missing.
         """
-        for key, value in new_bug_template.iteritems():
+        for key, value in six.iteritems(new_bug_template):
             self.assertEqual(value, self.bug_template[key])
 
 
@@ -304,7 +310,7 @@ class SetMethodTests(unittest.TestCase):
                   ControlData.TEST_TIME_LIST]
         time_min_index = [ControlData.get_test_time_index(time)
                           for time in inputs]
-        expected_time_index = range(len(ControlData.TEST_TIME_LIST))
+        expected_time_index = list(range(len(ControlData.TEST_TIME_LIST)))
         self.assertEqual(time_min_index, expected_time_index)
 
 

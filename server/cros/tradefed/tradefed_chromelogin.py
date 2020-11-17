@@ -90,13 +90,13 @@ class ChromeLogin(object):
                 install_autotest = True
 
         if install_autotest:
-            # Installs the autotest client to the DUT by running a dummy test.
+            # Installs the autotest client to the DUT by running a no-op test.
             autotest.Autotest(self._host).run_timed_test(
                 'dummy_Pass', timeout=2 * timeout, check_client_result=True)
             # The (re)run the login script.
             self._login_by_script(timeout=timeout, verbose=verbose)
 
-        # Sanity check if Android has really started. When autotest client
+        # Quick check if Android has really started. When autotest client
         # installed on the DUT was partially broken, the script may succeed
         # without actually logging into Chrome/Android. See b/129382439.
         self._host.run(

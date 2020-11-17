@@ -47,14 +47,7 @@ CONFIG['LAB_DEPENDENCY'] = {'x86': ['cts_abi_x86']}
 
 CONFIG['CTS_JOB_RETRIES_IN_PUBLIC'] = 1
 CONFIG['CTS_QUAL_RETRIES'] = 9
-CONFIG['CTS_MAX_RETRIES'] = {
-        # TODO(kinaba): Remove the limit. See b/156178323.
-        # R is not stable yet. Running many retries lead to job
-        # abort before reporting test results. That's worse than
-        # reporting some result with flakiness.
-        'CtsDeqpTestCases': 1,
-        'CtsMediaTestCases': 1,
-}
+CONFIG['CTS_MAX_RETRIES'] = {}
 
 # Timeout in hours.
 CONFIG['CTS_TIMEOUT_DEFAULT'] = 1.0
@@ -128,14 +121,6 @@ CONFIG['ENABLE_DEFAULT_APPS'] = [
 # Run `eject` for (and only for) each device with RM=1 in lsblk output.
 _EJECT_REMOVABLE_DISK_COMMAND = (
         "\'lsblk -do NAME,RM | sed -n s/1$//p | xargs -n1 eject\'")
-# Behave more like in the verififed mode.
-_SECURITY_PARANOID_COMMAND = (
-        "\'echo 3 > /proc/sys/kernel/perf_event_paranoid\'")
-# Expose /proc/config.gz
-_CONFIG_MODULE_COMMAND = "\'modprobe configs\'"
-
-# TODO(b/126741318): Fix performance regression and remove this.
-_SLEEP_60_COMMAND = "\'sleep 60\'"
 
 # Preconditions applicable to public and internal tests.
 CONFIG['PRECONDITION'] = {}

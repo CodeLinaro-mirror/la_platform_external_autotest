@@ -56,7 +56,7 @@ class firmware_DevMode(FirmwareTest):
                 return
 
             logging.info("Rebooting into fake recovery mode (EC still in RW).")
-            self.servo.get_power_state_controller().power_off()
+            self._client.power_off_via_servo()
             self.ec.set_hostevent(chrome_ec.HOSTEVENT_KEYBOARD_RECOVERY)
             self.servo.power_short_press()
 

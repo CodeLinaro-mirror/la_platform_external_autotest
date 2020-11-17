@@ -72,11 +72,8 @@ class cheets_CTS_P(tradefed_test.TradefedTest):
                 except OSError:
                     logging.error('Can\'t change current PATH directory')
 
-        elif self._timeout <= 3600:
-            # TODO(kinaba): remove once crbug.com/1041833 is resolved.
-            logging.info('Add more debug log for small modules')
-            cmd.append('--log-level-display=VERBOSE')
-
+        # Suppress redundant output from tradefed.
+        cmd.append('--quiet-output=true')
         return cmd
 
     def _get_default_bundle_url(self, bundle):

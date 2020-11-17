@@ -95,7 +95,7 @@ CONFIG['CTS_TIMEOUT'] = {
 # (typically camera) is stuck, the CTS precondition step hits 5 minute abort.
 # Since this abort doesn't affect too much for the main CTS runs (with longer
 # timeouts), it's ok to let them go in. Bad state of camre should be caught by
-# camera tests, not by this general CTS sanity test.
+# camera tests, not by this general test harness health check for CTS.
 CONFIG['BVT_TIMEOUT'] = 0.2
 
 CONFIG['QUAL_BOOKMARKS'] = sorted([
@@ -657,4 +657,3 @@ from generate_controlfiles_common import main
 
 if __name__ == '__main__':
     main(CONFIG)
-

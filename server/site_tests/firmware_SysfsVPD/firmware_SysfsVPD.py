@@ -101,7 +101,7 @@ class firmware_SysfsVPD(FirmwareTest):
 
         # Reboot DUT to load new VPD data in sysfs
         logging.info('Rebooting DUT')
-        self.servo.get_power_state_controller().reset()
+        self.host.reset_via_servo()
 
         # Verify RO test string can be read through sysfs and matches test value
         logging.info('Verifying RO VPD test data in sysfs')

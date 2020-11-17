@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2011 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -61,9 +62,9 @@ class TtciController(object):
                 node_addr=INA219_MPWR_SLV)
             self.ina_backup_obj = smogcheck_ina219.InaController(
                 node_addr=INA219_BPWR_SLV)
-        except smogcheck_pca9555.PcaError, e:
+        except smogcheck_pca9555.PcaError as e:
             raise TtciError('Error initialize PCA9555 module: %s' % e)
-        except smogcheck_ina219.InaError, e:
+        except smogcheck_ina219.InaError as e:
             raise TtciError('Error initialize INA219 module: %s' % e)
 
     def TTCI_Get_Main_Power_Metrics(self):

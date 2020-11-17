@@ -88,7 +88,7 @@ class tast(test.test):
     _SSP_REMOTE_BUNDLE_DIR = os.path.join(_SSP_ROOT, 'bundles/remote')
     _SSP_REMOTE_DATA_DIR = os.path.join(_SSP_ROOT, 'data')
     _SSP_REMOTE_TEST_RUNNER_PATH = os.path.join(_SSP_ROOT, 'remote_test_runner')
-    _SSP_DEFAULT_VARS_DIR_PATH = os.path.join(_SSP_ROOT, 'vars/private')
+    _SSP_DEFAULT_VARS_DIR_PATH = os.path.join(_SSP_ROOT, 'vars')
 
     # Prefix added to Tast test names when writing their results to TKO
     # status.log files.
@@ -123,9 +123,10 @@ class tast(test.test):
                    build=None,
                    build_bundle='cros',
                    run_private_tests=True,
-                   varsfiles=None,
+                   varsfiles=[],
                    download_data_lazily=True,
-                   clear_tpm=False):
+                   clear_tpm=False,
+                   varslist=[]):
         """
         @param host: remote.RemoteHost instance representing DUT.
         @param test_exprs: Array of strings describing tests to run.
@@ -155,6 +156,8 @@ class tast(test.test):
             lazily between tests. If false, external data files are downloaded
             in a batch before running tests.
         @param clear_tpm: clear the TPM first before running the tast tests.
+        @param varslist: list of strings to pass to tast run command as |-vars|
+            arguments. Each string should be formatted as "name=value".
 
         @raises error.TestFail if the Tast installation couldn't be found.
         """
@@ -175,6 +178,7 @@ class tast(test.test):
         self._run_private_tests = run_private_tests
         self._fake_now = None
         self._varsfiles = varsfiles
+        self._varslist = varslist
         self._download_data_lazily = download_data_lazily
         self._clear_tpm = clear_tpm
 
@@ -447,9 +451,11 @@ class tast(test.test):
             '-continueafterfailure=true',
         ] + self._get_servo_args() + self._get_wificell_args() + self._get_cloud_storage_info()
 
-        if self._varsfiles:
-            for varsfile in self._varsfiles:
-                args.append('-varsfile=%s' % varsfile)
+        for varsfile in self._varsfiles:
+            args.append('-varsfile=%s' % varsfile)
+
+        for var in self._varslist:
+            args.append('-var=%s' % var)
 
         logging.info('Running tests with timeout of %d sec', self._max_run_sec)
         self._run_tast('run', args, self._max_run_sec + tast._RUN_EXIT_SEC,

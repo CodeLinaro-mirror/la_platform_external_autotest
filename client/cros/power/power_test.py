@@ -102,7 +102,7 @@ class power_Test(test.test):
         ]
 
         # Use fake camera for DUT without camera, e.g. chromebox.
-        if not camera_utils.find_cameras():
+        if not camera_utils.has_builtin_or_vivid_camera():
             ret.append('--use-fake-device-for-media-stream')
             self.keyvals['use_fake_camera'] = 1
         else:

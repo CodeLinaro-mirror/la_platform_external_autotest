@@ -133,17 +133,26 @@ class PDDevice(object):
         @param disc_time_sec: Time in seconds between disconnect and reconnect
         """
         raise NotImplementedError(
-                'drp_disconnect_reconnect should be implemented in \
-                derived class')
+                'drp_disconnect_connect should be implemented in derived class'
+        )
 
     def cc_disconnect_connect(self, disc_time_sec):
-        """Force PD disconnect/connect using PDTester fw command
+        """Force PD disconnect/connect
 
         @param disc_time_sec: Time in seconds between disconnect and reconnect
         """
         raise NotImplementedError(
-                'cc_disconnect_reconnect should be implemented in \
-                derived class')
+                'cc_disconnect_connect should be implemented in derived class')
+
+    def get_connected_state_after_cc_reconnect(self, disc_time_sec):
+        """Get the connected state after disconnect/reconnect
+
+        @param disc_time_sec: Time in seconds for disconnect period.
+        @returns: The connected PD state.
+        """
+        raise NotImplementedError(
+                'get_connected_state_after_cc_reconnect should be implemented'
+                'in derived class')
 
 
 class PDConsoleDevice(PDDevice):
@@ -332,27 +341,31 @@ class PDConsoleDevice(PDDevice):
         """
         # Create Try.SRC pd command
         cmd = 'pd trysrc %d' % int(enable)
+        # TCPMv1 indicates Try.SRC is on by returning 'on'
+        # TCPMv2 indicates Try.SRC is on by returning 'Forced ON'
+        on_vals = ('on', 'Forced ON')
+        # TCPMv1 indicates Try.SRC is off by returning 'off'
+        # TCPMv2 indicates Try.SRC is off by returning 'Forced OFF'
+        off_vals = ('off', 'Forced OFF')
+
         # Try.SRC on/off is output, if supported feature
-        regex = ['Try\.SRC(\s([\w]+)\s([\w]+)|\s([\w]+))|(Parameter)']
+        regex = ['Try\.SRC\s(%s)|(Parameter)' % ('|'.join(on_vals + off_vals))]
         m = self.utils.send_pd_command_get_output(cmd, regex)
+
         # Determine if Try.SRC feature is supported
-        trysrc = re.search('Try\.SRC(\s([\w]+)\s([\w]+)|\s([\w]+))', m[0][0])
-        if not trysrc:
+        if 'Try.SRC' not in m[0][0]:
             logging.warn('Try.SRC not supported on this PD device')
             return False
-        # TrySRC is supported on this PD device, verify setting.
-        logging.info('Try.SRC mode = %s', trysrc.group(1))
-        if enable:
-            # TCPMv1 indicates Try.SRC is on by returning 'on'
-            # TCPMv2 indicates Try.SRC is on by returning 'Forced ON'
-            vals = ('on', 'Forced ON')
-        else:
-            # TCPMv1 indicates Try.SRC is off by returning 'off'
-            # TCPMv2 indicates Try.SRC is off by returning 'Forced OFF'
-            vals = ('off', 'Forced OFF')
 
-        trysrc_val = str(m[0][1]).strip()
-        return bool(trysrc_val in vals)
+        # TrySRC is supported on this PD device, verify setting.
+        trysrc_val = m[0][1]
+        logging.info('Try.SRC mode = %s', trysrc_val)
+        if enable:
+            vals = on_vals
+        else:
+            vals = off_vals
+
+        return trysrc_val in vals
 
     def soft_reset(self):
         """Initates a PD soft reset sequence
@@ -513,6 +526,25 @@ class PDTesterDevice(PDConsoleDevice):
         disc_cmd = 'fakedisconnect %d  %d' % (DISC_DELAY,
                                               disc_time_sec * 1000)
         self.utils.send_pd_command(disc_cmd)
+
+    def get_connected_state_after_cc_reconnect(self, disc_time_sec):
+        """Get the connected state after disconnect/reconnect using PDTester
+
+        PDTester supports a feature which simulates a USB Type C disconnect
+        and reconnect. It returns the first connected state (either source or
+        sink) after reconnect.
+
+        @param disc_time_sec: Time in seconds for disconnect period.
+        @returns: The connected PD state.
+        """
+        DISC_DELAY = 100
+        disc_cmd = 'fakedisconnect %d %d' % (DISC_DELAY, disc_time_sec * 1000)
+        src_connected_tuple = self.utils.get_src_connect_states()
+        snk_connected_tuple = self.utils.get_snk_connect_states()
+        connected_exp = '|'.join(src_connected_tuple + snk_connected_tuple)
+        reply_exp = ['(.*)(C%d)\s+[\w]+:?\s(%s)' % (self.port, connected_exp)]
+        m = self.utils.send_pd_command_get_output(disc_cmd, reply_exp)
+        return m[0][3]
 
     def drp_disconnect_connect(self, disc_time_sec):
         """Disconnect/reconnect using PDTester
@@ -872,4 +904,3 @@ class PDPortPartner(object):
                     return [tester, dut]
 
         return []
-

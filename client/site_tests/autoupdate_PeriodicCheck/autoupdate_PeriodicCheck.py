@@ -6,6 +6,7 @@ import logging
 import os
 
 from autotest_lib.client.bin import utils
+from autotest_lib.client.common_lib import error
 from autotest_lib.client.cros.update_engine import nebraska_wrapper
 from autotest_lib.client.cros.update_engine import update_engine_test
 
@@ -47,10 +48,13 @@ class autoupdate_PeriodicCheck(update_engine_test.UpdateEngineTest):
             self._restart_update_engine()
 
             # Wait for the first update check.
-            utils.poll_for_condition(
+            try:
+                utils.poll_for_condition(
                     lambda: len(self._get_update_requests()) == 1,
                     desc='1st periodic update check.',
                     timeout=1.5 * periodic_interval)
+            except utils.TimeoutError:
+                raise error.TestFail('1st periodic check not found.')
             self._check_update_engine_log_for_entry(self._PERIODIC_LOG,
                                                     raise_error=True)
             logging.info('First periodic update was initiated.')
@@ -59,9 +63,12 @@ class autoupdate_PeriodicCheck(update_engine_test.UpdateEngineTest):
             self._create_custom_lsb_release(nebraska.get_update_url())
 
             # Wait for the second update check.
-            utils.poll_for_condition(
+            try:
+                utils.poll_for_condition(
                     lambda: len(self._get_update_requests()) == 2,
                     desc='2nd periodic update check.',
-                    timeout=1.5 * periodic_interval)
+                    timeout=2 * periodic_interval)
+            except utils.TimeoutError:
+                raise error.TestFail('2nd periodic check not found.')
             logging.info('Second periodic update was initiated.')
             self._wait_for_update_to_complete()

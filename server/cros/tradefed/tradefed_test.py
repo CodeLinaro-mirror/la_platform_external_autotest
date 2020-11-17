@@ -75,7 +75,7 @@ class TradefedTest(test.test):
     _job_deadline = None
 
     def _log_java_version(self):
-        """Quick sanity and spew of java version installed on the server."""
+        """Log java version to debug failures due to version mismatch."""
         utils.run(
             'java',
             args=('-version',),
@@ -158,7 +158,8 @@ class TradefedTest(test.test):
 
         # Install the tradefed bundle.
         bundle_install_path = self._install_bundle(
-            uri or self._get_default_bundle_url(bundle))
+                self._get_latest_bundle_url(bundle) if uri == 'LATEST' else (
+                        uri or self._get_default_bundle_url(bundle)))
         self._repository = os.path.join(bundle_install_path,
                                         self._get_tradefed_base_dir())
 
@@ -638,47 +639,17 @@ class TradefedTest(test.test):
                 verbose=True)
             return output
 
-        if not client_utils.is_moblab():
-            # If the machine can access to the storage server directly,
-            # defer to "gsutil" for downloading.
-            logging.info('Not in lab. Downloading %s directly to %s.',
-                         uri, output)
-            # b/17445576: gsutil rsync of individual files is not implemented.
-            res = utils.run('gsutil',
-                            args=('cp', uri, output),
-                            verbose=True,
-                            ignore_status=True)
-            if not res or res.exit_status != 0:
-                logging.warning('Retrying download...')
-                utils.run('gsutil', args=('cp', uri, output), verbose=True)
-            return output
-
-        # We are in the moblab. Because the machine cannot access the storage
-        # server directly, use dev server to proxy.
-        logging.info('In lab. Downloading %s by staging to %s.',
-                     uri, output)
-
-        dirname = os.path.dirname(parsed.path)
-        archive_url = '%s://%s%s' % (parsed.scheme, parsed.netloc, dirname)
-
-        # First, request the devserver to download files into the lab network.
-        # TODO(ihf): Switch stage_artifacts to honor rsync. Then we don't have
-        # to shuffle files inside of tarballs.
-        info = self._hosts[0].host_info_store.get()
-        ds = dev_server.ImageServer.resolve(info.build)
-        ds.stage_artifacts(
-            info.build, files=[filename], archive_url=archive_url)
-
-        # Then download files from the dev server.
-        # TODO(ihf): use rsync instead of wget. Are there 3 machines involved?
-        # Itself, dev_server plus DUT? Or is there just no rsync in moblab?
-        ds_src = '/'.join([ds.url(), 'static', dirname, filename])
-        logging.info('dev_server URL: %s', ds_src)
-        # Calls into DUT to pull uri from dev_server.
-        utils.run(
-            'wget',
-            args=('--report-speed=bits', '-O', output, ds_src),
-            verbose=True)
+        # If the machine can access to the storage server directly,
+        # defer to "gsutil" for downloading.
+        logging.info('Downloading %s directly to %s.', uri, output)
+        # b/17445576: gsutil rsync of individual files is not implemented.
+        res = utils.run('gsutil',
+                        args=('cp', uri, output),
+                        verbose=True,
+                        ignore_status=True)
+        if not res or res.exit_status != 0:
+            logging.warning('Retrying download...')
+            utils.run('gsutil', args=('cp', uri, output), verbose=True)
         return output
 
     def _instance_copyfile(self, cache_path):
@@ -1017,8 +988,11 @@ class TradefedTest(test.test):
         self._collect_tradefed_global_log(output, result_destination)
         # Result parsing must come after all other essential operations as test
         # warnings, errors and failures can be raised here.
-        return tradefed_utils.parse_tradefed_result(output.stdout,
-                                                    self._waivers)
+        base = self._default_tradefed_base_dir()
+        path = tradefed_utils.get_test_result_xml_path(base)
+        return tradefed_utils.parse_tradefed_testresults_xml(
+            test_result_xml_path=path,
+            waivers=self._waivers)
 
     def _setup_result_directories(self):
         """Sets up the results and logs directories for tradefed.
@@ -1350,6 +1324,15 @@ class TradefedTest(test.test):
                 self.summary += msg
                 logging.info('RESULT: %s %s', msg, result)
 
+                # Overwrite last_all_done if the executed test count is equal
+                # to the known test count of the job.
+                if (not last_all_done and executable_test_count != None and
+                    (last_passed + last_failed in executable_test_count)):
+                    logging.warning('Overwriting all_done as True, since the '
+                                    'explicitly set executable_test_count '
+                                    'tests have run.')
+                    last_all_done = True
+
                 # Check for no-test modules. We use the "all_done" indicator
                 # provided by list_results to decide if there are outstanding
                 # modules to iterate over (similar to missing tests just on a
@@ -1372,15 +1355,10 @@ class TradefedTest(test.test):
                         current_login.need_reboot()
                     continue
 
+                # After the no-test check, commit the pass/fail count.
                 waived = last_waived
-                session_id, passed, failed, all_done  = result
-                if (not all_done and executable_test_count != None and
-                        (passed + failed ==
-                         executable_test_count * self._test_count_factor)):
-                    logging.warning('Overwriting all_done as True, since the '
-                                    'explicitly set executable_test_count '
-                                    'tests have run.')
-                    all_done = True
+                session_id, passed, failed, all_done =\
+                    last_session_id, last_passed, last_failed, last_all_done
 
                 # Check if all the tests passed.
                 if failed <= waived and all_done:

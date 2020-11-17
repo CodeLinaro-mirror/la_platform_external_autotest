@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2017 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -11,7 +12,10 @@ inheritance with, just a collection of static methods.
 
 # pylint: disable=missing-docstring
 
-import StringIO
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import collections
 import datetime
 import errno
@@ -20,7 +24,6 @@ import itertools
 import logging
 import os
 import pickle
-import Queue
 import random
 import re
 import resource
@@ -28,22 +31,31 @@ import select
 import shutil
 import signal
 import socket
+import six
+from six.moves import input
+from six.moves import range
+from six.moves import urllib
+from six.moves import zip
+from six.moves import zip_longest
+import six.moves.urllib.parse
 import string
 import struct
 import subprocess
 import textwrap
 import threading
 import time
-import urllib2
-import urlparse
+import six.moves.queue
 import uuid
 import warnings
 
 try:
     import hashlib
-except ImportError:
-    import md5
-    import sha
+except ImportError as e:
+    if six.PY2:
+        import md5
+        import sha
+    else:
+        raise ImportError("Broken hashlib imports %s", e)
 
 import common
 
@@ -202,7 +214,7 @@ class BgJob(object):
 
         # allow for easy stdin input by string, we'll let subprocess create
         # a pipe for stdin input and we'll write to it in the wait loop
-        if isinstance(stdin, basestring):
+        if isinstance(stdin, six.string_types):
             self.string_stdin = stdin
             stdin = subprocess.PIPE
         else:
@@ -242,9 +254,9 @@ class BgJob(object):
                 env=env, close_fds=False)
         self._cleanup_called = False
         self._stdout_file = (
-            None if stdout_tee == DEVNULL else StringIO.StringIO())
+            None if stdout_tee == DEVNULL else six.StringIO())
         self._stderr_file = (
-            None if stderr_tee == DEVNULL else StringIO.StringIO())
+            None if stderr_tee == DEVNULL else six.StringIO())
 
     def process_output(self, stdout=True, final_read=False):
         """Read from process's output stream, and write data to destinations.
@@ -395,7 +407,7 @@ def get_field(data, param, linestart="", sep=" "):
     if find != None:
         return re.split("%s" % sep, find.group(1))[param]
     else:
-        print "There is no line which starts with %s in data." % linestart
+        print("There is no line which starts with %s in data." % linestart)
         return None
 
 
@@ -453,7 +465,7 @@ def matrix_to_string(matrix, header=None):
             lengths.append(len(column))
     for row in matrix:
         for i, column in enumerate(row):
-            column = unicode(column).encode("utf-8")
+            column = six.ensure_binary(six.text_type(column), "utf-8")
             cl = len(column)
             try:
                 ml = lengths[i]
@@ -556,7 +568,7 @@ def write_keyval(path, dictionary, type_tag=None):
 def is_url(path):
     """Return true if path looks like a URL"""
     # for now, just handle http and ftp
-    url_parts = urlparse.urlparse(path)
+    url_parts = six.moves.urllib.parse.urlparse(path)
     return (url_parts[0] in ('http', 'ftp'))
 
 
@@ -567,7 +579,7 @@ def urlopen(url, data=None, timeout=5):
     old_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(timeout)
     try:
-        return urllib2.urlopen(url, data=data)
+        return urllib.request.urlopen(url, data=data)
     finally:
         socket.setdefaulttimeout(old_timeout)
 
@@ -645,7 +657,7 @@ def unmap_url(srcdir, src, destdir='.'):
                             (after retrieving it)
     """
     if is_url(src):
-        url_parts = urlparse.urlparse(src)
+        url_parts = six.moves.urllib.parse.urlparse(src)
         filename = os.path.basename(url_parts[2])
         dest = os.path.join(destdir, filename)
         return get_file(src, dest)
@@ -730,7 +742,7 @@ def run(command, timeout=None, ignore_status=False, stdout_tee=None,
     @raise CmdError: the exit code of the command execution was not 0
     @raise CmdTimeoutError: the command timed out and ignore_timeout is False.
     """
-    if isinstance(args, basestring):
+    if isinstance(args, six.string_types):
         raise TypeError('Got a string for the "args" keyword argument, '
                         'need a sequence.')
 
@@ -738,7 +750,7 @@ def run(command, timeout=None, ignore_status=False, stdout_tee=None,
     # (For example, see get_user_hash in client/cros/cryptohome.py.)
     # So, to cover that case, detect if it's a string or not and convert it
     # into one if necessary.
-    if not isinstance(command, basestring):
+    if not isinstance(command, six.string_types):
         command = ' '.join([sh_quote_word(arg) for arg in command])
 
     command = ' '.join([command] + [sh_quote_word(arg) for arg in args])
@@ -783,7 +795,7 @@ def run_parallel(commands, timeout=None, ignore_status=False,
     bg_jobs = []
     if nicknames is None:
         nicknames = []
-    for (command, nickname) in itertools.izip_longest(commands, nicknames):
+    for (command, nickname) in zip_longest(commands, nicknames):
         bg_jobs.append(BgJob(command, stdout_tee, stderr_tee,
                              stderr_level=get_stderr_level(ignore_status),
                              nickname=nickname))
@@ -1103,7 +1115,7 @@ def strip_unicode(input_obj):
         for key in input_obj.keys():
             output[str(key)] = strip_unicode(input_obj[key])
         return output
-    elif type(input_obj) == unicode:
+    elif type(input_obj) == six.text_type:
         return str(input_obj)
     else:
         return input_obj
@@ -1164,7 +1176,7 @@ def get_arch_userspace(run_function=run):
 
     cmd = 'file --brief --dereference /bin/sh'
     filestr = run_function(cmd).stdout.rstrip()
-    for a, regex in archs.iteritems():
+    for a, regex in six.iteritems(archs):
         if re.match(regex, filestr):
             return a
 
@@ -1593,7 +1605,7 @@ def get_relative_path(path, reference):
     ref_list = reference.split(os.path.sep)[1:]
 
     # find the longest leading common path
-    for i in xrange(min(len(path_list), len(ref_list))):
+    for i in range(min(len(path_list), len(ref_list))):
         if path_list[i] != ref_list[i]:
             # decrement i so when exiting this loop either by no match or by
             # end of range we are one step behind
@@ -1790,7 +1802,7 @@ def ask(question, auto=False):
     if auto:
         logging.info("%s (y/n) y", question)
         return "y"
-    return raw_input("%s INFO | %s (y/n) " %
+    return input("%s INFO | %s (y/n) " %
                      (time.strftime("%H:%M:%S", time.localtime()), question))
 
 
@@ -2103,7 +2115,7 @@ def get_chrome_version(job_views):
 
     for view in job_views:
         if (view.get('attributes')
-            and constants.CHROME_VERSION in view['attributes'].keys()):
+            and constants.CHROME_VERSION in list(view['attributes'].keys())):
 
             return view['attributes'].get(constants.CHROME_VERSION)
 
@@ -2248,7 +2260,7 @@ def nuke_pids(pid_list, signal_queue=None):
         signal_queue = [signal.SIGTERM, signal.SIGKILL]
     sig_count = {}
     # Though this is slightly hacky it beats hardcoding names anyday.
-    sig_names = dict((k, v) for v, k in signal.__dict__.iteritems()
+    sig_names = dict((k, v) for v, k in six.iteritems(signal.__dict__)
                      if v.startswith('SIG'))
     for sig in signal_queue:
         logging.debug('Sending signal %s to the following pids:', sig)
@@ -2312,8 +2324,8 @@ def urlopen_socket_timeout(url, data=None, timeout=5):
     old_timeout = socket.getdefaulttimeout()
     socket.setdefaulttimeout(timeout)
     try:
-        return urllib2.urlopen(url, data=data)
-    except urllib2.URLError as e:
+        return urllib.request.urlopen(url, data=data)
+    except urllib.error.URLError as e:
         if type(e.reason) is socket.timeout:
             raise error.TimeoutException(str(e))
         raise
@@ -2590,7 +2602,7 @@ def is_in_same_subnet(ip_1, ip_2, mask_bits=24):
     @return: True if the two IP addresses are in the same subnet.
 
     """
-    mask = ((2L<<mask_bits-1) -1)<<(32-mask_bits)
+    mask = ((2<<mask_bits-1) -1)<<(32-mask_bits)
     ip_1_num = struct.unpack('!I', socket.inet_aton(ip_1))[0]
     ip_2_num = struct.unpack('!I', socket.inet_aton(ip_2))[0]
     return ip_1_num & mask == ip_2_num & mask
@@ -2638,7 +2650,7 @@ def get_servers_in_same_subnet(host_ip, mask_bits, servers=None,
     if not servers and not server_ip_map:
         raise ValueError('Either `servers` or `server_ip_map` must be given.')
     if not servers:
-        servers = server_ip_map.keys()
+        servers = list(server_ip_map.keys())
     # Make sure server_ip_map is an empty dict if it's not set.
     if not server_ip_map:
         server_ip_map = {}
@@ -3068,7 +3080,7 @@ def threaded_return(function):
         Creates the queue and starts the thread, then assigns extra attributes
         to the thread to give it result-storing capability.
         """
-        q = Queue.Queue()
+        q = six.moves.queue.Queue()
         t = threading.Thread(target=wrapped_t, args=(q,) + args, kwargs=kwargs)
         t.start()
         t.result_queue = q
@@ -3198,14 +3210,20 @@ def cherry_pick_args(func, args, dargs):
       A tuple of: (args tuple, keyword arguments dictionary)
     """
     # Cherry pick args:
-    if func.func_code.co_flags & 0x04:
+    if hasattr(func, "func_code"):
+        # Moock doesn't have __code__ in either py2 or 3 :(
+        flags = func.func_code.co_flags
+    else:
+        flags = func.__code__.co_flags
+
+    if flags & 0x04:
         # func accepts *args, so return the entire args.
         p_args = args
     else:
         p_args = ()
 
     # Cherry pick dargs:
-    if func.func_code.co_flags & 0x08:
+    if flags & 0x08:
         # func accepts **dargs, so return the entire dargs.
         p_dargs = dargs
     else:
@@ -3235,7 +3253,7 @@ def get_nonstar_args(func):
 
     @return: A tuple of parameters accepted by the function.
     """
-    return func.func_code.co_varnames[:func.func_code.co_argcount]
+    return func.__code__.co_varnames[:func.__code__.co_argcount]
 
 def crc8(buf):
     """Calculate CRC8 for a given int list.

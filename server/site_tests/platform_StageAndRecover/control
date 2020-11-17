@@ -11,7 +11,7 @@ TEST_CATEGORY = "Install"
 TEST_CLASS = "platform"
 TEST_TYPE = "server"
 DEPENDENCIES = "servo_state:WORKING"
-ATTRIBUTES = "suite:platform_test_nightly"
+ATTRIBUTES = "suite:platform_test"
 
 DOC = """
 This test stages and installs the same build recovery image onto a

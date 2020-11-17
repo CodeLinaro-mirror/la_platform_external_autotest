@@ -31,6 +31,9 @@ def run_TS(machine):
         uri='gs://chromeos-arc-images/cts/bundle/android-gts-8-R1-P-6720564.zip',
         prerequisites=['bluetooth'],
         use_jdk9=True,
+        # This module has a known waived abort bug (b/166052755). As long as the
+        # executed test count matches the known number, assume all tests ran.
+        executable_test_count=[768, 1152, 1536],
         timeout=86400)
 
 parallel_simple(run_TS, machines)

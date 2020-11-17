@@ -6,7 +6,7 @@ from autotest_lib.client.common_lib import utils
 
 AUTHOR = 'abergman, chromeos-engprod-platform-syd'
 NAME = 'storage_qual_v2_teardown'
-ATTRIBUTES = 'suite:storage_qual_v2_xl, suite:storage_qual_v2_l, suite:storage_qual_v2_m, suite:storage_qual_v2_s'
+ATTRIBUTES = 'suite:storage_qual_v2_xl, suite:storage_qual_v2_l, suite:storage_qual_v2_m, suite:storage_qual_v2_s, suite:storage_qual_v2_xs'
 TIME = 'lengthy'
 TEST_CATEGORY = 'Stress'
 TEST_CLASS = 'Hardware'

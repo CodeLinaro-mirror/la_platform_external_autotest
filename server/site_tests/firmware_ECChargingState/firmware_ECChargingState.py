@@ -37,10 +37,12 @@ class firmware_ECChargingState(FirmwareTest):
         self.switcher.setup_mode('normal')
         self.ec.send_command("chan save")
         self.ec.send_command("chan 0")
+        self.set_dut_low_power_idle_delay(20)
 
     def cleanup(self):
         try:
             self.ec.send_command("chan restore")
+            self.restore_dut_low_power_idle_delay()
         except Exception as e:
             logging.error("Caught exception: %s", str(e))
         super(firmware_ECChargingState, self).cleanup()

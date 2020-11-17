@@ -8,16 +8,12 @@ does not compare the file content, instead, it sorts the files with the same
 prefix and remove files in the middle part.
 """
 
-from __future__ import print_function
-from __future__ import division
-from __future__ import absolute_import
-
 import os
 import re
 
-from . import result_info_lib
-from . import throttler_lib
-from . import utils_lib
+import result_info_lib
+import throttler_lib
+import utils_lib
 
 
 # Number of files to keep for the oldest files.

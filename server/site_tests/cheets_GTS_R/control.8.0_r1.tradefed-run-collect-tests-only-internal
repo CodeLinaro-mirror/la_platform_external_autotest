@@ -28,7 +28,7 @@ def run_TS(machine):
         retry_template=None,
         target_module=None,
         target_plan=None,
-        uri='gs://chromeos-arc-images/cts/bundle/android-gts-8-R1-R-6720564.zip',
+        uri='LATEST',
         use_jdk9=True,
         timeout=1800)
 

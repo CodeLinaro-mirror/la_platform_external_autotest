@@ -150,7 +150,8 @@ class ServoV4ChargeManager(object):
         time.sleep(_ROLE_SETTLING_DELAY_SEC)
 
         if not verify:
-          return
+            return
+
         @retry.retry(error.TestError, timeout_min=_TIMEOUT_MIN,
                      delay_sec=_DELAY_SEC, backoff=_BACKOFF)
         def check_servo_role(role):
@@ -187,21 +188,10 @@ class ServoV4ChargeManager(object):
                      delay_sec=_DELAY_SEC, backoff=_BACKOFF)
         def check_host_ac(connected):
             """Check if DUT AC power is as expected, if not, retry."""
-            if self._host is None:
-                return
             if self._host.is_ac_connected() != connected:
                 intent = 'connect' if connected else 'disconnect'
                 raise error.TestError('DUT failed to %s AC power.'% intent)
-        # TODO(b:143467862): Replace this try/except with a servo.has_control()
-        # test once Sarien servo overlay correctly says that Sarien does not
-        # have this control.
-        try:
-            power_state = self._servo.get('ec_system_powerstate')
-        except error.TestFail:
-            logging.warn('Could not verify that the DUT observes power as the '
-                          '%r control is not available on servod.',
-                          'ec_system_powerstate')
-            power_state = None
-        if power_state == 'S0':
+
+        if self._host and self._host.is_up_fast():
             # If the DUT has been charging in S3/S5/G3, cannot verify.
             check_host_ac(connected)

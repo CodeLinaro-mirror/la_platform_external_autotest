@@ -1,14 +1,20 @@
+# Lint as: python2, python3
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import itertools
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import json
 import logging
 import os
 import re
 import shutil
-import urlparse
+from six.moves import zip
+from six.moves import zip_longest
+import six.moves.urllib.parse
 
 from datetime import datetime, timedelta
 from xml.etree import ElementTree
@@ -26,6 +32,7 @@ from chromite.lib import auto_updater
 from chromite.lib import auto_updater_transfer
 from chromite.lib import remote_access
 from chromite.lib import retry_util
+
 
 class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
     """Base class for all autoupdate_ server tests.
@@ -219,7 +226,8 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
 
         """
         archive_url, _, filename = payload_uri.rpartition('/')
-        build_name = urlparse.urlsplit(archive_url).path.strip('/')
+        build_name = six.moves.urllib.parse.urlsplit(archive_url).path.strip(
+                '/')
         filenames = [filename]
         if properties_file:
             filenames.append(filename + '.json')
@@ -245,8 +253,8 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
         """
         autotest_devserver = dev_server.ImageServer.resolve(
             test_conf['target_payload_uri'], self._host.hostname)
-        devserver_hostname = urlparse.urlparse(
-            autotest_devserver.url()).hostname
+        devserver_hostname = six.moves.urllib.parse.urlparse(
+                autotest_devserver.url()).hostname
         logging.info('Devserver chosen for this run: %s', devserver_hostname)
         return autotest_devserver
 
@@ -258,7 +266,7 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
 
         @param build: build string e.g eve-release/R85-13265.0.0.
         @param full_payload: True for full payload. False for delta.
-        @param is_dlc: True to get the payload URL for dummy-dlc.
+        @param is_dlc: True to get the payload URL for sample-dlc.
 
         @returns the payload URL.
 
@@ -276,13 +284,12 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
         # chromeos_R85-13265.0.0_eve_full_dev.bin
         # chromeos_R85-13265.0.0_R85-13265.0.0_eve_delta_dev.bin
         # Example payload names (DLC):
-        # dlc_dummy-dlc_package_R85-13265.0.0_eve_full_dev.bin
-        # dlc_dummy-dlc_package_R85-13265.0.0_R85-13265.0.0_eve_delta_dev.bin
+        # dlc_sample-dlc_package_R85-13265.0.0_eve_full_dev.bin
+        # dlc_sample-dlc_package_R85-13265.0.0_R85-13265.0.0_eve_delta_dev.bin
         if is_dlc:
             payload_prefix = 'dlc_*%s*_%s_*' % (build.rpartition('/')[2], '%s')
         else:
-            payload_prefix = 'chromeos_%s*_%s_*' % (build.rpartition('/')[2],
-                                                    '%s')
+            payload_prefix = 'chromeos_*_%s_*.bin'
 
         regex = payload_prefix % ('full' if full_payload else 'delta')
 
@@ -437,7 +444,7 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
             #       version="13265.0.0" track=...>
             #     <event eventtype="13" eventresult="1"></event>
             #   </app>
-            #   <app appid="{DB5199C7-358B-4E1F-B4F6-AF6D2DD01A38}_dummy-dlc"
+            #   <app appid="{DB5199C7-358B-4E1F-B4F6-AF6D2DD01A38}_sample-dlc"
             #       version="0.0.0.0" track=...>
             #     <event eventtype="13" eventresult="1"></event>
             #   </app>
@@ -477,7 +484,7 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
                 # by checking the appid. For platform, the appid looks like:
                 #     {DB5199C7-358B-4E1F-B4F6-AF6D2DD01A38}
                 # For DLCs, it is the platform app ID + _ + the DLC ID:
-                #     {DB5199C7-358B-4E1F-B4F6-AF6D2DD01A38}_dummy-dlc
+                #     {DB5199C7-358B-4E1F-B4F6-AF6D2DD01A38}_sample-dlc
                 id_segments = app.attrib.get('appid').split('_')
                 if len(id_segments) > 1:
                     dlc_id = id_segments[1]
@@ -504,6 +511,11 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
         rootfs update and for the post reboot update check.
 
         """
+        # Check that update logs exist for the update that just happened.
+        if len(self._get_update_engine_logs()) < 2:
+            err_msg = 'update_engine logs are missing. Cannot verify update.'
+            raise error.TestFail(err_msg)
+
         # Each time we reboot in the middle of an update we ping omaha again
         # for each update event. So parse the list backwards to get the final
         # events.
@@ -638,7 +650,8 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
         # build_name = dev-channel/samus/9334.0.0
         # payload_file = payloads/blah.bin
         build_name = payload_uri[:payload_uri.index('payloads/')]
-        build_name = urlparse.urlsplit(build_name).path.strip('/')
+        build_name = six.moves.urllib.parse.urlsplit(build_name).path.strip(
+                '/')
         payload_file = payload_uri[payload_uri.index('payloads/'):]
 
         logging.debug('Extracted build_name: %s, payload_file: %s from %s.',
@@ -714,8 +727,7 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
         except Exception as e:
             raise error.TestFail('Error reading the hostlog file: %s' % e)
 
-        for expected, actual in itertools.izip_longest(expected_events,
-                                                       hostlog_events):
+        for expected, actual in zip_longest(expected_events, hostlog_events):
             err_msg = self._verify_event_with_timeout(expected, actual)
             if err_msg is not None:
                 raise error.TestFail(('Hostlog verification failed: %s ' %
@@ -776,7 +788,7 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
 
         @param job_repo_url: string url containing the current build.
         @param full_payload: True for full, False for delta.
-        @param is_dlc: True to get the payload URL for dummy-dlc.
+        @param is_dlc: True to get the payload URL for sample-dlc.
 
         """
         self._job_repo_url = self._get_job_repo_url(job_repo_url)
@@ -796,7 +808,7 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
         @param job_repo_url: string url containing the current build.
         @param full_payload: bool whether we want a full payload.
         @param public_bucket: True to return a payload on a public bucket.
-        @param is_dlc: True to get the payload URL for dummy-dlc.
+        @param is_dlc: True to get the payload URL for sample-dlc.
 
         @returns string URL of a payload staged on a lab devserver.
 
@@ -822,8 +834,9 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
 
         @param payload_uri: The payload with which the device should be updated.
         @param clobber_stateful: Boolean that determines whether the stateful
-                                 of the device should be force updated. By
-                                 default, set to False
+                                 of the device should be force updated and the
+                                 TPM ownership should be cleared. By default,
+                                 set to False.
         @param tag: An identifier string added to each log filename.
 
         @raise error.TestFail if anything goes wrong with the update.
@@ -837,13 +850,17 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
         with remote_access.ChromiumOSDeviceHandler(
             self._host.hostname, base_dir=cros_preserved_path) as device:
             updater = auto_updater.ChromiumOSUpdater(
-                device, build_name, build_name,
-                yes=True,
-                payload_filename=payload_filename,
-                clobber_stateful=clobber_stateful,
-                do_stateful_update=True,
-                staging_server=self._autotest_devserver.url(),
-                transfer_class=auto_updater_transfer.LabEndToEndPayloadTransfer)
+                    device,
+                    build_name,
+                    build_name,
+                    yes=True,
+                    payload_filename=payload_filename,
+                    clobber_stateful=clobber_stateful,
+                    clear_tpm_owner=clobber_stateful,
+                    do_stateful_update=True,
+                    staging_server=self._autotest_devserver.url(),
+                    transfer_class=auto_updater_transfer.
+                    LabEndToEndPayloadTransfer)
 
             try:
                 updater.RunUpdate()

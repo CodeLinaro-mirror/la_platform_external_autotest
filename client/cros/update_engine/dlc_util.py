@@ -26,7 +26,7 @@ class DLCUtil(object):
 
     """
     _DLCSERVICE_UTIL_CMD = "dlcservice_util"
-    _DUMMY_DLC_ID = "dummy-dlc"
+    _SAMPLE_DLC_ID = "sample-dlc"
 
     def __init__(self, run_func=_DEFAULT_RUN):
         """
@@ -47,15 +47,15 @@ class DLCUtil(object):
         a dictionary containing the result of dlcservice_util --list, which
         looks like:
         {
-           "dummy-dlc": [ {
+           "sample-dlc": [ {
               "fs-type": "squashfs",
-              "id": "dummy-dlc",
+              "id": "sample-dlc",
               "image_type": "dlc",
-              "manifest": "/opt/google/dlc/dummy-dlc/package/imageloader.json",
-              "name": "Dummy DLC",
+              "manifest": "/opt/google/dlc/sample-dlc/package/imageloader.json",
+              "name": "Sample DLC",
               "package": "package",
               "preallocated_size": "4194304",
-              "root_mount": "/run/imageloader/dummy-dlc/package",
+              "root_mount": "/run/imageloader/sample-dlc/package",
               "size": "53248",
               "version": "1.0.0-r10"
            } ]

@@ -1,7 +1,14 @@
+# Lint as: python2, python3
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import logging
 import os
+import six
 import sys
 import time
+
 from autotest_lib.client.common_lib import utils
 
 # Set up a simple catchall configuration for use during import time.  Some code
@@ -35,7 +42,7 @@ class VarLogMessageFormatter(logging.Formatter):
         # On Brillo the logger binary is not available. Disable after error.
         if self._should_respew:
             try:
-                if isinstance(s, unicode):
+                if isinstance(s, six.text_type):
                     s = s.encode('utf8')
                 os.system('logger -t "autotest" "%s"' % utils.sh_escape(s))
             except OSError:

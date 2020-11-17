@@ -4,7 +4,8 @@
 
 AUTHOR = 'bfreed'
 NAME = 'network_WiFi_BluetoothStreamPerf.11b'
-ATTRIBUTES = 'suite:wifi_perf'
+# TODO(b/168842922) Schedule the test when it is fixed
+ATTRIBUTES = ''
 TIME = 'MEDIUM'
 TEST_TYPE = 'Server'
 DEPENDENCIES = 'wificell, working_bluetooth_btpeer:1'

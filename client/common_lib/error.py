@@ -1,12 +1,15 @@
+# Lint as: python2, python3
 #pylint: disable-msg=C0111
 
 """
 Internal global error types
 """
 
-from __future__ import print_function
-from __future__ import division
 from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import six
 
 import sys, traceback
 from traceback import format_exception
@@ -52,7 +55,7 @@ class UnhandledJobError(JobError):
     def __init__(self, unhandled_exception):
         if isinstance(unhandled_exception, JobError):
             JobError.__init__(self, *unhandled_exception.args)
-        elif isinstance(unhandled_exception, basestring):
+        elif isinstance(unhandled_exception, six.string_types):
             JobError.__init__(self, unhandled_exception)
         else:
             msg = "Unhandled %s: %s"
@@ -95,7 +98,7 @@ class UnhandledTestError(TestError):
     def __init__(self, unhandled_exception):
         if isinstance(unhandled_exception, TestError):
             TestError.__init__(self, *unhandled_exception.args)
-        elif isinstance(unhandled_exception, basestring):
+        elif isinstance(unhandled_exception, six.string_types):
             TestError.__init__(self, unhandled_exception)
         else:
             msg = "Unhandled %s: %s"
@@ -110,7 +113,7 @@ class UnhandledTestFail(TestFail):
     def __init__(self, unhandled_exception):
         if isinstance(unhandled_exception, TestFail):
             TestFail.__init__(self, *unhandled_exception.args)
-        elif isinstance(unhandled_exception, basestring):
+        elif isinstance(unhandled_exception, six.string_types):
             TestFail.__init__(self, unhandled_exception)
         else:
             msg = "Unhandled %s: %s"
@@ -510,7 +513,7 @@ class AutoservDiskSizeUnknownError(AutoservHostError):
 
 # This MUST remain at the end of the file.
 # Limit 'from error import *' to only import the exception instances.
-for _name, _thing in list(locals().items()):
+for _name, _thing in locals().items():
     try:
         if issubclass(_thing, Exception):
             __all__.append(_name)

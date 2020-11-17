@@ -29,11 +29,11 @@ class autoupdate_InstallAndUpdateDLC(update_engine_test.UpdateEngineTest):
         with nebraska_wrapper.NebraskaWrapper(
                 payload_url=payload_urls) as nebraska:
             nebraska_url = nebraska.get_update_url(critical_update=True)
-            logging.debug('Installing dummy-dlc')
+            logging.debug('Installing sample-dlc')
             # Nebraska will automatically use the full payload to install DLC.
-            self._dlc_util.install(self._dlc_util._DUMMY_DLC_ID, nebraska_url)
+            self._dlc_util.install(self._dlc_util._SAMPLE_DLC_ID, nebraska_url)
 
-            if not self._dlc_util.is_installed(self._dlc_util._DUMMY_DLC_ID):
+            if not self._dlc_util.is_installed(self._dlc_util._SAMPLE_DLC_ID):
                 raise error.TestFail('Dummy DLC was not installed.')
 
             logging.debug('Updating OS and DLC')

@@ -53,7 +53,7 @@ class bluetooth_AdapterLEBetterTogether(BluetoothAdapterBetterTogether):
                  num_iterations=1,
                  btpeer_args=[],
                  test_name=None,
-                 flag='Quick Sanity'):
+                 flag='Quick Health'):
         """Run the batch of Bluetooth LE tests for Better Together
 
         @param host: the DUT, usually a chromebook

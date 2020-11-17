@@ -330,13 +330,12 @@ class FirmwareUpdater(object):
         # Resign and flash the AP firmware back to the system
         self.cbfs_sign_and_flash()
 
-    def corrupt_diagnostics_image(self, local_filename):
+    def corrupt_diagnostics_image(self, local_path):
         """Corrupts a diagnostics image in the CBFS working directory.
 
-        @param local_filename: Filename for storing the diagnostics image in the
+        @param local_path: Filename for storing the diagnostics image in the
             CBFS working directory
         """
-        local_path = os.path.join(self._cbfs_work_path, local_filename)
 
         # Invert the last few bytes of the image. Note that cbfstool will
         # silently ignore bytes added after the end of the ELF, and it will
@@ -673,16 +672,16 @@ class FirmwareUpdater(object):
 
         return results
 
-    def cbfs_extract_diagnostics(self, diag_name, local_filename):
+    def cbfs_extract_diagnostics(self, diag_name, local_path):
         """Runs cbfstool to extract a diagnostics image.
 
         @param diag_name: Name of the diagnostics image in CBFS
-        @param local_filename: Filename for storing the diagnostics image in the
+        @param local_path: Filename for storing the diagnostics image in the
             CBFS working directory
         """
         return self.cbfs_extract(diag_name,
                                  '', ['RW_LEGACY'],
-                                 local_filename,
+                                 local_path,
                                  arch='x86')
 
     def cbfs_get_chip_hash(self, fw_name, hash_extension='.hash'):
@@ -785,17 +784,17 @@ class FirmwareUpdater(object):
         self.cbfs_truncate(regions)
         return True
 
-    def cbfs_replace_diagnostics(self, diag_name, local_filename):
+    def cbfs_replace_diagnostics(self, diag_name, local_path):
         """Runs cbfstool to replace a diagnostics image in the firmware image.
 
         @param diag_name: Name of the diagnostics image in CBFS
-        @param local_filename: Filename for storing the diagnostics image in the
+        @param local_path: Filename for storing the diagnostics image in the
             CBFS working directory
         """
         regions = ['RW_LEGACY']
         self.cbfs_expand(regions)
         self.cbfs_remove(diag_name, '', regions)
-        self.cbfs_add(diag_name, '', regions, local_filename=local_filename)
+        self.cbfs_add(diag_name, '', regions, local_path)
         self.cbfs_truncate(regions)
 
     def cbfs_sign_and_flash(self):

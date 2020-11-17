@@ -12,9 +12,9 @@ import re
 
 from autotest_lib.client.common_lib.cros import cr50_utils
 from autotest_lib.client.common_lib import error
+from autotest_lib.server import utils
 from autotest_lib.server.cros import filesystem_util, gsutil_wrapper
 from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
-from chromite.lib import gs
 
 
 # TOT cr50 images are built as part of the reef image builder.
@@ -50,12 +50,13 @@ class provision_Cr50TOT(FirmwareTest):
               contents of the path gs://<bucket>/<board> for any reason.
         """
         path = 'gs://%s/%s' % (bucket, board)
+        cmd = 'gsutil ls -- %s' % path
         try:
-            contents = gs.GSContext().List(path=path)
+            contents = utils.system_output(cmd).splitlines()
             latest_contents = contents[(num_builds * -1):]
             latest_builds = []
             for content in latest_contents:
-                latest_builds.append(content.url.strip(path).strip('/'))
+                latest_builds.append(content.strip(path).strip('/'))
             latest_builds.reverse()
             logging.info('Checking latest builds %s', latest_builds)
             return latest_builds

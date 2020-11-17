@@ -11,9 +11,9 @@ In particular, following test blocks are generated:
 - 99_teardown_benchmarks: final test benchmarks
 
 Generated tests are executed by one of the four test suites, according to the required
-test length: storage_qual_v2_s, storage_qual_v2_m, storage_qual_v2_l and
-storage_qual_v2_xl for small, medium, large and extra-large test length. The difference
-in test length is number of universal test blocks: 10, 20, 30 or 40 respectively.
+test length: storage_qual_v2_xs, storage_qual_v2_s, storage_qual_v2_m, storage_qual_v2_l
+and storage_qual_v2_xl for extra small, small, medium, large and extra-large test length.
+The difference is number of universal test blocks: 2, 10, 20, 30 or 40 respectively.
 """
 import os
 
@@ -55,6 +55,8 @@ def _get_suite_attributes(iteration):
         attrs += ['suite:%s_m' % SUITE]
     if iteration < 10:
         attrs += ['suite:%s_s' % SUITE]
+    if iteration < 2:
+        attrs += ['suite:%s_xs' % SUITE]
     return attrs
 
 

@@ -30,8 +30,6 @@ The content of the json file looks like:
 from __future__ import division
 from __future__ import print_function
 
-from __future__ import absolute_import
-
 import argparse
 import copy
 import fnmatch
@@ -44,14 +42,14 @@ import sys
 import time
 import traceback
 
-from . import dedupe_file_throttler
-from . import delete_file_throttler
-from . import result_info
-from . import shrink_file_throttler
+import dedupe_file_throttler
+import delete_file_throttler
+import result_info
+import shrink_file_throttler
 from six.moves import range
-from . import throttler_lib
-from . import utils_lib
-from . import zip_file_throttler
+import throttler_lib
+import utils_lib
+import zip_file_throttler
 
 
 # Do NOT import autotest_lib modules here. This module can be executed without

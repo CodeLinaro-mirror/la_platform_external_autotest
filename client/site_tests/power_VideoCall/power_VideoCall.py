@@ -116,7 +116,7 @@ class power_VideoCall(power_test.power_Test):
         HIGH_IF_HAS_FAN_REGEX = r'''
             Intel[ ]Core[ ]i[357]-[6-9][0-9]{3}U|     # Intel Core i7-8650U
             Intel[ ]Core[ ]i[357]-1[0-9]{4}U|         # Intel Core i7-10510U
-            AMD[ ]Ryzen[ ][357]-[3-9][0-9]{3}C|       # AMD Ryzen 7 3700C
+            AMD[ ]Ryzen[ ][357][ ][3-9][0-9]{3}C|     # AMD Ryzen 7 3700C
             Genuine[ ]Intel[ ]0000                    # Unrelease CPU
         '''
         MEDIUM_REGEX = r'''

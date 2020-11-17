@@ -172,9 +172,9 @@ class bluetooth_AdapterPowerMeasure(BluetoothAdapterQuickTests):
         self._cleanup_servod(device)
 
 
-    @batch_wrapper('Bluetooth Power Measurement Sanity Tests')
-    def pw_sanity_batch_run(self, num_iterations=1, test_name=None):
-        """Run bluetooth power measurement sanity test batch or a specific test.
+    @batch_wrapper('Bluetooth Power Measurement Health Tests')
+    def pw_health_batch_run(self, num_iterations=1, test_name=None):
+        """Run bluetooth power measurement health test batch or a specific test.
 
         @param num_iterations: how many iterations to run
         @param test_name: specific test to run otherwise None to run the
@@ -190,7 +190,7 @@ class bluetooth_AdapterPowerMeasure(BluetoothAdapterQuickTests):
                  test_name=None,
                  max_power_mw=3,
                  suspend_time_secs=30,
-                 flag='Quick Sanity'):
+                 flag='Quick Health'):
         """Running Bluetooth adapter power consumption autotest during system
         suspension.
 
@@ -209,5 +209,5 @@ class bluetooth_AdapterPowerMeasure(BluetoothAdapterQuickTests):
                              use_btpeer=True,
                              flag=flag,
                              btpeer_args=btpeer_args)
-        self.pw_sanity_batch_run(num_iterations, test_name)
+        self.pw_health_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

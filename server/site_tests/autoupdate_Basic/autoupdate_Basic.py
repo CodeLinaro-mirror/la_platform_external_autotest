@@ -31,6 +31,6 @@ class autoupdate_Basic(update_engine_test.UpdateEngineTest):
 
         # Verify the update completed successfully.
         self._host.reboot()
+        kernel_utils.verify_boot_expectations(inactive, host=self._host)
         rootfs_hostlog, _ = self._create_hostlog_files()
         self.verify_update_events(self._FORCED_UPDATE, rootfs_hostlog)
-        kernel_utils.verify_boot_expectations(inactive, host=self._host)

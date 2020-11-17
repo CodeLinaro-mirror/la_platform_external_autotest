@@ -53,7 +53,7 @@ cts_test = args_dict.get('test', cts_test)
 cts_timeout = float(args_dict.get('timeout', cts_timeout))
 cts_retry = int(args_dict.get('max_retry', cts_retry))
 
-# Sanity checks.
+# Basic checks for option validity.
 logging.error('Running module %s with test %s on abi %s and revision %s',
               cts_module, cts_test, cts_abi, cts_revision)
 if not cts_abi or not cts_module or not cts_test:

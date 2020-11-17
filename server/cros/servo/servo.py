@@ -196,7 +196,7 @@ class _WrapServoErrors(object):
                     # The error message for unavailable controls is huge, since
                     # it reports all known controls.  Don't log the full text.
                     unknown_ctrl_name = unknown_ctrl.group('name')
-                    logging.error('%s :: No control named %r',
+                    logging.debug('%s :: No control named %r',
                                   self.description, unknown_ctrl_name)
                     err = ControlUnavailableError(
                             'No control named %r' % unknown_ctrl_name)
@@ -678,11 +678,11 @@ class Servo(object):
         """Returns the servod version."""
         # TODO: use system_output once servod --sversion prints to stdout
         try:
-            result = self._servo_host.run('servod --sversion')
+            result = self._servo_host.run('servod --sversion 2>&1')
         except error.AutoservRunError as e:
             if 'command execution error' in str(e):
                 # Fall back to version if sversion is not supported yet.
-                result = self._servo_host.run('servod --version')
+                result = self._servo_host.run('servod --version 2>&1')
                 return result.stdout.strip() or result.stderr.strip()
             # An actually unexpected error occurred, just raise.
             raise e
@@ -1426,18 +1426,22 @@ class Servo(object):
             logging.warn('Not a Chrome EC, ignore re-programming it')
             return None
 
-        # Array of candidates for EC image
-        ec_image_candidates = ['ec.bin',
-                               '%s/ec.bin' % model,
-                               '%s/ec.bin' % board]
-
-        # Best effort; try to retrieve the EC board from the version as
-        # reported by the EC.
+        # Try to retrieve firmware build target from the version reported
+        # by the EC. If this doesn't work, we assume the firmware build
+        # target is the same as the model name.
         try:
-            ec_image_candidates.append('%s/ec.bin' % self.get_ec_board())
+            fw_target = self.get_ec_board()
         except Exception as err:
             logging.warn('Failed to get ec_board value; ignoring')
+            fw_target = model
             pass
+
+        # Array of candidates for EC image
+        ec_image_candidates = [
+                'ec.bin',
+                '%s/ec.bin' % fw_target,
+                '%s/ec.bin' % board
+        ]
 
         # Extract EC image from tarball
         dest_dir = os.path.join(os.path.dirname(tarball_path), 'EC')
@@ -1471,18 +1475,22 @@ class Servo(object):
         @return: Path to extracted BIOS image.
         """
 
-        # Array of candidates for BIOS image
-        bios_image_candidates = ['image.bin',
-                                 'image-%s.bin' % model,
-                                 'image-%s.bin' % board]
-
-        # Best effort; try to retrieve the EC board from the version as
-        # reported by the EC.
+        # Try to retrieve firmware build target from the version reported
+        # by the EC. If this doesn't work, we assume the firmware build
+        # target is the same as the model name.
         try:
-            bios_image_candidates.append('image-%s.bin' % self.get_ec_board())
+            fw_target = self.get_ec_board()
         except Exception as err:
             logging.warn('Failed to get ec_board value; ignoring')
+            fw_target = model
             pass
+
+        # Array of candidates for BIOS image
+        bios_image_candidates = [
+                'image.bin',
+                'image-%s.bin' % fw_target,
+                'image-%s.bin' % board
+        ]
 
         # Extract BIOS image from tarball
         dest_dir = os.path.join(os.path.dirname(tarball_path), 'BIOS')

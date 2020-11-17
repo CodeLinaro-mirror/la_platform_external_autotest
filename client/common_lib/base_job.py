@@ -1,12 +1,17 @@
+# Lint as: python2, python3
 # pylint: disable=missing-docstring
 
-import cPickle as pickle
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import copy
 import errno
 import fcntl
 import logging
 import os
 import re
+import six
+import six.moves.cPickle as pickle
 import tempfile
 import time
 import traceback
@@ -96,7 +101,7 @@ class job_directory(object):
         if is_writable:
             try:
                 os.makedirs(self.path)
-            except OSError, e:
+            except OSError as e:
                 if e.errno != errno.EEXIST or not os.path.isdir(self.path):
                     raise self.UncreatableDirectoryException(self.path, e)
         elif not os.path.isdir(self.path):
@@ -236,9 +241,9 @@ class job_state(object):
 
         if merge:
             # merge the on-disk state with the in-memory state
-            for namespace, namespace_dict in on_disk_state.iteritems():
+            for namespace, namespace_dict in six.iteritems(on_disk_state):
                 in_memory_namespace = self._state.setdefault(namespace, {})
-                for name, value in namespace_dict.iteritems():
+                for name, value in six.iteritems(namespace_dict):
                     if name in in_memory_namespace:
                         if in_memory_namespace[name] != value:
                             logging.info('Persistent value of %s.%s from %s '
@@ -495,7 +500,7 @@ class status_log_entry(object):
             self.fields = {}
         else:
             self.fields = fields.copy()
-        for key, value in self.fields.iteritems():
+        for key, value in six.iteritems(self.fields):
             if type(value) is int:
                 value = str(value)
             if self.BAD_CHAR_REGEX.search(key + value):
@@ -534,7 +539,7 @@ class status_log_entry(object):
         # combine all the log line data into a tab-delimited string
         subdir = self.subdir or self.RENDERED_NONE_VALUE
         operation = self.operation or self.RENDERED_NONE_VALUE
-        extra_fields = ['%s=%s' % field for field in self.fields.iteritems()]
+        extra_fields = ['%s=%s' % field for field in six.iteritems(self.fields)]
         line_items = [self.status_code, subdir, operation]
         line_items += extra_fields + [self.message]
         first_line = '\t'.join(line_items)
@@ -673,7 +678,7 @@ class status_logger(object):
         for log_file in log_files:
             fileobj = open(log_file, 'a')
             try:
-                print >> fileobj, log_text
+                print(log_text, file=fileobj)
             finally:
                 fileobj.close()
 
@@ -989,7 +994,7 @@ class base_job(object):
         try:
             outputdir = self._job_directory(path, True)
             return outputdir
-        except self._job_directory.JobDirectoryException, e:
+        except self._job_directory.JobDirectoryException as e:
             logging.exception('%s directory creation failed with %s',
                               subdir, e)
             raise error.TestError('%s directory creation failed' % subdir)

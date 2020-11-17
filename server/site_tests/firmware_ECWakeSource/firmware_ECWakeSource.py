@@ -37,7 +37,7 @@ class firmware_ECWakeSource(FirmwareTest):
     def cleanup(self):
         # Restore the lid_open switch in case the test failed in the middle.
         if self.check_ec_capability(['lid']):
-          self.servo.set('lid_open', 'yes')
+            self.servo.set('lid_open', 'yes')
         super(firmware_ECWakeSource, self).cleanup()
 
     def hibernate_and_wake_by_power_button(self, host):
@@ -88,6 +88,30 @@ class firmware_ECWakeSource(FirmwareTest):
             raise error.TestFail('Platform failed to reach S0 state.')
         self.switcher.wait_for_client(timeout=self.RESUME_TIMEOUT)
 
+    def suspend_and_dont_wake(self, suspend_func, wake_func):
+        """Suspend and then check the the device doesn't wake up.
+
+        Args:
+            suspend_func: The method used to suspend the device
+            wake_func: The method used to wake the device
+        """
+        suspend_func()
+        self.switcher.wait_for_client_offline()
+        if not self.wait_power_state(self.POWER_STATE_SUSPEND,
+                                     self.POWER_STATE_RETRY_COUNT):
+            raise error.TestFail('Platform failed to reach S0ix or S3 state.')
+        time.sleep(self.SUSPEND_WAIT_TIME_SECONDS)
+        wake_func()
+        if self.wait_power_state(self.POWER_STATE_S0,
+                                 self.POWER_STATE_RETRY_COUNT):
+            raise error.TestFail('Platform woke up unexpectedly.')
+        else:
+            self.servo.power_normal_press()
+            if not self.wait_power_state(self.POWER_STATE_S0,
+                                         self.POWER_STATE_RETRY_COUNT):
+                raise error.TestFail('Platform failed to reach S0 state.')
+        self.switcher.wait_for_client(timeout=self.RESUME_TIMEOUT)
+
     def run_once(self, host):
         """Runs a single iteration of the test."""
         # Login as a normal user and stay there, such that closing lid triggers
@@ -106,28 +130,47 @@ class firmware_ECWakeSource(FirmwareTest):
         if not self.check_ec_capability(['keyboard']):
             logging.info('The device has no internal keyboard. '
                          'Skip testing suspend/resume by internal keyboard.')
+        elif not self.ec.has_command('ksstate'):
+            logging.info('The device does not support the ksstate command. '
+                         'Skip testing suspend/resume by internal keyboard.')
         else:
-            logging.info('Suspend and wake by internal key press.')
-            self.suspend_and_wake(self.suspend,
-                                  lambda:self.ec.key_press('<enter>'))
+            result = self.ec.send_command_get_output(
+                    'ksstate',
+                    ['Keyboard scan disable mask: 0x([0-9a-fA-F]{8})'])
+            kb_scan_disable_mask = int(result[0][1], 16)
+            if kb_scan_disable_mask == 0:
+                logging.info('Suspend and wake by internal key press.')
+                self.suspend_and_wake(self.suspend,
+                                      lambda: self.ec.key_press('<enter>'))
+            else:
+                logging.info('Tablet mode enabled; suspend and check device '
+                             'does not wake by internal key press.')
+                self.suspend_and_dont_wake(
+                        self.suspend, lambda: self.ec.key_press('<enter>'))
 
-        logging.info('Suspend and wake by USB HID key press.')
+        if not self.faft_config.usb_hid_wake_enabled:
+            logging.info('Device does not support wake by USB HID. '
+                         'Skip suspend and wake by USB HID key press.')
+        else:
+            logging.info('Suspend and wake by USB HID key press.')
 
-        logging.debug('Initializing HID keyboard emulator.')
-        self.servo.set_nocheck('init_usb_keyboard', 'on')
-        time.sleep(self.USB_PRESENT_DELAY)
+            logging.debug('Initializing HID keyboard emulator.')
+            self.servo.set_nocheck('init_usb_keyboard', 'on')
+            time.sleep(self.USB_PRESENT_DELAY)
 
-        try:
-            self.suspend_and_wake(self.suspend,
-                    lambda:self.servo.set_nocheck('usb_keyboard_enter_key',
-                                                  'press'))
-        except ConnectionError:
-            raise error.TestFail('USB HID suspend/resume fails. Maybe try to '
-                    'update firmware for Atmel USB KB emulator by running '
-                    'firmware_FlashServoKeyboardMap test and then try again?')
+            try:
+                self.suspend_and_wake(self.suspend,
+                        lambda:self.servo.set_nocheck('usb_keyboard_enter_key',
+                                                      'press'))
+            except ConnectionError:
+                raise error.TestFail(
+                        'USB HID suspend/resume fails. Maybe try to '
+                        'update firmware for Atmel USB KB emulator by running '
+                        'firmware_FlashServoKeyboardMap test and then try again?'
+                )
 
-        logging.debug('Turning off HID keyboard emulator.')
-        self.servo.set_nocheck('init_usb_keyboard', 'off')
+            logging.debug('Turning off HID keyboard emulator.')
+            self.servo.set_nocheck('init_usb_keyboard', 'off')
 
         if not self.check_ec_capability(['lid']):
             logging.info('The device has no lid. '
