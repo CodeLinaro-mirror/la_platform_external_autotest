@@ -50,6 +50,7 @@ suite:bvt-tast-android-pfq
 suite:bvt-tast-chrome-pfq
 suite:bvt-tast-cq
 suite:bvt-tast-informational
+suite:camera-postsubmit
 suite:camerabox_facing-back
 suite:camerabox_facing-front
 suite:cellular_endtoend
@@ -77,6 +78,7 @@ suite:crosbolt_perf_nightly
 suite:crosbolt_perf_perbuild
 suite:crosbolt_perf_weekly
 suite:cts_P
+suite:cts
 suite:cups_weekly
 suite:debug_kernel_testing
 suite:deqp
@@ -135,6 +137,7 @@ suite:gts
 suite:hotrod
 suite:hotrod-remora
 suite:hwqual
+suite:infra_qual
 suite:jailed_build
 suite:kernel_daily_benchmarks
 suite:kernel_daily_regression

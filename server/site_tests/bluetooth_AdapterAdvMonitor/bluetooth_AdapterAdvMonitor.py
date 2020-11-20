@@ -78,7 +78,7 @@ class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
                  host,
                  num_iterations=1,
                  peer_required=True,
-                 btpeer_args=[],
+                 args_dict=None,
                  test_name=None,
                  flag='Quick Health'):
         """Run the batch of Bluetooth Advertisement Monitor API tests.
@@ -93,6 +93,6 @@ class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
         self.quick_test_init(host,
                              use_btpeer=peer_required,
                              flag=flag,
-                             btpeer_args=btpeer_args)
+                             args_dict=args_dict)
         self.advmon_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

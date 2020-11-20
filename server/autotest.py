@@ -52,6 +52,8 @@ AUTOSERV_PREBUILD = _CONFIG.get_config_value(
 _FAIL_STATUS_RE = re.compile(
     r'\s*FAIL.*localtime=.*\s*.*\s*[0-9]+:[0-9]+:[0-9]+\s*(?P<fail_msg>.*)')
 
+LOG_BUFFER_SIZE_BYTES = 64
+
 
 class AutodirNotFoundError(Exception):
     """No Autotest installation could be found."""
@@ -417,7 +419,7 @@ class Autotest(installable_object.InstallableObject):
         logging.info('Installing updated global_config.ini.')
         destination = os.path.join(self.host.get_autodir(),
                                    'global_config.ini')
-        with tempfile.NamedTemporaryFile() as client_config:
+        with tempfile.NamedTemporaryFile(mode='w') as client_config:
             config = global_config.global_config
             client_section = config.get_section_values('CLIENT')
             client_section.write(client_config)
@@ -987,7 +989,7 @@ class _Run(object):
         client_log_prefix = self.get_client_log()
         client_log_path = os.path.join(self.results_dir, 'debug',
                                        client_log_prefix + '.log')
-        client_log = open(client_log_path, 'w', 0)
+        client_log = open(client_log_path, 'w', LOG_BUFFER_SIZE_BYTES)
         self.copy_client_config_file(client_log_prefix)
 
         stdout_read = stderr_read = 0

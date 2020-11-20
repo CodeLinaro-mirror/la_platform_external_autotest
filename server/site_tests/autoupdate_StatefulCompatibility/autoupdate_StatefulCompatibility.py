@@ -9,8 +9,10 @@ import re
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils as cutils
+from autotest_lib.client.common_lib.cros import kernel_utils
 from autotest_lib.client.cros import constants
 from autotest_lib.server import utils
+from autotest_lib.server.cros import provisioner
 from autotest_lib.server.cros.update_engine import update_engine_test
 
 
@@ -280,12 +282,36 @@ class autoupdate_StatefulCompatibility(update_engine_test.UpdateEngineTest):
         self._stage_payloads(self._target_payload_uri, None)
 
         if self._source_payload_uri is not None:
-            logging.debug('Going to install source image on DUT.')
-            self.update_device(self._source_payload_uri, clobber_stateful=True)
+            build_name, _ = self._get_update_parameters_from_uri(
+                    self._source_payload_uri)
+            update_url = self._autotest_devserver.get_update_url(build_name)
+            logging.info('Installing source image with update url: %s',
+                         update_url)
+
+            provisioner.ChromiumOSProvisioner(
+                    update_url, host=self._host,
+                    is_release_bucket=True).run_provision()
+
             self._run_client_test_and_check_result(self._LOGIN_TEST,
                                                    tag='source')
 
+        # Record the active root partition.
+        active, inactive = kernel_utils.get_kernel_state(self._host)
+        logging.info('Source active slot: %s', active)
+
+        # Get the source and target versions for verifying hostlog update events.
+        source_release = self._host.get_release_version()
+        target_release, _ = self._get_update_parameters_from_uri(
+                self._target_payload_uri)
+        target_release = target_release.split('/')[-1]
+
         logging.debug('Going to install target image on DUT.')
         self.update_device(self._target_payload_uri, tag='target')
+
+        # Compare hostlog events from the update to the expected ones.
+        rootfs, reboot = self._create_hostlog_files()
+        self.verify_update_events(source_release, rootfs)
+        self.verify_update_events(source_release, reboot, target_release)
+        kernel_utils.verify_boot_expectations(inactive, host=self._host)
 
         self._run_client_test_and_check_result(self._LOGIN_TEST, tag='target')

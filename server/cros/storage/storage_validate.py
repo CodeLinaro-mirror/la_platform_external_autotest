@@ -257,8 +257,6 @@ class StorageStateValidator(object):
             return STORAGE_STATE_NORMAL
 
         # set state based on life of estimates
-        elif lev_value == -1:
-            raise StorageError('Storage state cannot be detected')
         elif lev_value < 90:
             return STORAGE_STATE_NORMAL
         elif lev_value < 100:
@@ -283,8 +281,6 @@ class StorageStateValidator(object):
                     logging.info('Could not cast: %s to int ', param)
                 break
 
-        if used_value < 0:
-            raise StorageError('Storage state cannot be detected')
         if used_value < 91:
             return STORAGE_STATE_NORMAL
         # Stop mark device as bad when they reached 100% usage

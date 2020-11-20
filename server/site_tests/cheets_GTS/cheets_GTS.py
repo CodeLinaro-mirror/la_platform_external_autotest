@@ -23,7 +23,7 @@ from autotest_lib.server.cros.tradefed import tradefed_test
 # Maximum default time allowed for each individual GTS module.
 _GTS_TIMEOUT_SECONDS = 3600
 _PARTNER_GTS_BUCKET = 'gs://chromeos-partner-gts/'
-_PARTNER_GTS_LOCATION = _PARTNER_GTS_BUCKET + 'gts-8_r1-6720564.zip'
+_PARTNER_GTS_LOCATION = _PARTNER_GTS_BUCKET + 'gts-8-R2-6955212.zip'
 _PARTNER_GTS_AUTHKEY = _PARTNER_GTS_BUCKET + 'gts-arc.json'
 _GTS_MEDIA_URI = ('https://storage.googleapis.com/youtube-test-media/gts/' +
                   'GtsYouTubeTestCases-media-1.2.zip')

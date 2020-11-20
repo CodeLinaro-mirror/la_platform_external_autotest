@@ -75,7 +75,7 @@ class _BaseFwBypasser(object):
                 mv = self.servo.get('vbus_voltage')
                 # Despite the faft_config, make sure the issue occurs -
                 # servo is snk and vbus is not supplied.
-                if mv < 1000.0:
+                if mv < self.servo.VBUS_THRESHOLD:
                     # Make servo SRC to supply Vbus correctly
                     self.servo.set_servo_v4_role('src')
                     time.sleep(self.faft_framework.PD_RESYNC_DELAY)

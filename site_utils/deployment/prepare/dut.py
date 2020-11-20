@@ -23,10 +23,17 @@ from autotest_lib.server import hosts
 from autotest_lib.server import site_utils as server_utils
 from autotest_lib.server.hosts import host_info
 from autotest_lib.server.hosts import servo_host
+from autotest_lib.server.hosts import cros_constants
 from autotest_lib.server.hosts import servo_constants
 
 
 _FIRMWARE_UPDATE_TIMEOUT = 600
+# Check battery level with retries.
+# If battery level is low then sleep to 15 minutes.
+_BATTERY_LEVEL_CHECK_RETRIES = 8
+_BATTERY_LEVEL_CHECK_RETRIES_TIMEOUT = 900
+# We expecting that battery will change more than 4% for 15 minutes.
+_BATTERY_LEVEL_CHANGE_IN_ONE_RETRY = 4
 
 
 @contextlib.contextmanager
@@ -177,10 +184,45 @@ def verify_battery_status(host):
         raise Exception(
                 'Unexpected battery status. Please verify that DUT prepared'
                 ' for deployment.')
-    if status in ['Discharging']:
+
+    # Verify battery level to avoid cases when DUT in factory mode which can
+    # block battery from charging. Retry check will take 8 attempts by
+    # 15 minutes to allow battery to reach required level.
+    battery_level_good = False
+    last_battery_level = 0
+    for _ in range(_BATTERY_LEVEL_CHECK_RETRIES):
+        power_info = host.get_power_supply_info()
+        battery_level = float(power_info['Battery']['percentage'])
+        # Verify if battery reached the required level
+        battery_level_good = battery_level >= cros_constants.MIN_BATTERY_LEVEL
+        if battery_level_good:
+            # Stop retry as battery reached the required level
+            break
+        logging.info(
+                'Battery level %s%% is lower than expected %s%%.'
+                ' Sleep for %s seconds to try again', battery_level,
+                cros_constants.MIN_BATTERY_LEVEL,
+                _BATTERY_LEVEL_CHECK_RETRIES_TIMEOUT)
+        time.sleep(_BATTERY_LEVEL_CHECK_RETRIES_TIMEOUT)
+
+        if last_battery_level > 0:
+            # If level of battery is changing less than 4% per 15 minutes
+            # then we can assume that the battery is not charging as expected
+            # or stuck on some level.
+            battery_level_change = abs(last_battery_level - battery_level)
+            if battery_level_change < _BATTERY_LEVEL_CHANGE_IN_ONE_RETRY:
+                logging.info(
+                        'Battery charged less than 4%% for 15 minutes which'
+                        ' means that something wrong with charging.'
+                        ' Stop retry to charge it. Battery level: %s%%',
+                        battery_level)
+                break
+        last_battery_level = battery_level
+    if not battery_level_good:
         raise Exception(
-                'Unexpected battery status. Please verify that DUT connected'
-                ' to power and charging.')
+                'Battery is not charged or discharging.'
+                ' Please verify that DUT connected to power and charging.'
+                ' Possible that the DUT is not ready for deployment in lab.')
     logging.info("Battery status verification passed!")
 
 

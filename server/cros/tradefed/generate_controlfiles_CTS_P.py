@@ -10,7 +10,7 @@ CONFIG = {}
 
 CONFIG['TEST_NAME'] = 'cheets_CTS_P'
 CONFIG['DOC_TITLE'] = 'Android Compatibility Test Suite (CTS)'
-CONFIG['MOBLAB_SUITE_NAME'] = 'suite:cts_P'
+CONFIG['MOBLAB_SUITE_NAME'] = 'suite:cts_P, suite:cts'
 CONFIG['COPYRIGHT_YEAR'] = 2018
 CONFIG['AUTHKEY'] = ''
 
@@ -64,27 +64,27 @@ CONFIG['CTS_MAX_RETRIES'] = {
 # Timeout in hours.
 CONFIG['CTS_TIMEOUT_DEFAULT'] = 1.0
 CONFIG['CTS_TIMEOUT'] = {
-    'CtsActivityManagerDeviceTestCases': 2.0,
-    'CtsAppSecurityHostTestCases':       2.0,
-    'CtsAutoFillServiceTestCases':       6.0,  # TODO(b/145092442)
-    'CtsCameraTestCases':                2.0,  # TODO(b/150657700)
-    'CtsDeqpTestCases':                 20.0,
-    'CtsDeqpTestCases.dEQP-EGL'  :       2.0,
-    'CtsDeqpTestCases.dEQP-GLES2':       2.0,
-    'CtsDeqpTestCases.dEQP-GLES3':       6.0,
-    'CtsDeqpTestCases.dEQP-GLES31':      6.0,
-    'CtsDeqpTestCases.dEQP-VK':         15.0,
-    'CtsFileSystemTestCases':            3.0,
-    'CtsIcuTestCases':                   2.0,
-    'CtsLibcoreOjTestCases':             2.0,
-    'CtsMediaStressTestCases':           5.0,
-    'CtsMediaTestCases':                10.0,
-    'CtsPrintTestCases':                 1.5,
-    'CtsSecurityTestCases':              2.0,
-    'CtsVideoTestCases':                 1.5,
-    _COLLECT:                            2.5,
-    _PUBLIC_COLLECT:                     2.5,
-    _WM_PRESUBMIT:                       0.2,
+        'CtsActivityManagerDeviceTestCases': 2.0,
+        'CtsAppSecurityHostTestCases': 4.0,  # TODO(b/172409836)
+        'CtsAutoFillServiceTestCases': 6.0,  # TODO(b/145092442)
+        'CtsCameraTestCases': 2.0,  # TODO(b/150657700)
+        'CtsDeqpTestCases': 20.0,
+        'CtsDeqpTestCases.dEQP-EGL': 2.0,
+        'CtsDeqpTestCases.dEQP-GLES2': 2.0,
+        'CtsDeqpTestCases.dEQP-GLES3': 6.0,
+        'CtsDeqpTestCases.dEQP-GLES31': 6.0,
+        'CtsDeqpTestCases.dEQP-VK': 15.0,
+        'CtsFileSystemTestCases': 3.0,
+        'CtsIcuTestCases': 2.0,
+        'CtsLibcoreOjTestCases': 2.0,
+        'CtsMediaStressTestCases': 5.0,
+        'CtsMediaTestCases': 10.0,
+        'CtsPrintTestCases': 1.5,
+        'CtsSecurityTestCases': 2.0,
+        'CtsVideoTestCases': 1.5,
+        _COLLECT: 2.5,
+        _PUBLIC_COLLECT: 2.5,
+        _WM_PRESUBMIT: 0.2,
 }
 
 # Any test that runs as part as blocking BVT needs to be stable and fast. For

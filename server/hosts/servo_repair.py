@@ -78,6 +78,13 @@ class _UpdateVerifier(hosts.Verifier):
                              " by labstation AdminRepair task.")
                 return
             if host.is_in_lab() and host.job and host.job.in_lab:
+                if (
+                        not host.get_dut_host_info() or
+                        not host.get_dut_host_info().servo_cros_stable_version
+                ):
+                    logging.info('Servo stable version missed.'
+                                 ' Skip update check action.')
+                    return
                 # We have seen cases that invalid GPT headers/entries block
                 # v3s from been update, so always try to repair here.
                 # See crbug.com/994396, crbug.com/1057302.
@@ -340,10 +347,10 @@ class _Cr50ConsoleVerifier(hosts.Verifier):
                         sys.exc_info()[2])
 
     def _is_applicable(self, host):
-        if host.get_servo():
-            # Only when DUT connect by type-c.
-            return host.get_servo().get_main_servo_device() == 'ccd_cr50'
-        return False
+        # Only when DUT is running through ccd.
+        # TODO(coconutruben): replace with ccd API when available in servo.py
+        return (host.get_servo()
+                and host.get_servo().get_main_servo_device() == 'ccd_cr50')
 
     @property
     def description(self):
@@ -377,10 +384,10 @@ class _CCDTestlabVerifier(hosts.Verifier):
             'to enable it (go/ccd-setup).')
 
     def _is_applicable(self, host):
-        if host.get_servo():
-            # Only when DUT connect by type-c.
-            return host.get_servo().get_main_servo_device() == 'ccd_cr50'
-        return False
+        # Only when DUT is running through ccd.
+        # TODO(coconutruben): replace with ccd API when available in servo.py
+        return (host.get_servo()
+                and host.get_servo().get_main_servo_device() == 'ccd_cr50')
 
     @property
     def description(self):

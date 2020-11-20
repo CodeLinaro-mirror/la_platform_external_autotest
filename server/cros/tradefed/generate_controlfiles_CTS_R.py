@@ -9,7 +9,7 @@ CONFIG = {}
 
 CONFIG['TEST_NAME'] = 'cheets_CTS_R'
 CONFIG['DOC_TITLE'] = 'Android Compatibility Test Suite (CTS)'
-CONFIG['MOBLAB_SUITE_NAME'] = 'suite:cts_R'
+CONFIG['MOBLAB_SUITE_NAME'] = 'suite:cts'
 CONFIG['COPYRIGHT_YEAR'] = 2020
 CONFIG['AUTHKEY'] = ''
 
@@ -42,6 +42,7 @@ CONFIG['CONTROLFILE_WRITE_EXTRA'] = True
 # tag) that contain 'tradefed-run-collect-tests'. b/119640440
 # Do not change the name/tag without adjusting the dashboard.
 _COLLECT = 'tradefed-run-collect-tests-only-internal'
+_PUBLIC_COLLECT = 'tradefed-run-collect-tests-only'
 
 CONFIG['LAB_DEPENDENCY'] = {'x86': ['cts_abi_x86']}
 
@@ -74,6 +75,7 @@ CONFIG['CTS_TIMEOUT'] = {
         'CtsVideoTestCases': 1.5,
         'CtsWidgetTestCases': 2.0,
         _COLLECT: 2.5,
+        _PUBLIC_COLLECT: 2.5,
 }
 
 # Any test that runs as part as blocking BVT needs to be stable and fast. For
@@ -122,14 +124,39 @@ CONFIG['ENABLE_DEFAULT_APPS'] = [
 _EJECT_REMOVABLE_DISK_COMMAND = (
         "\'lsblk -do NAME,RM | sed -n s/1$//p | xargs -n1 eject\'")
 
+_WIFI_CONNECT_COMMANDS = [
+        # These needs to be in order.
+        "'/usr/local/autotest/cros/scripts/wifi connect %s %s\' % (ssid, wifipass)",
+        "'/usr/local/autotest/cros/scripts/reorder-services-moblab.sh wifi'"
+]
+
 # Preconditions applicable to public and internal tests.
 CONFIG['PRECONDITION'] = {}
 CONFIG['LOGIN_PRECONDITION'] = {}
 
 # Preconditions applicable to public tests.
-CONFIG['PUBLIC_PRECONDITION'] = {}
+CONFIG['PUBLIC_PRECONDITION'] = {
+        'CtsHostsideNetworkTests': _WIFI_CONNECT_COMMANDS,
+        'CtsLibcoreTestCases': _WIFI_CONNECT_COMMANDS,
+        'CtsNetTestCases': _WIFI_CONNECT_COMMANDS,
+        'CtsJobSchedulerTestCases': _WIFI_CONNECT_COMMANDS,
+        'CtsUsageStatsTestCases': _WIFI_CONNECT_COMMANDS,
+        'CtsStatsdHostTestCases': _WIFI_CONNECT_COMMANDS,
+}
+CONFIG['PUBLIC_DEPENDENCIES'] = {
+        'CtsCameraTestCases': ['lighting'],
+        'CtsMediaTestCases': ['noloopback'],
+}
 
-CONFIG['PUBLIC_DEPENDENCIES'] = {}
+CONFIG['PUBLIC_OVERRIDE_TEST_PRIORITY'] = {
+        _PUBLIC_COLLECT: 70,
+        'CtsDeqpTestCases': 70,
+        'CtsDeqpTestCases': 70,
+        'CtsMediaTestCases': 70,
+        'CtsMediaStressTestCases': 70,
+        'CtsSecurityTestCases': 70,
+        'CtsCameraTestCases': 70
+}
 
 # This information is changed based on regular analysis of the failure rate on
 # partner moblabs.
@@ -147,6 +174,7 @@ CONFIG['OVERRIDE_TEST_LENGTH'] = {
         # Even though collect tests doesn't run very long, it must be the very first
         # job executed inside of the suite. Hence it is the only 'LENGTHY' test.
         _COLLECT: 5,  # LENGTHY
+        _PUBLIC_COLLECT: 5,  # LENGTHY
 }
 
 # Enabling --logcat-on-failure can extend total run time significantly if
@@ -203,50 +231,11 @@ CONFIG['EXTRA_MODULES'] = {
         },
 }
 
-# Moblab wants to shard dEQP really finely. This isn't needed anymore as it got
-# faster, but I guess better safe than sorry.
-CONFIG['PUBLIC_EXTRA_MODULES'] = {
-        'CtsDeqpTestCases': [
-                'CtsDeqpTestCases.dEQP-EGL', 'CtsDeqpTestCases.dEQP-GLES2',
-                'CtsDeqpTestCases.dEQP-GLES3', 'CtsDeqpTestCases.dEQP-GLES31',
-                'CtsDeqpTestCases.dEQP-VK.api',
-                'CtsDeqpTestCases.dEQP-VK.binding_model',
-                'CtsDeqpTestCases.dEQP-VK.clipping',
-                'CtsDeqpTestCases.dEQP-VK.compute',
-                'CtsDeqpTestCases.dEQP-VK.device_group',
-                'CtsDeqpTestCases.dEQP-VK.draw',
-                'CtsDeqpTestCases.dEQP-VK.dynamic_state',
-                'CtsDeqpTestCases.dEQP-VK.fragment_operations',
-                'CtsDeqpTestCases.dEQP-VK.geometry',
-                'CtsDeqpTestCases.dEQP-VK.glsl',
-                'CtsDeqpTestCases.dEQP-VK.image',
-                'CtsDeqpTestCases.dEQP-VK.info',
-                'CtsDeqpTestCases.dEQP-VK.memory',
-                'CtsDeqpTestCases.dEQP-VK.multiview',
-                'CtsDeqpTestCases.dEQP-VK.pipeline',
-                'CtsDeqpTestCases.dEQP-VK.protected_memory',
-                'CtsDeqpTestCases.dEQP-VK.query_pool',
-                'CtsDeqpTestCases.dEQP-VK.rasterization',
-                'CtsDeqpTestCases.dEQP-VK.renderpass',
-                'CtsDeqpTestCases.dEQP-VK.renderpass2',
-                'CtsDeqpTestCases.dEQP-VK.robustness',
-                'CtsDeqpTestCases.dEQP-VK.sparse_resources',
-                'CtsDeqpTestCases.dEQP-VK.spirv_assembly',
-                'CtsDeqpTestCases.dEQP-VK.ssbo',
-                'CtsDeqpTestCases.dEQP-VK.subgroups',
-                'CtsDeqpTestCases.dEQP-VK.subgroups.b',
-                'CtsDeqpTestCases.dEQP-VK.subgroups.s',
-                'CtsDeqpTestCases.dEQP-VK.subgroups.vote',
-                'CtsDeqpTestCases.dEQP-VK.subgroups.arithmetic',
-                'CtsDeqpTestCases.dEQP-VK.subgroups.clustered',
-                'CtsDeqpTestCases.dEQP-VK.subgroups.quad',
-                'CtsDeqpTestCases.dEQP-VK.synchronization',
-                'CtsDeqpTestCases.dEQP-VK.tessellation',
-                'CtsDeqpTestCases.dEQP-VK.texture',
-                'CtsDeqpTestCases.dEQP-VK.ubo', 'CtsDeqpTestCases.dEQP-VK.wsi',
-                'CtsDeqpTestCases.dEQP-VK.ycbcr'
-        ]
-}
+# Moblab optionally can reshard modules, this was originally used
+# for deqp but it is no longer required for that module.  Retaining
+# feature in case future slower module needs to be sharded.
+CONFIG['PUBLIC_EXTRA_MODULES'] = {}
+
 # TODO(haddowk,kinaba): Hack for b/138622686. Clean up later.
 CONFIG['EXTRA_SUBMODULE_OVERRIDE'] = {
         'x86': {

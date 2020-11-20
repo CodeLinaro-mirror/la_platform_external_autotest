@@ -44,7 +44,7 @@ class bluetooth_AdapterQuickHealth(
     def run_once(self,
                  host,
                  num_iterations=1,
-                 btpeer_args=[],
+                 args_dict=None,
                  flag='Quick Health'):
         """Run the package of Bluetooth LE health tests
 
@@ -56,7 +56,7 @@ class bluetooth_AdapterQuickHealth(
         self.quick_test_init(host,
                              use_btpeer=True,
                              flag=flag,
-                             btpeer_args=btpeer_args)
+                             args_dict=args_dict)
         self.quick_test_package_start('BT Quick Health')
 
         # Run health package

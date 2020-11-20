@@ -14,8 +14,6 @@ from autotest_lib.server.cros.bluetooth.bluetooth_adapter_pairing_tests import (
         BluetoothAdapterPairingTests)
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_hidreports_tests \
         import BluetoothAdapterHIDReportTests
-from autotest_lib.server.cros.bluetooth.bluetooth_adapter_tests import (
-        EXT_ADV_MODELS)
 
 
 # TODO(b/161174805) - veyron_fievel and veyron_mickey experiencing an
@@ -135,8 +133,11 @@ class bluetooth_AdapterLEHealth(BluetoothAdapterQuickTests,
         self.test_gatt_browse(device.address)
 
 
-    @test_wrapper('LE secondary Test', devices={'BLE_KEYBOARD':1},
-                  skip_models=LAB_VEYRON_MODELS)
+    # TODO (b/165949047) Flaky behavior on MVL/4.4 kernel causes flakiness when
+    # connection is initiated by slave. Skip the test until 2021 uprev
+    @test_wrapper('LE secondary Test',
+                  devices={'BLE_KEYBOARD': 1},
+                  skip_models=LAB_VEYRON_MODELS + ['bob'])
     def le_role_secondary(self):
         """Tests connection as secondary"""
 
@@ -254,8 +255,11 @@ class bluetooth_AdapterLEHealth(BluetoothAdapterQuickTests,
                 kbd, kbd_test_func, secondary_info=hid_test_device)
 
 
-    @test_wrapper('LE Receiver Role Test', devices={'BLE_KEYBOARD':1},
-                  skip_models=LAB_VEYRON_MODELS)
+    # TODO (b/165949047) Flaky behavior on MVL/4.4 kernel causes flakiness when
+    # connection is initiated by slave. Skip the test until 2021 uprev
+    @test_wrapper('LE Receiver Role Test',
+                  devices={'BLE_KEYBOARD': 1},
+                  skip_models=LAB_VEYRON_MODELS + ['bob'])
     def le_role_receiver(self):
         """Tests basic Nearby Receiver role"""
 
@@ -292,11 +296,12 @@ class bluetooth_AdapterLEHealth(BluetoothAdapterQuickTests,
                 kbd, kbd_test_func, secondary_info=hid_test_device)
 
 
-    # TODO(b/162324887) - platforms supporting extended advertising do not
-    # properly resume advertising after connecting an LE device
     @test_wrapper('LE HID Test During Receiver Adv',
-                  devices={'BLE_KEYBOARD':1, 'BLE_MOUSE':1},
-                  skip_models=EXT_ADV_MODELS+LAB_VEYRON_MODELS)
+                  devices={
+                          'BLE_KEYBOARD': 1,
+                          'BLE_MOUSE': 1
+                  },
+                  skip_models=LAB_VEYRON_MODELS)
     def le_role_hid_during_receiver_adv(self):
         """Tests HID device while already in Nearby Receiver role adv state"""
 
@@ -372,7 +377,7 @@ class bluetooth_AdapterLEHealth(BluetoothAdapterQuickTests,
     def run_once(self,
                  host,
                  num_iterations=1,
-                 btpeer_args=[],
+                 args_dict=None,
                  test_name=None,
                  flag='Quick Health'):
         """Run the batch of Bluetooth LE health tests
@@ -386,6 +391,6 @@ class bluetooth_AdapterLEHealth(BluetoothAdapterQuickTests,
         self.quick_test_init(host,
                              use_btpeer=True,
                              flag=flag,
-                             btpeer_args=btpeer_args)
+                             args_dict=args_dict)
         self.le_health_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

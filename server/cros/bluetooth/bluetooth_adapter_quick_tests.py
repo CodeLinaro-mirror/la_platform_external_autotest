@@ -100,27 +100,34 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
     def _print_delimiter(self):
         logging.info('=======================================================')
 
+    @staticmethod
+    def _get_update_btpeers_arguments(args_dict=None):
+        """Parse the update_btpeers argument"""
+        key = 'update_btpeers'
+        if args_dict is not None and key in args_dict:
+            return args_dict[key].lower() != 'false'
+        return True
 
     def quick_test_init(self,
                         host,
                         use_btpeer=True,
                         flag='Quick Health',
-                        btpeer_args=[],
+                        args_dict=None,
                         start_browser=False):
         """Inits the test batch"""
         self.host = host
         self.start_browser = start_browser
-        self.in_lab = site_utils.host_in_lab(self.host.hostname)
         self.use_btpeer = use_btpeer
+        update_btpeers = self._get_update_btpeers_arguments(args_dict)
+        btpeer_args = []
+        if args_dict is not None:
+            btpeer_args = self.host.get_btpeer_arguments(args_dict)
         #factory can not be declared as local variable, otherwise
         #factory._proxy.__del__ will be invoked, which shutdown the xmlrpc
         # server, which log out the user.
 
         self.factory = remote_facade_factory.RemoteFacadeFactory(
-                host,
-                no_chrome=not self.start_browser,
-                disable_arc=True,
-                retry_rpc=False)
+                host, no_chrome=not self.start_browser, disable_arc=True)
         try:
             self.bluetooth_facade = self.factory.create_bluetooth_facade()
         except Exception as e:
@@ -141,11 +148,11 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
                 raise error.TestFail('Unable to find a Bluetooth peer')
 
             # Check the chameleond version on the peer and update if necessary
-            if self.in_lab:
+            if update_btpeers:
                 if not self.update_btpeer():
                     logging.error('Updating btpeers failed. Ignored')
             else:
-                logging.info('No attempting peer update since DUT is not in lab.')
+                logging.info('No attempting peer update.')
 
             # Query connected devices on our btpeer at init time
             self.available_devices = self.list_devices_available()

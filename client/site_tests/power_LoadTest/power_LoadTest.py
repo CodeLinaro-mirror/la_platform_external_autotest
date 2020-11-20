@@ -574,6 +574,7 @@ class power_LoadTest(arc.ArcTest):
             self._backlight.restore()
         if self._services:
             self._services.restore_services()
+        audio_helper.set_default_volume_levels()
         self._detachable_handler.restore()
 
         if self.task_monitor_file:

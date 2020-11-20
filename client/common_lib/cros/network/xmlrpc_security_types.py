@@ -1,10 +1,18 @@
+# Lint as: python2, python3
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import logging
 import os
 import random
+import six
+from six.moves import map
+from six.moves import range
 import stat
 import string
 import sys
@@ -78,9 +86,8 @@ class SecurityConfig(xmlrpc_types.XmlRpcStruct):
 
 
     def __repr__(self):
-        return '%s(%s)' % (self.__class__.__name__,
-                           ', '.join(['%s=%r' % item
-                                      for item in vars(self).iteritems()]))
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(
+                ['%s=%r' % item for item in six.iteritems(vars(self))]))
 
 
 class WEPConfig(SecurityConfig):
@@ -453,7 +460,7 @@ class EAPConfig(SecurityConfig):
         """@return dict of shill service properties."""
         ret = {self.SERVICE_PROPERTY_EAP_IDENTITY: self.eap_identity}
         if self.pin:
-               ret[self.SERVICE_PROPERTY_EAP_PIN] = self.pin
+            ret[self.SERVICE_PROPERTY_EAP_PIN] = self.pin
         if self.client_ca_cert:
             # Technically, we could accept a list of certificates here, but we
             # have no such tests.
@@ -635,9 +642,8 @@ class Tunneled1xConfig(WPAEAPConfig):
         self.inner_protocol = inner_protocol
         # hostapd wants these surrounded in double quotes.
         quote = lambda x: '"' + x + '"'
-        eap_users = map(' '.join, [('*',  outer_protocol),
-                                   (quote(eap_identity), inner_protocol,
-                                    quote(password), '[2]')])
+        eap_users = list(map(' '.join, [('*', outer_protocol),
+                (quote(eap_identity), inner_protocol, quote(password), '[2]')]))
         super(Tunneled1xConfig, self).__init__(
                 server_ca_cert=server_ca_cert,
                 server_cert=server_cert,

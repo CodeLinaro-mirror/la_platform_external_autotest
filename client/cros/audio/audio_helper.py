@@ -38,6 +38,8 @@ _DEFAULT_PLAYBACK_VOLUME = 100
 _DEFAULT_CAPTURE_GAIN = 2500
 _DEFAULT_ALSA_MAX_VOLUME = '100%'
 _DEFAULT_ALSA_CAPTURE_GAIN = '25dB'
+_DEFAULT_VOLUME_LEVEL = 75
+_DEFAULT_MIC_GAIN = 75
 
 # Minimum RMS value to pass when checking recorded file.
 _DEFAULT_SOX_RMS_THRESHOLD = 0.08
@@ -86,16 +88,22 @@ def set_mixer_controls(mixer_settings={}, card='0'):
             # fail the test here if we get an error.
             logging.info('amixer command failed: %s', cmd)
 
+def set_default_volume_levels():
+    """Sets the default volume and default capture gain through cras_test_client.
+
+    """
+    logging.info('Setting audio levels to their defaults')
+    set_volume_levels(_DEFAULT_VOLUME_LEVEL, _DEFAULT_MIC_GAIN)
+
 def set_volume_levels(volume, capture):
     """Sets the volume and capture gain through cras_test_client.
 
     @param volume: The playback volume to set.
     @param capture: The capture gain to set.
     """
-    logging.info('Setting volume level to %d', volume)
+    logging.info('Setting volume: %d capture: %d', volume, capture)
     try:
         utils.system('/usr/bin/cras_test_client --volume %d' % volume)
-        logging.info('Setting capture gain to %d', capture)
         utils.system('/usr/bin/cras_test_client --capture_gain %d' % capture)
         utils.system('/usr/bin/cras_test_client --dump_server_info')
         utils.system('/usr/bin/cras_test_client --mute 0')

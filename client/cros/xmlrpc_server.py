@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -10,8 +11,8 @@ import logging
 import os
 import select
 import signal
+import six.moves.xmlrpc_server
 import threading
-import SimpleXMLRPCServer
 
 
 def terminate_old(script_name, sigterm_timeout=5, sigkill_timeout=3):
@@ -121,8 +122,8 @@ class XmlRpcServer(threading.Thread):
         """
         super(XmlRpcServer, self).__init__()
         logging.info('Binding server to %s:%d', host, port)
-        self._server = SimpleXMLRPCServer.SimpleXMLRPCServer((host, port),
-                                                             allow_none=True)
+        self._server = six.moves.xmlrpc_server.SimpleXMLRPCServer(
+                (host, port), allow_none=True)
         self._server.register_introspection_functions()
         # After python 2.7.10, BaseServer.handle_request automatically retries
         # on EINTR, so handle_request will be blocked at select.select forever

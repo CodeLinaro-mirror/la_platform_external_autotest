@@ -310,7 +310,6 @@ class bluetooth_AdapterMTBF(BluetoothAdapterBetterTogether,
     def run_once(self,
                  host,
                  num_iterations=1,
-                 btpeer_args=[],
                  test_name=None,
                  args_dict=None):
         """Run the batch of Bluetooth MTBF tests
@@ -322,7 +321,7 @@ class bluetooth_AdapterMTBF(BluetoothAdapterBetterTogether,
 
         # Initialize and run the test batch or the requested specific test
         self.set_fail_fast(args_dict, True)
-        self.quick_test_init(host, use_btpeer=True, btpeer_args=btpeer_args)
+        self.quick_test_init(host, use_btpeer=True, args_dict=args_dict)
 
         self.mtbf_batch_run(num_iterations, test_name)
 

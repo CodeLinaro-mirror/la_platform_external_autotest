@@ -27,11 +27,10 @@ DOC = """
     """
 
 args_dict = utils.args_to_dict(args)
-btpeer_args = hosts.CrosHost.get_btpeer_arguments(args_dict)
 
 def run(machine):
     host = hosts.create_host(machine)
     job.run_test('bluetooth_AdapterLEHealth', host=host,
-                 num_iterations=15, btpeer_args=btpeer_args)
+                 num_iterations=15, args_dict=args_dict)
 
 parallel_simple(run, machines)

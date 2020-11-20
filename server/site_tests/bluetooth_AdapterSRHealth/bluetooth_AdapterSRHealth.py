@@ -217,7 +217,9 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
                 [(device_type, device, self._test_mouse_left_click)],
                 iterations=STRESS_ITERATIONS)
 
-    @test_wrapper('Reconnect A2DP', devices={'BLUETOOTH_AUDIO': 1})
+    @test_wrapper('Reconnect A2DP',
+                  devices={'BLUETOOTH_AUDIO': 1},
+                  skip_chipsets=['Realtek-RTL8822C-USB'])
     def sr_reconnect_a2dp(self):
         """ Reconnects an A2DP device after suspend/resume. """
         device_type = 'BLUETOOTH_AUDIO'
@@ -392,7 +394,8 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
                                     iterations=STRESS_ITERATIONS)
 
     @test_wrapper('Peer wakeup with A2DP should fail',
-                  devices={'BLUETOOTH_AUDIO': 1})
+                  devices={'BLUETOOTH_AUDIO': 1},
+                  skip_chipsets=['Realtek-RTL8822C-USB'])
     def sr_peer_wake_a2dp_should_fail(self):
         """ Use A2DP device to wake from suspend and fail. """
         device_type = 'BLUETOOTH_AUDIO'
@@ -510,7 +513,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
     def run_once(self,
                  host,
                  num_iterations=1,
-                 btpeer_args=[],
+                 args_dict=None,
                  test_name=None,
                  flag='Quick Health'):
         """Running Bluetooth adapter suspend resume with peer autotest.
@@ -526,6 +529,6 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
         self.quick_test_init(host,
                              use_btpeer=True,
                              flag=flag,
-                             btpeer_args=btpeer_args)
+                             args_dict=args_dict)
         self.sr_health_batch_run(num_iterations, test_name)
         self.quick_test_cleanup()

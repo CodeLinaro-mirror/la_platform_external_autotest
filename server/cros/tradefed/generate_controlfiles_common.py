@@ -175,21 +175,17 @@ def get_tradefed_revision(line):
                  Android Compatibility Test Suite for Instant Apps 1.0 (4898911)
     @return Tradefed CTS revision. Example: 6.0_r6.
     """
-    m = re.search(r'Android Google Mobile Services \(GMS\) Test Suite (.*) \(',
-                  line)
-    if m:
-        return m.group(1)
+    tradefed_identifier_list = [
+            r'Android Google Mobile Services \(GMS\) Test Suite (.*) \(',
+            r'Android Compatibility Test Suite(?: for Instant Apps)? (.*) \(',
+            r'Android Vendor Test Suite (.*) \(',
+            r'Android Security Test Suite (.*) \('
+    ]
 
-    m = re.search(
-        r'Android Compatibility Test Suite(?: for Instant Apps)? (.*) \(', line)
-    if m:
-        return m.group(1)
-
-    m = re.search(
-        r'Android Vendor Test Suite (.*) \(', line)
-
-    if m:
-        return m.group(1)
+    for identifier in tradefed_identifier_list:
+        m = re.search(identifier, line)
+        if m:
+            return m.group(1)
 
     logging.warning('Could not identify revision in line "%s".', line)
     return None
@@ -866,9 +862,10 @@ def get_tradefed_data(path, is_public, abi):
     while True:
         line = p.stdout.readline().strip()
         # Android Compatibility Test Suite 7.0 (3423912)
-        if (line.startswith('Android Compatibility Test Suite ') or
-            line.startswith('Android Google ') or
-            line.startswith('Android Vendor Test Suite')):
+        if (line.startswith('Android Compatibility Test Suite ')
+                    or line.startswith('Android Google ')
+                    or line.startswith('Android Vendor Test Suite')
+                    or line.startswith('Android Security Test Suite')):
             logging.info('Unpacking: %s.', line)
             build = get_tradefed_build(line)
             revision = get_tradefed_revision(line)
@@ -1195,9 +1192,16 @@ def write_extra_camera_controlfiles(abi, revision, build, uri, is_public):
         for led_provision in ['led', 'noled']:
             name = get_controlfile_name(module, abi,
                                         revision, is_public, led_provision, facing)
-            content = get_controlfile_content(module, set([module]), abi,
-                                              revision, build, uri,
-                                              None, is_public, led_provision, facing)
+            content = get_controlfile_content(module,
+                                              set([module]),
+                                              abi,
+                                              revision,
+                                              build,
+                                              uri,
+                                              None,
+                                              is_public,
+                                              led_provision=led_provision,
+                                              camera_facing=facing)
             with open(name, 'w') as f:
                 f.write(content)
 

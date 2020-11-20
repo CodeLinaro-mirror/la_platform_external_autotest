@@ -1661,6 +1661,28 @@ class BluetoothDevice(object):
 
         return self._proxy.bt_caused_last_resume()
 
+    @proxy_thread_safe
+    def find_last_suspend_via_powerd_logs(self):
+        """Finds the last suspend attempt via powerd logs.
+
+        @return: Tuple (suspend start time, suspend end time, suspend result) or
+                 None
+        """
+        info = self._proxy.find_last_suspend_via_powerd_logs()
+
+        # Currently, we get the date back in string format due to python2/3
+        # inconsistencies. We can get rid of this once everything is running
+        # python3 (hopefully)
+        # TODO - Revisit converting date to string and back in this method
+        if info:
+            date_format = '%Y-%m-%d %H:%M:%S.%f'
+            start_date = datetime.strptime(info[0], date_format)
+            end_date = datetime.strptime(info[1], date_format)
+            ret = info[2]
+
+            return (start_date, end_date, ret)
+
+        return None
 
     @proxy_thread_safe
     def do_suspend(self, seconds, expect_bt_wake):
@@ -1671,7 +1693,8 @@ class BluetoothDevice(object):
             suspend. If true, we expect this resume will occur early
         """
 
-        return self._proxy.do_suspend(seconds, expect_bt_wake)
+        # Do not retry this RPC if it fails or times out
+        return self._proxy.do_suspend(seconds, expect_bt_wake, __no_retry=True)
 
 
     @proxy_thread_safe
