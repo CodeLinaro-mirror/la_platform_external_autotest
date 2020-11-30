@@ -29,34 +29,42 @@ class DeviceHealthProfile(object):
     that cached on profile host(usually labstation).
     """
 
-    def __init__(self, host, profile_host):
+    def __init__(self, hostname, host_info=None, result_dir=None):
         """Initialize the class.
-        @param host: An CrosHost object, we record health profile for it.
-        @param profile_host: An ServoHost object, where is the location
-                             we store device health for CrosHost.
+
+        @param hostname:    The device hostaname or identification.
+        @param host_info:   A HostInfo object of the device of the profile.
+        @param result_dir:  A result directory where we can keep local copy of
+                            device profile.
         """
-        self._host = host
-        self._profile_host = profile_host
+        self._hostname = hostname
+        # Cache host-info data
+        self._device_board = host_info.board if host_info else ''
+        self._device_model = host_info.model if host_info else ''
+        # the profile is located on servo-host as temporally location.
+        # The servo-host will be provided later
+        self._profile_host = None
         self._health_profile = None
 
         # Construct remote and local file path.
-        profile_filename = self._host.hostname + '.profile'
-        self._remote_path = os.path.join(PROFILE_FILE_DIR,
-                                         profile_filename)
+        profile_filename = self._hostname + '.profile'
+        self._remote_path = os.path.join(PROFILE_FILE_DIR, profile_filename)
+        result_dir = result_dir or '/tmp'
+        self._local_path = os.path.join(result_dir, profile_filename)
 
-        if self._host.job and self._host.job.resultdir:
-            self._local_path = os.path.join(self._host.job.resultdir,
-                                            profile_filename)
-        else:
-            self._local_path = os.path.join('/tmp', profile_filename)
+    def init_profile(self, profile_host):
+        """Initialize device health profile data.
 
-        self._initialize_device_health_profile()
+        If the cached file exists on profile host the method will download
+        file to a local path and read data, otherwise create a profile data
+        from template.
 
-    def _initialize_device_health_profile(self):
-        """Initialize device health profile data. If the cached file exists
-        on profile host the method will download file to a local path and
-        read data, otherwise create a profile data from template.
+        @param profile_host: An ServoHost object, where is the location
+                             we store device health for device.
         """
+        if not profile_host:
+            raise DeviceHealthProfileError('The profile host is not provided.')
+        self._profile_host = profile_host
         # Do a lightweighted check to make sure the machine is up
         # (by ping), as we don't waste time on unreachable DUT.
         if not self._profile_host.check_cached_up_status():
@@ -72,6 +80,10 @@ class DeviceHealthProfile(object):
 
         if not self._sync_existing_profile():
             self._create_profile_from_template()
+
+    def is_loaded(self):
+        """Check if device profile was loaded on not."""
+        return self._health_profile is not None
 
     def _sync_existing_profile(self):
         """Sync health profile from remote profile host(servohost) and
@@ -135,21 +147,20 @@ class DeviceHealthProfile(object):
         """Create a new health profile dict from template.
         """
         logging.info('Creating new health profile from template for %s.',
-                     self._host.hostname)
+                     self._hostname)
         self._health_profile = copy.deepcopy(DEVICE_HEALTH_PROFILE_TEMPLATE)
-        host_info = self._host.host_info_store.get()
-        if host_info:
-            self._set_board(host_info.board)
-            self._set_model(host_info.model)
+        if self._device_board or self._device_model:
+            self._set_board(self._device_board)
+            self._set_model(self._device_model)
         self.refresh_update_time()
 
     def _validate_profile_data(self, data):
         """Validate the given profile data is in good state.
         """
-        logging.info('Validating health profile data.')
+        logging.debug('Validating health profile data.')
         if not isinstance(data, dict):
-            logging.info('Non-dict type detected, the profile data'
-                         ' may be corrupted.')
+            logging.debug('Non-dict type detected, the profile data'
+                          ' may be corrupted.')
             return False
 
         # Validate that cached health profile version is not outdated.
@@ -160,24 +171,23 @@ class DeviceHealthProfile(object):
                          PROFILE_VERSION)
             return False
 
-        # Validate that cached board/model is match with DUT, in case
+        # Validate that cached board/model is match with device, in case
         # there is was decom/redeploy.
-        host_info = self._host.host_info_store.get()
-        board = host_info.board
-        model = host_info.model
         cached_board = data.get(BOARD_KEY)
         cached_model = data.get(MODEL_KEY)
-        if board and cached_board and (board != cached_board):
-            logging.info('The board: %s from host_info does not match'
-                         ' board: %s from cached profile, the device'
-                         ' hardware probably has been changed.',
-                         board, cached_board)
+        if (self._device_board and cached_board
+                    and (self._device_board != cached_board)):
+            logging.info(
+                    'The board: %s from host_info does not match board: %s'
+                    ' from cached profile, the device hardware probably has'
+                    ' been changed.', self._device_board, cached_board)
             return False
-        if model and cached_model and (model != cached_model):
-            logging.info('The model: %s from host_info does not match'
-                         ' model: %s from cached profile, the device'
-                         ' hardware probably has been changed.',
-                         model, cached_model)
+        if (self._device_model and cached_model
+                    and (self._device_model != cached_model)):
+            logging.info(
+                    'The model: %s from host_info does not match model: %s'
+                    ' from cached profile, the device hardware probably has'
+                    ' been changed.', self._device_model, cached_model)
             return False
         return True
 
@@ -214,12 +224,6 @@ class DeviceHealthProfile(object):
     def health_profile(self):
         # pylint: disable=missing-docstring
         return self._health_profile
-
-    @health_profile.setter
-    def health_profile(self, data):
-        # pylint: disable=missing-docstring
-        if self._validate_profile_data(data):
-            self._health_profile = data
 
     def get_board(self):
         """Get device board from cached device health profile.
@@ -371,6 +375,19 @@ class DeviceHealthProfile(object):
         last_time = self.get_badblocks_rw_run_time()
         return int(time.mktime(time.strptime(last_time, TIME_PATTERN)))
 
+    def get_servo_micro_fw_update_time(self):
+        """Get the timestamp of when run last fw update for servo_micro.
+        Example "2020-01-01 15:05:05"
+        """
+        last_time = self._get_value(LAST_SERVO_MICRO_FW_UPDATE_RUN_TIME_KEY)
+        return last_time or DEFAULT_TIMESTAMP
+
+    def get_servo_micro_fw_update_time_epoch(self):
+        """Get the unix time of when run last fw update for servo_micro.
+        """
+        last_time = self.get_servo_micro_fw_update_time()
+        return int(time.mktime(time.strptime(last_time, TIME_PATTERN)))
+
     def set_cros_stable_version(self, build):
         """Set the most recent used cros image during repair.
         """
@@ -396,6 +413,13 @@ class DeviceHealthProfile(object):
         """
         return self._update_profile(
                 LAST_BADBLOCKS_RW_RUN_TIME_KEY,
+                time.strftime(TIME_PATTERN, time.localtime()))
+
+    def refresh_servo_miro_fw_update_run_time(self):
+        """Get the timestamp of when run last fw update for servo_micro.
+        """
+        return self._update_profile(
+                LAST_SERVO_MICRO_FW_UPDATE_RUN_TIME_KEY,
                 time.strftime(TIME_PATTERN, time.localtime()))
 
     def refresh_update_time(self):

@@ -95,11 +95,6 @@ label: {label} {{
 """
 
 
-def prompt_for_input(prompt_message):
-    """Prompts for user input and returns the inputted text as a string."""
-    return raw_input('%s:> ' % prompt_message)
-
-
 def identify_benchmarks_to_run(benchmark_info, iteration_nums, perf_keys):
     """Identifies which benchmarks to run, and for how many iterations.
 
@@ -505,6 +500,7 @@ def verify_command_line_options(options, iteration_nums, perf_keys):
 
 
 def main():
+    """Main script logic."""
     options = parse_options()
 
     log_level = logging.DEBUG if options.verbose else logging.INFO

@@ -13,6 +13,7 @@ TIME = "SHORT"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "network"
 TEST_TYPE = "client"
+ATTRIBUTES = "suite:cellular_ota"
 DEPENDENCIES = "carrier:verizon"
 DOC = """
   Tests that a cellular modem provides correct identification information
@@ -28,4 +29,4 @@ DOC = """
 from autotest_lib.client.cros.cellular import test_environment
 
 test_env = test_environment.CellularOTATestEnvironment()
-job.run_test('cellular_Identifiers', tag='fibocom-l850gl', test_env=test_env)
+job.run_test('cellular_Identifiers', test_env=test_env)

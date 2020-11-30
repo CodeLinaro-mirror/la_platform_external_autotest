@@ -177,6 +177,24 @@ class HostInfoTest(unittest.TestCase):
         self.assertListEqual(self.info.labels, ['extra', 'cheets-version:Y',
                                                 'cros-version:Z'])
 
+    def test_has_level_as_prefix(self):
+        """Check if label present as prefix with some value."""
+        self.info.labels = ['lb1', 'lb2:Y']
+        self.assertTrue(self.info.has_label('lb2'))
+        self.info.labels = ['lb1', 'lb2:']
+        self.assertTrue(self.info.has_label('lb2'))
+
+    def test_has_level_as_value(self):
+        """Check if label present as value."""
+        self.info.labels = ['lb1', 'lb2:Y']
+        self.assertTrue(self.info.has_label('lb1'))
+
+    def test_has_level_is_not_present(self):
+        """Check if label present as value."""
+        self.info.labels = ['lb1', 'lb2:Y']
+        self.assertFalse(self.info.has_label('lb3'))
+        self.assertFalse(self.info.has_label('LB1'))
+
 
 class InMemoryHostInfoStoreTest(unittest.TestCase):
     """Basic tests for CachingHostInfoStore using InMemoryHostInfoStore."""

@@ -93,8 +93,8 @@ class CrashTest(test.test):
     _MAX_CRASH_SIZE = 1024 * 1024
 
     # Use the same file format as crash does normally:
-    # <basename>.#.#.#.meta
-    _FAKE_TEST_BASENAME = 'fake.1.2.3'
+    # <basename>.#.#.#.#.meta
+    _FAKE_TEST_BASENAME = 'fake.1.2.3.4'
 
     def _set_system_sending(self, is_enabled):
         """Sets whether or not the system crash_sender is allowed to run.
@@ -113,16 +113,16 @@ class CrashTest(test.test):
             utils.system('touch ' + self._PAUSE_FILE)
 
     def _remove_all_files_in_dir(self, d):
-      """Recursively remove all of the files in |d|, without removing |d|.
+        """Recursively remove all of the files in |d|, without removing |d|.
       """
-      try:
-          root, dirs, files = next(os.walk(d))
-      except StopIteration:
-          return
-      for path in files:
-          os.remove(os.path.join(root, path))
-      for path in dirs:
-          shutil.rmtree(os.path.join(root, path))
+        try:
+            root, dirs, files = next(os.walk(d))
+        except StopIteration:
+            return
+        for path in files:
+            os.remove(os.path.join(root, path))
+        for path in dirs:
+            shutil.rmtree(os.path.join(root, path))
 
 
     def _reset_rate_limiting(self):
@@ -142,7 +142,7 @@ class CrashTest(test.test):
         self._remove_all_files_in_dir(self._SYSTEM_CRASH_DIR)
         self._remove_all_files_in_dir(self._REBOOT_VAULT_CRASH_DIR)
         for d in glob.glob(self._USER_CRASH_DIRS):
-          self._remove_all_files_in_dir(d)
+            self._remove_all_files_in_dir(d)
         self._remove_all_files_in_dir(self._FALLBACK_USER_CRASH_DIR)
 
 

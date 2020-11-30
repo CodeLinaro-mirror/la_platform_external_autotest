@@ -945,9 +945,9 @@ class SystemServicer(object):
         root_part = self._os_if.get_root_part()
         return self._os_if.get_internal_disk(root_part)
 
-    def create_temp_dir(self, prefix='backup_'):
+    def create_temp_dir(self, prefix='backup_', dir=None):
         """Create a temporary directory and return the path."""
-        return tempfile.mkdtemp(prefix=prefix)
+        return tempfile.mkdtemp(prefix=prefix, dir=dir)
 
     def remove_file(self, file_path):
         """Remove the file."""

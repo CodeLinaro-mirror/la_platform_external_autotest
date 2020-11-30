@@ -644,14 +644,18 @@ class Servo(object):
         # TODO(coconutruben): eventually, replace this with a metric to track
         # SBU voltages wrt servo-hw/dut-hw
         if self.has_control('servo_v4_sbu1_mv'):
-            for sbu in ['sbu1', 'sbu2']:
+            # Attempt to take a reading of sbu1 and sbu2 multiple times to
+            # account for situations where the two lines exchange hi/lo roles
+            # frequently.
+            for i in range(10):
                 try:
-                    mv = int(self.get('servo_v4_%s_mv' % sbu))
-                    logging.info('%s voltage: %d mv', sbu, mv)
+                    sbu1 = int(self.get('servo_v4_sbu1_mv'))
+                    sbu2 = int(self.get('servo_v4_sbu2_mv'))
+                    logging.info('attempt %d sbu1 %d sbu2 %d', i, sbu1, sbu2)
                 except error.TestFail as e:
                     # This is a nice to have but if reading this fails, it
                     # shouldn't interfere with the test.
-                    logging.info('Failed to read %s voltage', sbu)
+                    logging.exception(e)
         self._uart.start_capture()
         if cold_reset:
             if not self._power_state.supported:
@@ -1591,6 +1595,23 @@ class Servo(object):
             self.set_nocheck('servo_v4_role', role)
         else:
             logging.debug('Already in the role: %s.', role)
+
+    def get_servo_v4_role(self):
+        """Get the power role of servo v4, either 'src' or 'snk'.
+
+        It returns None if not a servo v4.
+        """
+        if not self._servo_type.startswith('servo_v4'):
+            logging.debug('Not a servo v4, unable to get role')
+            return None
+
+        if not self.has_control('servo_v4_role'):
+            logging.debug(
+                    'Servo does not has servo_v4_role control, unable'
+                    ' to get the role.')
+            return None
+
+        return self.get('servo_v4_role')
 
     def set_servo_v4_pd_comm(self, en):
         """Set the PD communication of servo v4, either 'on' or 'off'.

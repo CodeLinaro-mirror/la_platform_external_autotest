@@ -169,6 +169,11 @@ class XmlRpcServer(threading.Thread):
                     # handle this kind of error.
                     if v[0] != errno.EINTR:
                         raise
+
+        for delegate in self._delegates:
+            if hasattr(delegate, 'cleanup'):
+                delegate.cleanup()
+
         logging.info('XmlRpcServer exited.')
 
 

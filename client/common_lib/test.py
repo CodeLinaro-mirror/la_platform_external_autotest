@@ -396,7 +396,8 @@ class base_test(object):
         #     attribute the crash to it (e.g. to the 'tast.critical-system'
         #     "autotest").  For this case, we should save the contents of the
         #     file before a test and restore it after.
-        if 'host' in dargs and dargs['host'].is_up_fast():
+        if ('host' in dargs and hasattr(dargs['host'], 'is_up_fast') and
+                dargs['host'].is_up_fast()):
             dargs['host'].run('echo %s > %s' %
                               (self.tagged_testname, self.test_in_prog_file),
                               ignore_status=True)
@@ -436,7 +437,8 @@ class base_test(object):
                           'after_iteration_hooks.', str(e))
             raise
         finally:
-            if 'host' in dargs and dargs['host'].is_up_fast():
+            if ('host' in dargs and hasattr(dargs['host'], 'is_up_fast') and
+                    dargs['host'].is_up_fast()):
                 dargs['host'].run('rm -f %s' % self.test_in_prog_file)
             else:
                 try:

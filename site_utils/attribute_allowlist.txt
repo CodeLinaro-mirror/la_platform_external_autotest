@@ -50,6 +50,7 @@ suite:bvt-tast-android-pfq
 suite:bvt-tast-chrome-pfq
 suite:bvt-tast-cq
 suite:bvt-tast-informational
+suite:camera-libcamera
 suite:camera-postsubmit
 suite:camerabox_facing-back
 suite:camerabox_facing-front
@@ -57,10 +58,7 @@ suite:cellular_endtoend
 suite:cellular_mbim_compliance
 suite:cellular_modem_repair
 suite:cellular_ota
-suite:cellular_ota_att
-suite:cellular_ota_sprint
-suite:cellular_ota_tmobile
-suite:cellular_ota_verizon
+suite:cellular_ota_flaky
 suite:cellular_pseudomodem
 suite:cellular_qual
 suite:chameleon_audiovideo
@@ -218,6 +216,7 @@ suite:vmtest-informational1
 suite:vmtest-informational2
 suite:vmtest-informational3
 suite:wifi_atten_perf
+suite:wifi_atten_roam_perf
 suite:wifi_endtoend
 suite:wifi_flaky
 suite:wifi_func_tast

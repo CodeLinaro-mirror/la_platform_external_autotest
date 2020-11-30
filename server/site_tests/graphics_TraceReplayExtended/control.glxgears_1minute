@@ -20,7 +20,7 @@ This test runs a game trace replay on repeat for X minutes and measures system/p
 def run(machine):
     host = hosts.create_host(machine)
     job.run_test("graphics_TraceReplayExtended", host=host,
-                 client_tast_test='graphics.TraceReplayExtended.glxgears_1minute',
+                 client_tast_test='graphics.TraceReplayExtended.glxgears_1minute_amd64',
                  tast_build_bundle='cros',
                  tast_command_arg=args,
                  max_duration_minutes=10)

@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import chrome
 from autotest_lib.client.cros.update_engine import nebraska_wrapper
@@ -11,6 +12,10 @@ from telemetry.core import exceptions
 class autoupdate_UpdateFromUI(update_engine_test.UpdateEngineTest):
     """Starts an update from the Chrome OS Settings app. """
     version = 1
+
+    _NOTIFICATION_TITLE = "Update available"
+    _NOTIFICATION_TIMEOUT = 10
+    _NOTIFICATION_INTERVAL = 1
 
 
     def initialize(self):
@@ -23,6 +28,28 @@ class autoupdate_UpdateFromUI(update_engine_test.UpdateEngineTest):
         """Test cleanup. Clears the custom lsb-release used by the test. """
         self._clear_custom_lsb_release()
         super(autoupdate_UpdateFromUI, self).cleanup()
+
+    def _wait_for_update_notification(self, cr):
+        """
+        Waits for the post-update notification to appear.
+
+        @param cr: Chrome instance.
+
+        """
+
+        def find_notification():
+            """Polls for visibility of the post-update notification. """
+            notifications = cr.get_visible_notifications()
+            if notifications is None:
+                return False
+            return any(n for n in notifications
+                       if self._NOTIFICATION_TITLE in n['title'])
+
+        utils.poll_for_condition(
+                condition=find_notification,
+                desc='Post-update notification not found',
+                timeout=self._NOTIFICATION_TIMEOUT,
+                sleep_interval=self._NOTIFICATION_INTERVAL)
 
 
     def run_once(self, payload_url):
@@ -53,7 +80,5 @@ class autoupdate_UpdateFromUI(update_engine_test.UpdateEngineTest):
                     raise error.TestFail(
                         'Failed to find and click Check For Updates button.')
                 self._take_screenshot('after_check_for_updates.png')
-            # Sign out of Chrome and wait for the update to complete.
-            # If we waited for the update to complete and then logged out
-            # the DUT will auto-reboot and the client test cannot return.
-            self._wait_for_update_to_complete()
+                self._wait_for_update_to_complete()
+                self._wait_for_update_notification(cr)

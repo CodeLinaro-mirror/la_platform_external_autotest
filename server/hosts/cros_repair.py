@@ -90,8 +90,14 @@ _DEV_MODE_ALWAYS_ALLOWED = global_config.global_config.get_config_value(
 # the 'cros' verifier; it's listed as an provision trigger as a
 # simplification.  The ultimate fix is to split the 'cros' verifier
 # into smaller individual verifiers.
-_CROS_PROVISION_TRIGGERS = ('power', 'rwfw', 'python', 'cros',
-                            'dev_default_boot',)
+_CROS_PROVISION_TRIGGERS = (
+        'power',
+        'rwfw',
+        'fwstatus',
+        'python',
+        'cros',
+        'dev_default_boot',
+)
 _CROS_POWERWASH_TRIGGERS = ('tpm', 'good_provision', 'ext4',)
 _CROS_USB_TRIGGERS = ('ssh', 'writable', 'stop_start_ui',)
 _JETSTREAM_USB_TRIGGERS = ('ssh', 'writable',)
@@ -1005,20 +1011,35 @@ class ServoInstallRepair(hosts.RepairAction):
     """
 
     # Timeout value for this repair action is specially configured as we need
-    # stage image to usb drive, install chromeos image and potentially run
-    # bad block check on usb drive.
+    # stage image to usb drive, install chromeos image.
     @timeout_util.TimeoutDecorator(60 * 60)
     def repair(self, host):
         # pylint: disable=missing-docstring
-        repair_utils.require_servo(host)
+        repair_utils.require_servo(host, ignore_state=True)
         image_name = host.get_cros_repair_image_name()
+        image_name_on_usb = host._servo_host.validate_image_usbkey()
+        if image_name_on_usb == image_name:
+            logging.info(
+                    'Required image %s is already on usbkey,'
+                    ' skipping download.', image_name)
+            need_update_image = False
+        else:
+            logging.info('Required image is not on usbkey.')
+            need_update_image = True
+
+        # Verify if we want to force re-image the USB.
+        if not need_update_image and host.health_profile:
+            repair_failed_count = host.health_profile.get_repair_fail_count()
+            # try to re-image USB when previous attempt failed
+            if repair_failed_count == 1:
+                logging.info('Required re-download image to usbkey as'
+                             ' a previous repair failed.')
+                need_update_image = True
+
         update_url = None
-        if host._servo_host.validate_image_usbkey() != image_name:
+        if need_update_image:
             logging.info('Staging image: %s on caching server.', image_name)
             _, update_url = host.stage_image_for_servo()
-        else:
-            logging.info('Required image %s is already on usbkey,'
-                         ' skipping download.', image_name)
         afe_utils.clean_provision_labels(host)
         host.servo_install(update_url, is_repair=True)
         afe_utils.add_provision_labels(host, host.VERSION_PREFIX, image_name)

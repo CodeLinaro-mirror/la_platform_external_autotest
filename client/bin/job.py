@@ -884,12 +884,6 @@ class base_client_job(base_job.base_job):
 
     def complete(self, status):
         """Write pending reports, clean up, and exit"""
-        # write out a job HTML report
-        try:
-            html_report.create_report(self.resultdir)
-        except Exception as e:
-            logging.error("Error writing job HTML report: %s", e)
-
         # We are about to exit 'complete' so clean up the control file.
         dest = os.path.join(self.resultdir, os.path.basename(self._state_file))
         shutil.move(self._state_file, dest)

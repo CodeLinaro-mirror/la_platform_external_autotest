@@ -106,11 +106,6 @@ COMMON_FAILURES = {
 # the ones that were not launched
 TABLET_MODELS = ['kakadu', 'kodama', 'krane', 'dru', 'druwl', 'dumo']
 
-# TODO(b/158336394) - Devices with Realtek chipsets won't behave well during
-# suspend/resume because they don't maintain FW. List all Realtek models here
-# and skip them in the relevant tests.
-REALTEK_MODELS = ['blooglet', 'barla', 'ezkinil', 'trembyle']
-
 # TODO(b/161005264) - Some tests rely on software rotation to pass, so we must
 # know which models don't use software rotation. Use a static list until we can
 # query the bluez API instead. Extended advertising is supported on platforms
@@ -121,6 +116,16 @@ EXT_ADV_MODELS = ['ezkinil', 'trembyle', 'drawcia', 'drawlat', 'drawman',
                   'dragonair', 'dratini', 'duffy', 'jinlon', 'kaisa',
                   'kindred', 'kled', 'puff', 'kohaku', 'nightfury', 'morphius',
                   'lazor', 'trogdor']
+
+# TODO(b/158336394) Realtek: Powers down during suspend due to high power usage
+#                            during S3.
+# TODO(b/168152910) Marvell: Powers down during suspend due to flakiness when
+#                            entering suspend.  This will also skip the tests
+#                            for Veyron (which don't power down right now) but
+#                            reconnect tests are still enabled for that platform
+#                            to check for suspend stability.
+SUSPEND_POWER_DOWN_CHIPSETS = ['Realtek-RTL8822C-USB', 'MVL-8897', 'MVL-8997']
+
 
 def method_name():
     """Get the method name of a class.
@@ -870,6 +875,15 @@ class BluetoothAdapterTests(test.test):
         # Ensure device is back online before continuing
         self.wait_for_device(device, timeout=30)
 
+    def device_set_powered(self, device, powered):
+        """Set raspi BT powered state.
+
+        @param powered: Powered state to set on Raspi.
+        """
+        if powered:
+            device.AdapterPowerOn()
+        else:
+            device.AdapterPowerOff()
 
     def get_device_rasp(self, device_num, on_start=True):
         """Get all bluetooth device objects from Bluetooth peer devices
@@ -1386,6 +1400,19 @@ class BluetoothAdapterTests(test.test):
         """ Collect WRT logs from Intel Adapters."""
         return self.bluetooth_facade.collect_wrt_logs()
 
+    def get_num_connected_devices(self):
+        """ Return number of remote devices currently connected to the DUT.
+
+        @returns: The number of devices known to bluez with the Connected
+            property active
+        """
+
+        num_connected_devices = 0
+        for dev in self.bluetooth_facade.get_devices():
+            if dev and dev.get('Connected', 0):
+                num_connected_devices += 1
+
+        return num_connected_devices
 
     @test_retry_and_log
     def test_bluetoothd_running(self):
@@ -2089,6 +2116,8 @@ class BluetoothAdapterTests(test.test):
         paired = False
         connected = False
         connection_info_retrievable = False
+        connected_devices = self.get_num_connected_devices()
+
         if self.bluetooth_facade.has_device(device_address):
             has_device = True
             try:
@@ -2110,9 +2139,11 @@ class BluetoothAdapterTests(test.test):
                 'has_device': has_device,
                 'paired': paired,
                 'connected': connected,
-                'connection_info_retrievable': connection_info_retrievable}
-        return all(self.results.values())
+                'connection_info_retrievable': connection_info_retrievable,
+                'connection_num': connected_devices + 1
+        }
 
+        return all(self.results.values())
 
     @test_retry_and_log
     def test_remove_pairing(self, device_address):
@@ -2920,10 +2951,17 @@ class BluetoothAdapterTests(test.test):
                 service_data_found = False
                 break
 
-        # Verify that the advertising intervals are correct.
-        min_adv_interval_ms_found, max_adv_interval_ms_found = (
-                self._verify_advertising_intervals(min_adv_interval_ms,
-                                                   max_adv_interval_ms))
+        # Broadcast advertisements are overwritten in some kernel versions to
+        # be more aggressive. Verify that the advertising intervals are correct
+        # if this mode is not used
+        if advertisement_data.get('Type') != 'broadcast':
+            min_adv_interval_ms_found, max_adv_interval_ms_found = (
+                    self._verify_advertising_intervals(min_adv_interval_ms,
+                                                       max_adv_interval_ms))
+
+        else:
+            min_adv_interval_ms_found = True
+            max_adv_interval_ms_found = True
 
         scan_rsp_correct = self._verify_scan_response_data(advertisement_data)
 
@@ -3459,23 +3497,6 @@ class BluetoothAdapterTests(test.test):
             for diff_str in diff[::]:
                 if pattern.search(diff_str):
                     diff.remove(diff_str)
-
-        # Remove any difference in Includes [] versus None
-        # TODO(b:155596705) Cleanup these code when we switch to bluez 5.54
-        pattern = re.compile('^Service .* is different in Includes: \[\] vs '
-                             'None')
-        for diff_str in diff[::]:
-            if pattern.search(diff_str):
-                diff.remove(diff_str)
-
-        # Remove any difference in Battery Service
-        # TODO(b:155596705) Cleanup these code until b:155505162 is solved.
-        pattern = re.compile('^Service %s is not included in both Applications:'
-                             'False vs True' % GATT_HIDApplication.\
-                                                            BatteryServiceUUID)
-        for diff_str in diff[::]:
-            if pattern.search(diff_str):
-                diff.remove(diff_str)
 
         if len(diff) != 0:
             logging.error('Application Diff: %s', diff)
@@ -4085,7 +4106,13 @@ class BluetoothAdapterTests(test.test):
             @raises: error.TestNAError if found suspend occurred before we
                      started waiting for resume.
             """
-            if wake_at < wait_from:
+            # If the last suspend attempt was before we started waiting and by
+            # more than timeout seconds, it's probably not a recent attempt.
+            # Make sure to compare the delta because if we fail suspend,
+            # self.suspend_and_wait_for_sleep will block until the suspend
+            # attempt is already complete so wake_at < wait_from is always true.
+            if wake_at < wait_from and (wait_from - wake_at) > timedelta(
+                    seconds=resume_timeout):
                 raise error.TestNAError(
                         'No recent suspend attempt found. '
                         'Start waiting at {} but last suspend ended at {}'.

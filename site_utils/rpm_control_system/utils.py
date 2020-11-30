@@ -44,34 +44,6 @@ class PowerUnitInfo(object):
         self.hydra_hostname = hydra_hostname
 
 
-    @staticmethod
-    def get_powerunit_info(afe_host):
-        """Constructe a PowerUnitInfo instance from an afe host.
-
-        @param afe_host: A host object.
-
-        @returns: A PowerUnitInfo object populated with the power management
-                  unit information of the host.
-        """
-        if (not POWERUNIT_HOSTNAME_KEY in afe_host.attributes or
-            not POWERUNIT_OUTLET_KEY in afe_host.attributes):
-            raise rpm_infrastructure_exception.RPMInfrastructureException(
-                    'Can not retrieve complete rpm information'
-                    'from AFE for %s, please make sure %s and %s are'
-                    ' in the host\'s attributes.' % (afe_host.hostname,
-                    POWERUNIT_HOSTNAME_KEY, POWERUNIT_OUTLET_KEY))
-
-        hydra_hostname=(afe_host.attributes[HYDRA_HOSTNAME_KEY]
-                        if HYDRA_HOSTNAME_KEY in afe_host.attributes
-                        else None)
-        return PowerUnitInfo(
-                device_hostname=afe_host.hostname,
-                powerunit_type=PowerUnitInfo.POWERUNIT_TYPES.RPM,
-                powerunit_hostname=afe_host.attributes[POWERUNIT_HOSTNAME_KEY],
-                outlet=afe_host.attributes[POWERUNIT_OUTLET_KEY],
-                hydra_hostname=hydra_hostname)
-
-
 class LRUCache(object):
     """A simple implementation of LRU Cache."""
 

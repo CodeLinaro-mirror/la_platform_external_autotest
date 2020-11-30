@@ -4,8 +4,7 @@
 
 AUTHOR = 'rzakarian'
 NAME = 'policy_ArcAudioCaptureAllowed.allow'
-# Disable until test can be fixed: http://b/170680351
-# ATTRIBUTES = 'suite:ent-nightly, suite:policy'
+ATTRIBUTES = 'suite:ent-nightly, suite:policy'
 TIME = 'SHORT'
 TEST_CATEGORY = 'General'
 TEST_CLASS = 'enterprise'

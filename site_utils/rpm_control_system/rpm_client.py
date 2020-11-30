@@ -94,13 +94,18 @@ def _set_power(args_tuple, timeout_mins=RPM_CALL_TIMEOUT_MINS):
         logging.error(error_msg)
         if len(args_tuple) > 2:
             # Collect failure metrics if we set power via rpm.
-            _send_rpm_failure_metrics(args_tuple[1], args_tuple[2])
+            _send_rpm_failure_metrics(args_tuple[0], args_tuple[1],
+                                      args_tuple[2])
         raise RemotePowerException(error_msg)
 
 
-def _send_rpm_failure_metrics(rpm_host, outlet):
-    metrics_fields = {'rpm_host': rpm_host, 'outlet': outlet}
-    metrics.Counter('chromeos/autotest/rpm/rpm_failure').increment(
+def _send_rpm_failure_metrics(hostname, rpm_host, outlet):
+    metrics_fields = {
+            'hostname': hostname,
+            'rpm_host': rpm_host,
+            'outlet': outlet
+    }
+    metrics.Counter('chromeos/autotest/rpm/rpm_failure2').increment(
             fields=metrics_fields)
 
 

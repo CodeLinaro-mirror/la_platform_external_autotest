@@ -8,6 +8,8 @@ from autotest_lib.server.cros.bluetooth.bluetooth_adapter_quick_tests \
      import BluetoothAdapterQuickTests
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_adv_monitor_tests \
      import BluetoothAdapterAdvMonitorTests
+from autotest_lib.server.cros.bluetooth.bluetooth_adapter_tests \
+     import SUSPEND_POWER_DOWN_CHIPSETS
 
 
 class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
@@ -43,6 +45,13 @@ class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
         self.advmon_test_rssi_filter_3()
 
 
+    @test_wrapper('Multi Client Tests',
+                  devices={'BLE_KEYBOARD':1, 'BLE_MOUSE':1})
+    def advmon_multi_client_tests(self):
+        """Tests monitor functionality for multiple clients."""
+        self.advmon_test_multi_client()
+
+
     @test_wrapper('Foreground Background Combination Tests',
                   devices={'BLE_KEYBOARD':1, 'BLE_MOUSE':1})
     def advmon_fg_bg_combination_tests(self):
@@ -50,7 +59,26 @@ class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
         self.advmon_test_fg_bg_combination()
 
 
-    @test_wrapper('Interleave Scan Tests', devices={'BLE_MOUSE': 1})
+    # TODO(b/150897528) - Dru loses firmware around suspend, which causes bluez
+    #                     removes all the monitors.
+    @test_wrapper('Suspend Resume Tests',
+                  devices={
+                          'BLE_KEYBOARD': 1,
+                          'BLE_MOUSE': 1
+                  },
+                  skip_models=['dru'],
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
+    def advmon_suspend_resume_tests(self):
+        """Tests working of background scanning with suspend resume."""
+        self.advmon_test_suspend_resume()
+
+
+    # TODO(b/150897528) - Dru loses firmware around suspend, which causes bluez
+    #                     removes all the monitors.
+    @test_wrapper('Interleave Scan Tests',
+                  devices={'BLE_MOUSE': 1},
+                  skip_models=['dru'],
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def advmon_interleaved_scan(self):
         """Tests interleave scan."""
         self.advmon_test_interleaved_scan()
@@ -71,7 +99,9 @@ class bluetooth_AdapterAdvMonitor(BluetoothAdapterQuickTests,
         """
         self.advmon_monitor_health_tests()
         self.advmon_single_client_tests()
+        self.advmon_multi_client_tests()
         self.advmon_fg_bg_combination_tests()
+        self.advmon_suspend_resume_tests()
         self.advmon_interleaved_scan()
 
     def run_once(self,

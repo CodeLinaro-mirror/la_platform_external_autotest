@@ -1,4 +1,6 @@
 autoupdate_Basic
+autoupdate_CatchBadSignatures
+autoupdate_WithDLC
 cheets_CTS*
 cheets_GTS*
 cheets_KeyboardTest

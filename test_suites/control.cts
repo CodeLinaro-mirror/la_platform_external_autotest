@@ -23,7 +23,7 @@ from autotest_lib.server.cros.dynamic_suite import dynamic_suite
 def predicate(test):
   if not hasattr(test, 'suite') or not hasattr(test, 'name'):
     return False
-  if not test.suite == NAME:
+  if not NAME in test.suite.split(','):
     return False
   # Strip off the cheets_CTS. from the test name before comparing to args
   name = test.name[test.name.find('.') + 1:]

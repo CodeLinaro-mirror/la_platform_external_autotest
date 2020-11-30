@@ -29,6 +29,12 @@ _RETRYS = 3
 _RECOVERY_WAIT_SEC = 1
 # Delay to wait before polling whether the role as been changed successfully.
 _ROLE_SETTLING_DELAY_SEC = 1
+# Timeout in minutes to attempt checking AC information over ssh.
+# Ethernet connection through the v4 flickers on role change. The usb
+# adapter needs to reenumerate and the DUT reconnect before information can be
+# queried. This delay has proven sufficient to overcome this in the current
+# implementation.
+_ETH_REENUMERATE_TIMEOUT_MIN = 1
 
 
 def _invert_role(role):
@@ -184,7 +190,7 @@ class ServoV4ChargeManager(object):
 
         check_ac_connected(connected)
 
-        @retry.retry(error.TestError, timeout_min=_TIMEOUT_MIN,
+        @retry.retry(error.TestError, timeout_min=_ETH_REENUMERATE_TIMEOUT_MIN,
                      delay_sec=_DELAY_SEC, backoff=_BACKOFF)
         def check_host_ac(connected):
             """Check if DUT AC power is as expected, if not, retry."""

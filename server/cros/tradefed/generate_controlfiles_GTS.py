@@ -55,8 +55,8 @@ CONFIG['CTS_TIMEOUT'] = {
         'GtsNetworkWatchlistTestCases': 1.0,
         'GtsYouTubeTestCases': 1.0,
         _ALL: 24,
-        _COLLECT: 0.5,
-        _PUBLIC_COLLECT: 0.5,
+        _COLLECT: 1.0,
+        _PUBLIC_COLLECT: 1.0,
 }
 
 # Any test that runs as part as blocking BVT needs to be stable and fast. For

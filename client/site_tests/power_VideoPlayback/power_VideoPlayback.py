@@ -4,6 +4,7 @@
 import logging
 import os
 
+from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import file_utils
 from autotest_lib.client.cros.power import power_videotest
 
@@ -148,8 +149,21 @@ class power_VideoPlayback(power_videotest.power_VideoTest):
         @param use_hw_decode: if False, disable hw video decoding.
         @param fast: Use smaller set of videos when videos is None.
         """
+        default_videos = self._FAST_VIDEOS if fast else self._VIDEOS
         if not videos:
-            videos = self._FAST_VIDEOS if fast else self._VIDEOS
+            videos = default_videos
+        else:
+            for i, (tagname, url) in enumerate(videos):
+                if url:
+                    continue
+                # if url is unset & tagname matches default use that path.
+                for default in default_videos:
+                    if tagname == default[0]:
+                        videos[i] = default
+                        break
+                else:
+                    estr = 'Unable to find URL for video name %s' % tagname
+                    raise error.TestError(estr)
 
         super(power_VideoPlayback, self).run_once(
             videos, secs_per_video, use_hw_decode)
