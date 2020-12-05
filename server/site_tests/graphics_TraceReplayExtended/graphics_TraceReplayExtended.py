@@ -132,6 +132,14 @@ class graphics_TraceReplayExtended(test.test):
         # data from the graphics_Power subtest.
         trace_name = client_tast_test.split('.')[-1]
 
+        # workaround for running test locally since crrev/c/2374267 and
+        # crrev/i/2374267
+        if not tast_command_args:
+            tast_command_args = []
+        tast_command_args.extend([
+                'extraallowedbuckets=termina-component-testing,cros-containers-staging'
+        ])
+
         # Define paths of signal files for basic RPC/IPC between sub-tests.
         temp_io_root = '/tmp/%s/' % self.__class__.__name__
         result_dir = os.path.join(temp_io_root, 'results')

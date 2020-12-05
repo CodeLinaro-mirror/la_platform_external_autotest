@@ -10,6 +10,7 @@ import dbus.service
 import gobject
 import logging
 
+from multiprocessing import Process, Pipe
 from threading import Thread
 
 DBUS_OM_IFACE = 'org.freedesktop.DBus.ObjectManager'
@@ -508,24 +509,183 @@ class AdvMonitorAppMgr():
 
     """
 
-    def __init__(self, bus, dbus_mainloop, advmon_manager):
-        """Construction of applications manager object.
+    # List of commands used by AdvMonitor AppMgr, AppMgr-helper process and
+    # AdvMonitor Test Application for communication between each other.
+    CMD_EXIT_HELPER = 0
+    CMD_CREATE_APP = 1
+    CMD_EXIT_APP = 2
+    CMD_KILL_APP = 3
+    CMD_REGISTER_APP = 4
+    CMD_UNREGISTER_APP = 5
+    CMD_ADD_MONITOR = 6
+    CMD_REMOVE_MONITOR = 7
+    CMD_GET_EVENT_COUNT = 8
+    CMD_RESET_EVENT_COUNT = 9
 
-        @param bus: a dbus system bus.
-        @param dbus_mainloop: an instance of mainloop.
-        @param advmon_manager: AdvertisementMonitorManager1 interface on
-                               the adapter.
+    def __init__(self):
+        """Construction of applications manager object."""
+
+        # Due to a limitation of python, it is not possible to fork a new
+        # process once any dbus connections are established. So, create a
+        # helper process before making any dbus connections. This helper
+        # process can be used to create more processes on demand.
+        parent_conn, child_conn = Pipe()
+        p = Process(target=self._appmgr_helper, args=(child_conn,))
+        p.start()
+
+        self._helper_proc = p
+        self._helper_conn = parent_conn
+        self.apps = []
+
+
+    def _appmgr_helper(self, appmgr_conn):
+        """AppMgr helper process.
+
+        This process is used to create new instances of the AdvMonitor Test
+        Application on demand and acts as a communication bridge between the
+        AppMgr and test applications.
+
+        @param appmgr_conn: an object of AppMgr connection pipe.
 
         """
-        self.bus = bus
-        self.mainloop = dbus_mainloop
-        self.advmon_mgr = advmon_manager
+        app_conns = dict()
 
-        self.apps = dict()
+        done = False
+        while not done:
+            cmd, app_id, data = appmgr_conn.recv()
+            ret = None
 
+            if cmd == self.CMD_EXIT_HELPER:
+                # Terminate any outstanding test application instances before
+                # exiting the helper process.
+                for app_id in app_conns:
+                    p, app_conn = app_conns[app_id]
+                    if p.is_alive():
+                        # Try to exit the app gracefully first, terminate if it
+                        # doesn't work.
+                        app_conn.send((self.CMD_EXIT_APP, None))
+                        if not app_conn.recv() or p.is_alive():
+                            p.terminate()
+                            p.join() # wait for test app to terminate
+                done = True
+                ret = True
+
+            elif cmd == self.CMD_CREATE_APP:
+                if app_id not in app_conns:
+                    parent_conn, child_conn = Pipe()
+                    p = Process(target=self._testapp_main,
+                                args=(child_conn, app_id,))
+                    p.start()
+
+                    app_conns[app_id] = (p, parent_conn)
+                    ret = app_id
+
+            elif cmd == self.CMD_KILL_APP:
+                if app_id in app_conns:
+                    p, _ = app_conns[app_id]
+                    if p.is_alive():
+                        p.terminate()
+                        p.join() # wait for test app to terminate
+
+                    app_conns.pop(app_id)
+                    ret = not p.is_alive()
+
+            else:
+                if app_id in app_conns:
+                    p, app_conn = app_conns[app_id]
+
+                    app_conn.send((cmd, data))
+                    ret = app_conn.recv()
+
+                    if cmd == self.CMD_EXIT_APP:
+                        p.join() # wait for test app to terminate
+
+                        app_conns.pop(app_id)
+                        ret = not p.is_alive()
+
+            appmgr_conn.send(ret)
+
+
+    def _testapp_main(self, helper_conn, app_id):
+        """AdvMonitor Test Application Process.
+
+        This process acts as a client application for AdvMonitor tests and used
+        to host AdvMonitor dbus objects.
+
+        @param helper_conn: an object of AppMgr-helper process connection pipe.
+        @param app_id: the app id of this test app process.
+
+        """
         # Initialize threads in gobject/dbus-glib before creating local threads.
         gobject.threads_init()
         dbus.mainloop.glib.threads_init()
+
+        # Arrange for the GLib main loop to be the default.
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+
+        def get_advmon_mgr(bus):
+            """Finds the AdvMonitor Manager object exported by bluetoothd."""
+            remote_om = dbus.Interface(bus.get_object(BLUEZ_SERVICE_NAME, '/'),
+                                       DBUS_OM_IFACE)
+            objects = remote_om.GetManagedObjects()
+
+            for o, props in objects.items():
+                if ADV_MONITOR_MANAGER_IFACE in props:
+                    return dbus.Interface(bus.get_object(BLUEZ_SERVICE_NAME, o),
+                                          ADV_MONITOR_MANAGER_IFACE)
+            return None
+
+        bus = dbus.SystemBus()
+        mainloop = gobject.MainLoop()
+        advmon_mgr = get_advmon_mgr(bus)
+
+        app = AdvMonitorApp(bus, mainloop, advmon_mgr, app_id)
+
+        done = False
+        while not done:
+            cmd, data = helper_conn.recv()
+            ret = None
+
+            if cmd == self.CMD_EXIT_APP:
+                done = True
+                ret = True
+
+            elif cmd == self.CMD_REGISTER_APP:
+                ret = app.register_app()
+
+            elif cmd == self.CMD_UNREGISTER_APP:
+                ret = app.unregister_app()
+
+            elif cmd == self.CMD_ADD_MONITOR:
+                ret = app.add_monitor(data)
+
+            elif cmd == self.CMD_REMOVE_MONITOR:
+                ret = app.remove_monitor(data)
+
+            elif cmd == self.CMD_GET_EVENT_COUNT:
+                ret = app.get_event_count(*data)
+
+            elif cmd == self.CMD_RESET_EVENT_COUNT:
+                ret = app.reset_event_count(*data)
+
+            helper_conn.send(ret)
+
+
+    def _send_to_helper(self, cmd, app_id=None, data=None):
+        """Sends commands to the helper process.
+
+        @param cmd: command number from the above set of CMD_* commands.
+        @param app_id: the app id.
+        @param data: the command data.
+
+        @returns: outcome of the command returned by the helper process.
+
+        """
+        if not self._helper_proc.is_alive():
+            return None
+
+        self._helper_conn.send((cmd, app_id, data))
+        return self._helper_conn.recv()
 
 
     def create_app(self):
@@ -535,17 +695,12 @@ class AdvMonitorAppMgr():
 
         """
         app_id = 0
+        while app_id in self.apps:
+            app_id += 1
 
-        # TODO(b/162791635) - fork a new app instance instead of creating a
-        # local app object (to be implemented with multiclient implementation).
-        if app_id not in self.apps:
-            app = AdvMonitorApp(self.bus,
-                                self.mainloop,
-                                self.advmon_mgr,
-                                app_id)
-            self.apps[app_id] = app
+        self.apps.append(app_id)
 
-        return app_id
+        return self._send_to_helper(self.CMD_CREATE_APP, app_id)
 
 
     def exit_app(self, app_id):
@@ -556,10 +711,12 @@ class AdvMonitorAppMgr():
         @returns: True on success, False otherwise.
 
         """
+        if app_id not in self.apps:
+            return False
 
-        # TODO(b/162791635) - to be implemented with multiclient implementation.
+        self.apps.remove(app_id)
 
-        return True
+        return self._send_to_helper(self.CMD_EXIT_APP, app_id)
 
 
     def kill_app(self, app_id):
@@ -570,10 +727,12 @@ class AdvMonitorAppMgr():
         @returns: True on success, False otherwise.
 
         """
+        if app_id not in self.apps:
+            return False
 
-        # TODO(b/162791635) - to be implemented with multiclient implementation.
+        self.apps.remove(app_id)
 
-        return True
+        return self._send_to_helper(self.CMD_KILL_APP, app_id)
 
 
     def register_app(self, app_id):
@@ -587,7 +746,7 @@ class AdvMonitorAppMgr():
         if app_id not in self.apps:
             return False
 
-        return self.apps[app_id].register_app()
+        return self._send_to_helper(self.CMD_REGISTER_APP, app_id)
 
 
     def unregister_app(self, app_id):
@@ -601,7 +760,7 @@ class AdvMonitorAppMgr():
         if app_id not in self.apps:
             return False
 
-        return self.apps[app_id].unregister_app()
+        return self._send_to_helper(self.CMD_UNREGISTER_APP, app_id)
 
 
     def add_monitor(self, app_id, monitor_data):
@@ -617,7 +776,7 @@ class AdvMonitorAppMgr():
         if app_id not in self.apps:
             return None
 
-        return self.apps[app_id].add_monitor(monitor_data)
+        return self._send_to_helper(self.CMD_ADD_MONITOR, app_id, monitor_data)
 
 
     def remove_monitor(self, app_id, monitor_id):
@@ -632,7 +791,7 @@ class AdvMonitorAppMgr():
         if app_id not in self.apps:
             return False
 
-        return self.apps[app_id].remove_monitor(monitor_id)
+        return self._send_to_helper(self.CMD_REMOVE_MONITOR, app_id, monitor_id)
 
 
     def get_event_count(self, app_id, monitor_id, event):
@@ -648,7 +807,8 @@ class AdvMonitorAppMgr():
         if app_id not in self.apps:
             return None
 
-        return self.apps[app_id].get_event_count(monitor_id, event)
+        return self._send_to_helper(self.CMD_GET_EVENT_COUNT, app_id,
+                                    (monitor_id, event))
 
 
     def reset_event_count(self, app_id, monitor_id, event):
@@ -664,4 +824,17 @@ class AdvMonitorAppMgr():
         if app_id not in self.apps:
             return False
 
-        return self.apps[app_id].reset_event_count(monitor_id, event)
+        return self._send_to_helper(self.CMD_RESET_EVENT_COUNT, app_id,
+                                    (monitor_id, event))
+
+
+    def destroy(self):
+        """Clean up the helper process and test app processes."""
+
+        self._send_to_helper(self.CMD_EXIT_HELPER)
+
+        if self._helper_proc.is_alive():
+            self._helper_proc.terminate()
+            self._helper_proc.join() # wait for helper process to terminate
+
+        return not self._helper_proc.is_alive()

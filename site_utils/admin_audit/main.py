@@ -111,8 +111,6 @@ def main():
             except Exception as err:
                 logging.error("fail to init servo host: %s", err)
                 return RETURN_CODES.OTHER_FAILURES
-        if hasattr(host, 'setup_device_health_profile'):
-            host.setup_device_health_profile()
         for action in opts.actions:
             if opts.dry_run:
                 logging.info('DRY RUN: Would have run actions %s', action)

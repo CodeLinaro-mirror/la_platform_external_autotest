@@ -19,9 +19,6 @@ class MockHostInfoStore(object):
 class MockHost(object):
     def __init__(self, hostname):
         self.hostname = hostname
-        self.host_info_store = mock.Mock()
-        self.host_info_store.get.return_value = MockHostInfoStore()
-        self.job = None
 
     def check_cached_up_status(self):
         return True
@@ -40,13 +37,30 @@ class MockHost(object):
 
 
 def create_device_health_profile():
-    dut = MockHost('dummy_dut_hostname')
     servohost = MockHost('dummy_servohost_hostname')
-    return device_health_profile.DeviceHealthProfile(dut, servohost)
+    host_info = MockHostInfoStore()
+    dhp = device_health_profile.DeviceHealthProfile(
+            hostname='dummy_dut_hostname',
+            host_info=host_info,
+            result_dir=None)
+    dhp.init_profile(servohost)
+    return dhp
 
 
 class DeviceHealthProfileTestCase(unittest.TestCase):
     dhp = create_device_health_profile()
+
+    def test_shows_not_loaded_till_profile_host_provided(self):
+        host_info = MockHostInfoStore()
+        dhp = device_health_profile.DeviceHealthProfile(
+                hostname='dummy_dut_hostname',
+                host_info=host_info,
+                result_dir=None)
+        self.assertFalse(dhp.is_loaded())
+
+    def test_set_loaded_when_provide_profile_host_provided(self):
+        dhp = create_device_health_profile()
+        self.assertTrue(dhp.is_loaded())
 
     def test_validate_device_health_profile_data(self):
         profile_data = self.dhp.health_profile
@@ -192,6 +206,24 @@ class DeviceHealthProfileTestCase(unittest.TestCase):
         time.sleep(1)
         self.dhp.refresh_badblocks_rw_run_time()
         self.assertGreater(self.dhp.get_badblocks_rw_run_time_epoch(),
+                           cached_time_epoch)
+
+    def test_get_servo_micro_fw_update_time(self):
+        cached_time = self.dhp.get_servo_micro_fw_update_time()
+        self.assertRegexpMatches(cached_time, r'\d{4}[-/]\d{2}[-/]\d{2}')
+        # Sleep 1 second so updated timestamp is different than current one.
+        time.sleep(1)
+        self.dhp.refresh_servo_miro_fw_update_run_time()
+        self.assertNotEqual(cached_time,
+                            self.dhp.get_servo_micro_fw_update_time())
+
+    def test_get_servo_micro_fw_update_time_epoch(self):
+        cached_time_epoch = self.dhp.get_servo_micro_fw_update_time_epoch()
+        self.assertEqual(type(cached_time_epoch), int)
+        # Sleep 1 second so updated timestamp is different than current one.
+        time.sleep(1)
+        self.dhp.refresh_servo_miro_fw_update_run_time()
+        self.assertGreater(self.dhp.get_servo_micro_fw_update_time_epoch(),
                            cached_time_epoch)
 
 

@@ -144,6 +144,9 @@ class BluetoothAdapterAdvMonitorTests(
     # Acceptable extra/missing cycles in interleave scan
     INTERLEAVE_SCAN_CYCLE_NUM_TOLERANCE = 2
 
+    # Duration of kernel perform 'start discovery', in sec
+    DISCOVERY_DURATION = 10.24
+
     test_case_log = bluetooth_adapter_tests.test_case_log
     test_retry_and_log = bluetooth_adapter_tests.test_retry_and_log
 
@@ -294,7 +297,7 @@ class BluetoothAdapterAdvMonitorTests(
         @returns: a list of records, where each item is a record of
                   interleave |state| and the |time| the state starts.
                   |state| could be {'no filter', 'allowlist'}
-                  |time| is kernel time in sec
+                  |time| is system time in sec
 
         """
         return self.bluetooth_facade.\
@@ -723,6 +726,58 @@ class BluetoothAdapterAdvMonitorTests(
                 'Span within range': span_within_range
         }
 
+    def check_records_paused(self, records, cancel_event, expect_paused_time,
+                             expect_resume):
+        """ Check if the interleave scan is paused
+
+        @param records: a list of records
+        @param cancel_event: the timestamp interleave was canceled
+        @param expect_paused_time: minimum duration of interleave scan paused
+        @param expect_resume: True if interleave scan should restart,
+                              False if ***we don't care***
+
+        @returns: a dict of {'Cancel event': (bool),
+                             'Non-empty records before paused': (bool),
+                             'Non-empty records after paused': (bool),
+                             'Paused enough time': (bool)
+                            }
+                  Note: some entries might not exist if it doesn't make sense
+                        in that case.
+
+        """
+
+        result = {}
+
+        result.update({'Cancel event': cancel_event is not None})
+        if cancel_event is None:
+            return result
+
+        canceled_time = cancel_event + self.INTERLEAVE_SCAN_CANCEL_TOLERANCE
+
+        before_paused_rec = [r for r in records if r['time'] < canceled_time]
+        after_paused_rec = [r for r in records if r['time'] >= canceled_time]
+
+        result.update({
+                'Non-empty records before paused':
+                len(before_paused_rec) != 0
+        })
+
+        if expect_resume:
+            result.update({
+                    'Non-empty records after paused':
+                    len(after_paused_rec) != 0
+            })
+
+        if len(before_paused_rec) > 0 and len(after_paused_rec) > 0:
+            # Records are stored chronologically.
+            last_time_before_paused = before_paused_rec[-1]['time']
+            first_time_after_paused = after_paused_rec[0]['time']
+            paused_time = first_time_after_paused - last_time_before_paused
+            result.update(
+                    {'Paused enough time': paused_time >= expect_paused_time})
+
+        return result
+
     def get_interleave_scan_durations(self):
         """ Get interleave scan duration.
 
@@ -800,38 +855,45 @@ class BluetoothAdapterAdvMonitorTests(
         logging.debug(records)
         logging.debug(cancel_event)
 
-        self.results = {}
-
-        if cancel_event is None:
-            self.results = {'Cancel event': cancel_event}
-            return False
-
-        canceled_time = cancel_event + self.INTERLEAVE_SCAN_CANCEL_TOLERANCE
-
-        suspend_records = [r for r in records if r['time'] < canceled_time]
-        resume_records = [r for r in records if r['time'] >= canceled_time]
-
-        if len(suspend_records) == 0:
-            self.results = {'non-empty records before suspended': False}
-            return False
-
-        if len(resume_records) == 0:
-            self.results = {'non-empty records after resumed': False}
-            return False
-
-        # Records are stored chronologically.
-        # The first record is the earliest, while the last one is the oldest.
-        last_suspend = suspend_records[-1]['time']
-        first_resume = resume_records[0]['time']
-        suspend_time = first_resume - last_suspend
-
         # Currently resume time is not very reliable. It is likely the actual
         # time in sleeping is less than expect_suspend_time.
         # Check the interleave scan paused for at least one cycle long instead.
-        self.results = {
-                'Paused enough time': suspend_time >= interleave_period
-        }
+        self.results = self.check_records_paused(records, cancel_event,
+                                                 interleave_period, True)
+        return all(self.results.values())
 
+    @test_retry_and_log(False)
+    def test_interleaving_active_scan_cycle(self):
+        """ Test for checking if kernel paused interleave scan during active
+            scan.
+
+        @returns: True on success, False otherwise.
+
+        """
+        durations = self.get_interleave_scan_durations()
+        interleave_period = sum(durations.values())
+
+        # make sure we'll get some records before/after active scan
+        extra_sleep_time = 2 * interleave_period
+
+        self.interleave_logger_start()
+        time.sleep(extra_sleep_time)
+        self.test_start_discovery()
+        time.sleep(extra_sleep_time + self.INTERLEAVE_SCAN_CANCEL_TOLERANCE)
+        self.interleave_logger_stop()
+        records = self.interleave_logger_get_records()
+        cancel_event = self.interleave_logger_get_cancel_event()
+
+        logging.debug(records)
+        logging.debug(cancel_event)
+
+        # BlueZ pauses discovery for every DISCOVERY_DURATION then restarts it
+        # 5 seconds later. Interleave scan also get restarted during the paused
+        # time.
+        self.results = self.check_records_paused(records, cancel_event,
+                                                 self.DISCOVERY_DURATION,
+                                                 False)
+        self.test_stop_discovery()
         return all(self.results.values())
 
     def advmon_test_monitor_creation(self):
@@ -1286,6 +1348,92 @@ class BluetoothAdapterAdvMonitorTests(
         self.test_exit_app(app1)
 
 
+    def advmon_test_multi_client(self):
+        """Test case: MULTI_CLIENT
+
+        Verify working of patterns filter and RSSI filters with multiple
+        clients and multiple monitors.
+
+        """
+        self.test_setup_peer_devices()
+
+        # Create two test app instances.
+        app1 = self.create_app()
+        app2 = self.create_app()
+
+        # Register both apps, should not fail.
+        self.test_register_app(app1)
+        self.test_register_app(app2)
+
+        # Monitors with same pattern and RSSI filter values in both apps.
+        monitor1 = TestMonitor(app1)
+        monitor1.update_type('or_patterns')
+        monitor1.update_patterns([
+                [0, 0x03, [0x12, 0x18]],
+                [0, 0x19, [0xc1, 0x03]],
+        ])
+        monitor1.update_rssi([-60, 3, -80, 3])
+
+        monitor2 = TestMonitor(app2)
+        monitor2.update_type('or_patterns')
+        monitor2.update_patterns([
+                [0, 0x03, [0x12, 0x18]],
+                [0, 0x19, [0xc1, 0x03]],
+        ])
+        monitor2.update_rssi([-60, 3, -80, 3])
+
+        # Activate should get invoked.
+        self.test_add_monitor(monitor1, expected_activate=True)
+        self.test_add_monitor(monitor2, expected_activate=True)
+
+        # DeviceFound should get triggered for keyboard.
+        self.test_start_peer_device_adv(self.peer_keybd, duration=5)
+        self.test_device_found(monitor1, count=1)
+        self.test_device_found(monitor2, count=1)
+        self.test_stop_peer_device_adv(self.peer_keybd)
+
+        # Remove a monitor from one app.
+        self.test_remove_monitor(monitor1)
+
+        # Monitors with same pattern but different RSSI filter values.
+        monitor3 = TestMonitor(app1)
+        monitor3.update_type('or_patterns')
+        monitor3.update_patterns([
+                [0, 0x19, [0xc2, 0x03]],
+        ])
+        monitor3.update_rssi([-60, 3, -80, 3])
+
+        monitor4 = TestMonitor(app2)
+        monitor4.update_type('or_patterns')
+        monitor4.update_patterns([
+                [0, 0x19, [0xc2, 0x03]],
+        ])
+        monitor4.update_rssi([-60, 10, -80, 10])
+
+        # Activate should get invoked.
+        self.test_add_monitor(monitor3, expected_activate=True)
+        self.test_add_monitor(monitor4, expected_activate=True)
+
+        # DeviceFound should get triggered for mouse.
+        self.test_start_peer_device_adv(self.peer_mouse, duration=5)
+        self.test_device_found(monitor2, count=2)
+        self.test_device_found(monitor3, count=1)
+
+        # Since the RSSI timeouts are different for monitor4, DeviceFound
+        # event should get triggered after total of 10 seconds.
+        self.test_device_found(monitor4, count=0)
+        self.test_device_found(monitor4, count=1, delay=5)
+        self.test_stop_peer_device_adv(self.peer_mouse)
+
+        # Unregister both apps, should not fail.
+        self.test_unregister_app(app1)
+        self.test_unregister_app(app2)
+
+        # Terminate the both test app instances.
+        self.test_exit_app(app1)
+        self.test_exit_app(app2)
+
+
     def advmon_test_fg_bg_combination(self):
         """Test case: FG_BG_COMBINATION
 
@@ -1372,6 +1520,85 @@ class BluetoothAdapterAdvMonitorTests(
         # Terminate the test app instance.
         self.test_exit_app(app1)
 
+
+    def advmon_test_suspend_resume(self):
+        """Test case: SUSPEND_RESUME
+
+        Verify working of background scanning with suspend/resume.
+
+        """
+        self.test_setup_peer_devices()
+
+        # Create two test app instances.
+        app1 = self.create_app()
+        app2 = self.create_app()
+
+        # Register both apps, should not fail.
+        self.test_register_app(app1)
+        self.test_register_app(app2)
+
+        # Add monitors in both apps.
+        monitor1 = TestMonitor(app1)
+        monitor1.update_type('or_patterns')
+        monitor1.update_patterns([ [0, 0x03, [0x12, 0x18]], ])
+        monitor1.update_rssi([-60, 3, -80, 3])
+
+        monitor2 = TestMonitor(app1)
+        monitor2.update_type('or_patterns')
+        monitor2.update_patterns([ [0, 0x19, [0xc2, 0x03]], ])
+        monitor2.update_rssi([-60, 10, -80, 10])
+
+        monitor3 = TestMonitor(app2)
+        monitor3.update_type('or_patterns')
+        monitor3.update_patterns([ [0, 0x03, [0x12, 0x18]], ])
+        monitor3.update_rssi([-60, 3, -80, 3])
+
+        monitor4 = TestMonitor(app2)
+        monitor4.update_type('or_patterns')
+        monitor4.update_patterns([ [0, 0x19, [0xc2, 0x03]], ])
+        monitor4.update_rssi([-60, 15, -80, 15])
+
+        # Activate should get invoked.
+        self.test_add_monitor(monitor1, expected_activate=True)
+        self.test_add_monitor(monitor2, expected_activate=True)
+        self.test_add_monitor(monitor3, expected_activate=True)
+        self.test_add_monitor(monitor4, expected_activate=True)
+
+        # DeviceFound for mouse should get triggered only for monitors
+        # satisfying the RSSI timers.
+        self.test_start_peer_device_adv(self.peer_mouse, duration=5)
+        self.test_device_found(monitor1, count=1)
+        self.test_device_found(monitor2, count=0)
+        self.test_device_found(monitor3, count=1)
+        self.test_device_found(monitor4, count=0)
+
+        # Initiate suspend/resume.
+        self.suspend_resume()
+
+        # Remove a monitor from one app, shouldn't affect working of other
+        # monitors or apps.
+        self.test_remove_monitor(monitor1)
+
+        # DeviceFound should get triggered for monitors with higher RSSI timers.
+        self.test_device_found(monitor2, count=1, delay=10)
+        self.test_device_found(monitor4, count=1, delay=5)
+        self.test_stop_peer_device_adv(self.peer_mouse)
+
+        # Terminate an app, shouldn't affect working of monitors in other apps.
+        self.test_exit_app(app1)
+
+        # DeviceFound should get triggered for keyboard.
+        self.test_start_peer_device_adv(self.peer_keybd, duration=5)
+        self.test_device_found(monitor3, count=2)
+        self.test_stop_peer_device_adv(self.peer_keybd)
+
+        # Unregister the running app, should not fail.
+        self.test_unregister_app(app2)
+
+        # Terminate the running test app instance.
+        self.test_exit_app(app2)
+
+
     def advmon_test_interleaved_scan(self):
         """ Test cases for verifying interleave scan """
 
@@ -1418,17 +1645,15 @@ class BluetoothAdapterAdvMonitorTests(
 
         # BLE_MOUSE in allowlist, interleave with allowlist passive scan
         self.test_interleaving_state(False, cycles=EXPECT_FALSE_TEST_CYCLE)
-        device.TurnOff()
+        device.AdapterPowerOff()
         # Make sure the peer is disconnected
         self.test_device_is_not_connected(device.address)
         self.test_interleaving_state(True)
 
         # Interleaving with allowlist should get paused during active scan
-        self.test_start_discovery()
-        self.test_interleaving_state(False, cycles=EXPECT_FALSE_TEST_CYCLE)
+        self.test_interleaving_active_scan_cycle()
 
         # Interleaving with allowlist should get resumed after stopping scan
-        self.test_stop_discovery()
         self.test_interleaving_state(True)
 
         # Interleaving with allowlist should get paused during system suspend,

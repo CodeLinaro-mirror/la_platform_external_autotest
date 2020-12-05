@@ -1038,7 +1038,7 @@ class BluetoothDevice(object):
         @returns: a list of records, where each item is a record of
                   interleave |state| and the |time| the state starts.
                   |state| could be {'no filter', 'allowlist'}
-                  |time| is kernel time in sec
+                  |time| is system time in sec
 
         """
         return self._proxy.advmon_interleave_scan_logger_get_records()
@@ -1049,7 +1049,7 @@ class BluetoothDevice(object):
 
         @returns: a list of cancel |time| when a interleave cancel event log
                   was found.
-                  |time| is kernel time in sec
+                  |time| is system time in sec
 
         """
         return self._proxy.advmon_interleave_scan_logger_get_cancel_events()

@@ -187,7 +187,11 @@ class InterleaveLogger(LogRecorder):
     """LogRecorder class that focus on interleave scan"""
 
     SYSLOG_PATH = '/var/log/messages'
-    KERNEL_LOG_PATTERN = ('[^ ]+ DEBUG kernel: \[(.*)\] Bluetooth: '
+
+    # Example bluetooth kernel log:
+    # "2020-11-23T07:52:31.395941Z DEBUG kernel: [ 6469.811135] Bluetooth: "
+    # "cancel_interleave_scan() hci0: hci0 cancelling interleave scan"
+    KERNEL_LOG_PATTERN = ('([^ ]+) DEBUG kernel: \[.*\] Bluetooth: '
                           '{FUNCTION}\(\) hci0: {LOG_STR}')
     STATE_PATTERN = KERNEL_LOG_PATTERN.format(
             FUNCTION='add_le_interleave_adv_monitor_scan',
@@ -195,6 +199,7 @@ class InterleaveLogger(LogRecorder):
     CANCEL_PATTERN = KERNEL_LOG_PATTERN.format(
             FUNCTION='cancel_interleave_scan',
             LOG_STR='hci0 cancelling interleave scan')
+    SYSTIME_LENGTH = len('2020-12-18T00:11:22.345678')
 
     def __init__(self):
         """ Initialize object
@@ -223,11 +228,11 @@ class InterleaveLogger(LogRecorder):
             - self.records: a dictionary where each item is a record of
                             interleave |state| and the |time| the state starts.
                             |state| could be {'no filter', 'allowlist'}
-                            |time| is kernel time in sec
+                            |time| is system time in sec
 
             - self.cancel_events: a list of |time| when a interleave cancel
                                   event log was found
-                                  |time| is kernel time in sec
+                                  |time| is system time in sec
 
             @returns: True if StopRecording success, False otherwise
 
@@ -238,21 +243,41 @@ class InterleaveLogger(LogRecorder):
             logging.error(e)
             return False
 
-        last_ktime = None
+        success = True
+
+        def sys_time_to_timestamp(time_str):
+            """ Return timestamp of time_str """
+
+            # This is to remove the suffix of time string, in some cases the
+            # time string ends with an extra 'Z', in other cases, the string
+            # ends with time zone (ex. '+08:00')
+            time_str = time_str[:self.SYSTIME_LENGTH]
+
+            try:
+                dt = datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S.%f")
+            except Exception as e:
+                logging.error(e)
+                success = False
+                return 0
+
+            return time.mktime(dt.timetuple()) + dt.microsecond * (10**-6)
+
         for line in self.log_contents:
             line = line.strip().replace('\\r\\n', '')
             state_pattern = self.state_pattern.search(line)
             cancel_pattern = self.cancel_pattern.search(line)
 
             if cancel_pattern:
-                ktime = float(cancel_pattern.groups()[0])
-                self.cancel_events.append(ktime)
+                time_str = cancel_pattern.groups()[0]
+                time_sec = sys_time_to_timestamp(time_str)
+                self.cancel_events.append(time_sec)
 
             if state_pattern:
-                ktime, state = state_pattern.groups()
-                ktime = float(ktime)
-                self.records.append({'time': ktime, 'state': state})
-        return True
+                time_str, state = state_pattern.groups()
+                time_sec = sys_time_to_timestamp(time_str)
+                self.records.append({'time': time_sec, 'state': state})
+
+        return success
 
 
 class PairingAgent(dbus.service.Object):
@@ -360,6 +385,13 @@ class BluetoothFacadeNative(object):
         self._control = bluetooth_socket.BluetoothControlSocket()
         self._has_adapter = len(self._control.read_index_list()) > 0
 
+        # Create an Advertisement Monitor App Manager instance.
+        # This needs to be created before making any dbus connections as
+        # AdvMonitorAppMgr internally forks a new helper process and due to
+        # a limitation of python, it is not possible to fork a new process
+        # once any dbus connections are established.
+        self.advmon_appmgr = adv_monitor_helper.AdvMonitorAppMgr()
+
         # Set up the connection to Upstart so we can start and stop services
         # and fetch the bluetoothd job.
         self._upstart_conn = dbus.connection.Connection(self.UPSTART_PATH)
@@ -403,11 +435,6 @@ class BluetoothFacadeNative(object):
         self._timeout_id = 0
         self._signal_watch = None
         self._dbus_mainloop = gobject.MainLoop()
-
-        # Create an Advertisement Monitor Helper App Manager instance.
-        self.advmon_appmgr = adv_monitor_helper.AdvMonitorAppMgr(
-                self._system_bus, self._dbus_mainloop,
-                self._adv_monitor_manager)
 
     @xmlrpc_server.dbus_safe(False)
     def set_debug_log_levels(self, dispatcher_vb, newblue_vb, bluez_vb,
@@ -2279,7 +2306,7 @@ class BluetoothFacadeNative(object):
         @returns: a list of records, where each item is a record of
                   interleave |state| and the |time| the state starts.
                   |state| could be {'no filter', 'allowlist'}
-                  |time| is kernel time in sec
+                  |time| is system time in sec
 
         """
         return self.advmon_interleave_logger.records
@@ -2289,7 +2316,7 @@ class BluetoothFacadeNative(object):
 
         @returns: a list of cancel |time| when a interleave cancel event log
                   was found.
-                  |time| is kernel time in sec
+                  |time| is system time in sec
 
         """
         return self.advmon_interleave_logger.cancel_events
@@ -3522,3 +3549,9 @@ class BluetoothFacadeNative(object):
         else:
             logging.debug("Chipset not known. Returning %s", chipset_string)
             return chipset_string
+
+
+    def cleanup(self):
+        """Cleanup before exiting the client xmlrpc process."""
+
+        self.advmon_appmgr.destroy()

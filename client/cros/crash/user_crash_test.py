@@ -273,14 +273,21 @@ class UserCrashTest(crash_test.CrashTest):
         if expected_gid is None:
             expected_gid = pwd.getpwnam(username).pw_gid
 
-        if expected_reason is None:
-            expected_reason = 'handling' if consent else 'ignoring - no consent'
+        if expected_reason is None and consent:
+            expected_reason = 'handling'
 
-        expected_message = (
-            ('[%s] Received crash notification for %s[%d] sig 11, user %d '
-             'group %d (%s)') %
-            (self._expected_tag, basename, pid, expected_uid, expected_gid,
-             expected_reason))
+        if expected_reason is not None:
+            expected_message = ((
+                    '[%s] Received crash notification for %s[%d] sig 11, user %d '
+                    'group %d (%s)') %
+                                (self._expected_tag, basename, pid,
+                                 expected_uid, expected_gid, expected_reason))
+        else:
+            # No consent; different message format.
+            expected_message = ((
+                    'No consent. Not handling invocation: /sbin/crash_reporter '
+                    '--user=%d:11:%d:%d:%s') %
+                                (pid, expected_uid, expected_gid, basename))
 
         # Wait until no crash_reporter is running.
         utils.poll_for_condition(
@@ -430,7 +437,7 @@ class UserCrashTest(crash_test.CrashTest):
 
         # Variables and their typical contents:
         # basename: crasher_nobreakpad
-        # filename: crasher_nobreakpad.20181023.135339.16890.dmp
+        # filename: crasher_nobreakpad.20181023.135339.12345.16890.dmp
         # ext: dmp
         for filename in crash_contents:
             if filename.endswith('.core'):

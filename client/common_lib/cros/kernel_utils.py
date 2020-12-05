@@ -140,7 +140,7 @@ def verify_boot_expectations(expected_kernel, error_message=_BOOT_ERR_MSG,
             logging.debug('Found %d kernel crash reports:',
                           len(kernel_crashes))
             # The crash names contain timestamps that may be useful:
-            #   kernel.20131207.005945.0.kcrash
+            #   kernel.20131207.005945.12345.0.kcrash
             for crash in kernel_crashes:
                 logging.debug('  %s', os.path.basename(crash))
 
@@ -165,4 +165,3 @@ def verify_boot_expectations(expected_kernel, error_message=_BOOT_ERR_MSG,
         else:
             raise Exception('update-engine failed to call '
                             'chromeos-setgoodkernel')
-

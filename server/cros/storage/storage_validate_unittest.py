@@ -43,9 +43,13 @@ class MockHost(object):
 
 
 def create_device_health_profile():
-    dut = MockHost('dummy_dut_hostname')
     servohost = MockHost('dummy_servohost_hostname')
-    return device_health_profile.DeviceHealthProfile(dut, servohost)
+    dhp = device_health_profile.DeviceHealthProfile(
+            hostname='dummy_dut_hostname',
+            host_info=MockHostInfoStore(),
+            result_dir=None)
+    dhp.init_profile(servohost)
+    return dhp
 
 
 def _add_days_to_time(secs, days):

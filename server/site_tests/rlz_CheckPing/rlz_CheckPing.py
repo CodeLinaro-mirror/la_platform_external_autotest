@@ -160,13 +160,11 @@ class rlz_CheckPing(test.test):
         self._host = host
         self._check_rlz_brand_code()
 
-        # Clear TPM owner so we have no users on DUT.
-        tpm_utils.ClearTPMOwnerRequest(self._host)
-
         # Set VPD settings that control if the DUT will send a first-use ping.
         self._set_vpd_values(should_send_rlz_ping=should_send_rlz_ping,
                              rlz_embargo_end_date=rlz_embargo_end_date)
-        self._host.reboot()
+        # Clear TPM owner so we have no users on DUT.
+        tpm_utils.ClearTPMOwnerRequest(self._host)
 
         # We expect first-use (CAF) ping to be sent when:
         # 1. should_send_rlz_ping exists and is 1

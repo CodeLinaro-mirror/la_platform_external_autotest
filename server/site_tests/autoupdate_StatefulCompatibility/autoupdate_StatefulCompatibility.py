@@ -306,7 +306,8 @@ class autoupdate_StatefulCompatibility(update_engine_test.UpdateEngineTest):
         target_release = target_release.split('/')[-1]
 
         logging.debug('Going to install target image on DUT.')
-        self.update_device(self._target_payload_uri, tag='target')
+        self.update_device(
+                self._target_payload_uri, tag='target', ignore_appid=True)
 
         # Compare hostlog events from the update to the expected ones.
         rootfs, reboot = self._create_hostlog_files()

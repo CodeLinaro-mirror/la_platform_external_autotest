@@ -3,12 +3,12 @@
 # found in the LICENSE file.
 
 AUTHOR = "ChromeOS Team"
-NAME = "cellular_StressEnable.fibocom-l850gl"
+NAME = "cellular_StressEnable.tmobile"
 PURPOSE = "Stress-test Connman enable/disable"
 CRITERIA = """
 This test fails if flimflam ever fails to respond to a DBus message or crashes.
 """
-ATTRIBUTES = "suite:cellular_ota_tmobile"
+ATTRIBUTES = "suite:cellular_ota_flaky"
 TIME = "SHORT"
 TEST_CATEGORY = "Stress"
 TEST_CLASS = "network"
@@ -22,4 +22,4 @@ DOC = """
 from autotest_lib.client.cros.cellular import test_environment
 
 test_env = test_environment.CellularOTATestEnvironment()
-job.run_test('cellular_StressEnable', tag='fibocom-l850gl', test_env=test_env)
+job.run_test('cellular_StressEnable', test_env=test_env)

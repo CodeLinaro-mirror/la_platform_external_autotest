@@ -7,7 +7,6 @@ database (defined in global config section AUTOTEST_SERVER_DB).
 
 """
 
-import collections
 import json
 import socket
 import subprocess
@@ -124,33 +123,6 @@ def format_servers_nameonly(servers):
     @returns: Formatted output as string.
     """
     return '\n'.join(s.hostname for s in servers)
-
-
-def _get_servers_by_role(servers):
-    """Return a mapping from roles to servers.
-
-    @param servers: Iterable of servers.
-    @returns: Mapping of role strings to lists of servers.
-    """
-    roles = [role for role, _ in server_models.ServerRole.ROLE.choices()]
-    servers_by_role = collections.defaultdict(list)
-    for server in servers:
-        for role in server.get_role_names():
-            servers_by_role[role].append(server)
-    return servers_by_role
-
-
-def _format_role_servers_summary(role, servers):
-    """Format one line of servers for a role in a server list summary.
-
-    @param role: Role string.
-    @param servers: Iterable of Server instances.
-    @returns: String.
-    """
-    servers_part = ', '.join(
-            '%s(%s)' % (server.hostname, server.status)
-            for server in servers)
-    return '%-15s: %s' % (role, servers_part)
 
 
 def check_server(hostname, role):

@@ -22,5 +22,12 @@ Crosbolt version adds force_discharge to collect total system power from battery
 
 args_dict = utils.args_to_dict(args)
 pdash_note = args_dict.get('pdash_note', '')
+
+job.default_profile_only = True
+job.profilers.add('cros_perf', interval=20)
+
 job.run_test('power_VideoCall', pdash_note=pdash_note, duration=180,
              tag=NAME.split('.')[1], seconds_period=5, force_discharge=True)
+
+job.profilers.delete('cros_perf')
+

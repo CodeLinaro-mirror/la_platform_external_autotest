@@ -151,6 +151,7 @@ class ServoHost(base_servohost.BaseServoHost):
         self.servo_serial = None
         self.servo_setup = None
         self.additional_servod_args = None
+        self._dut_health_profile = None
         # The flag that indicate if a servo is connected to a smart usbhub.
         # TODO(xianuowang@) remove this flag once all usbhubs in the lab
         # get replaced.
@@ -206,9 +207,6 @@ class ServoHost(base_servohost.BaseServoHost):
         self.servo_serial = servo_serial
         self.servo_setup = servo_setup
         self.additional_servod_args = additional_servod_args
-
-        if self.is_servo_topology_supported():
-            self._topology = servo_topology.ServoTopology(self)
 
         # The location of the log files on the servo host for this instance.
         self.remote_log_dir = '%s_%s' % (self.SERVOD_LOG_PREFIX,
@@ -339,7 +337,8 @@ class ServoHost(base_servohost.BaseServoHost):
             self._servo_state = servo_constants.SERVO_STATE_WORKING
             self.record('INFO', None, None,
                         'ServoHost verify set servo_state as WORKING')
-            if self._topology:
+            if self.is_servo_topology_supported():
+                self._topology = servo_topology.ServoTopology(self)
                 self._topology.generate()
         except Exception as e:
             if not self.is_localhost():
@@ -577,7 +576,8 @@ class ServoHost(base_servohost.BaseServoHost):
             # reboot request created by this servo because it passed repair.
             if self.is_labstation():
                 self.withdraw_reboot_request()
-            if self._topology:
+            if self.is_servo_topology_supported():
+                self._topology = servo_topology.ServoTopology(self)
                 self._topology.generate()
         except Exception as e:
             if not self.is_localhost():
@@ -728,8 +728,14 @@ class ServoHost(base_servohost.BaseServoHost):
         logging.error('Unexpected error occurred from usbhub control, please'
                       ' file a bug and inform chrome-fleet-software@ team!')
 
-    def _get_servo_usb_devnum(self):
-        """Helper function to collect current usb devnum of servo.
+    def get_main_servo_usb_path(self):
+        """Helper function to collect current usb-path to main servo.
+
+        The usb-path is path to the folder where usb-device was enumerated.
+        If fail then will return an empty string ('').
+
+        @returns: string, usb-path to the main servo device.
+            e.g.: '/sys/bus/usb/devices/1-6.1.3.1'
         """
         # TODO remove try-except when fix crbug.com/1087964
         try:
@@ -741,15 +747,19 @@ class ServoHost(base_servohost.BaseServoHost):
             logging.debug('Attempt to get servo usb-path failed due to '
                           'timeout; %s', e)
             return ''
-
         if resp.exit_status != 0:
             self._process_servodtool_error(resp)
             return ''
         usb_path = resp.stdout.strip()
         logging.info('Usb path of servo %s is %s', self.servo_serial, usb_path)
+        return usb_path
 
-        resp = self.run('cat %s/devnum' % usb_path,
-                        ignore_status=True)
+    def _get_servo_usb_devnum(self):
+        """Helper function to collect current usb devnum of servo."""
+        usb_path = self.get_main_servo_usb_path()
+        if not usb_path:
+            return ''
+        resp = self.run('cat %s/devnum' % usb_path, ignore_status=True)
         if resp.exit_status != 0:
             self._process_servodtool_error(resp)
             return ''
@@ -1356,6 +1366,7 @@ class ServoHost(base_servohost.BaseServoHost):
         init_servo = self.get_verifier_state('servod_control')
         servo_topology = self.get_verifier_state('servo_topology')
         dut_connected = self.get_verifier_state('dut_connected')
+        hub_connected = self.get_verifier_state('hub_connected')
         pwr_button = self.get_verifier_state('pwr_button')
         lid_open = self.get_verifier_state('lid_open')
         ec_board = self.get_verifier_state('ec_board')
@@ -1381,13 +1392,15 @@ class ServoHost(base_servohost.BaseServoHost):
         if servo_topology == hosts.VERIFY_FAILED:
             return servo_constants.SERVO_STATE_TOPOLOGY_ISSUE
 
-        if dut_connected == hosts.VERIFY_FAILED:
-            if pwr_button == hosts.VERIFY_SUCCESS:
-                # unexpected case
-                metrics.Counter(
-                        'chromeos/autotest/repair/servo_unexpected/pwr_button'
-                ).increment(fields=self._get_host_metrics_data())
+        if (dut_connected == hosts.VERIFY_FAILED
+                    or hub_connected == hosts.VERIFY_FAILED):
             return servo_constants.SERVO_STATE_DUT_NOT_CONNECTED
+        # TODO(otabek@): detect special cases detected by pwr_button
+        if dut_connected == hosts.VERIFY_SUCCESS:
+            if pwr_button == hosts.VERIFY_FAILED:
+                metrics.Counter(
+                        'chromeos/autotest/repair/servo_unexpected/pwr_button2'
+                ).increment(fields=self._get_host_metrics_data())
 
         if start_servod == hosts.VERIFY_FAILED:
             return servo_constants.SERVO_STATE_SERVOD_ISSUE
@@ -1439,6 +1452,9 @@ class ServoHost(base_servohost.BaseServoHost):
 
     def is_servo_topology_supported(self):
         """Check if servo_topology is supported."""
+        if not self.is_up_fast():
+            logging.info('Servo-Host is not reachable.')
+            return False
         if not self.is_labstation():
             logging.info('Servo-topology supported only for labstation.')
             return False
@@ -1458,6 +1474,20 @@ class ServoHost(base_servohost.BaseServoHost):
         at the same time.
         """
         return self.servo_setup == servo_constants.SERVO_SETUP_VALUE_DUAL_V4
+
+    def set_dut_health_profile(self, dut_health_profile):
+        """
+        @param dut_health_profile: A DeviceHealthProfile object.
+        """
+        logging.debug('setting dut_health_profile field to (%s)',
+                      dut_health_profile)
+        self._dut_health_profile = dut_health_profile
+
+    def get_dut_health_profile(self):
+        """
+        @return A DeviceHealthProfile object.
+        """
+        return self._dut_health_profile
 
 
 def make_servo_hostname(dut_hostname):
@@ -1553,8 +1583,12 @@ def _tweak_args_for_ssp_moblab(servo_args):
                 'SSP', 'host_container_ip', type=str, default=None)
 
 
-def create_servo_host(dut, servo_args, try_lab_servo=False,
-                      try_servo_repair=False, dut_host_info=None):
+def create_servo_host(dut,
+                      servo_args,
+                      try_lab_servo=False,
+                      try_servo_repair=False,
+                      dut_host_info=None,
+                      dut_health_profile=None):
     """Create a ServoHost object for a given DUT, if appropriate.
 
     This function attempts to create and verify or repair a `ServoHost`
@@ -1606,6 +1640,7 @@ def create_servo_host(dut, servo_args, try_lab_servo=False,
                           `repair()` instead of `verify()`.
     @param dut_host_info: A HostInfo object of the DUT that connected
                           to this servo.
+    @param dut_health_profile: DUT repair info with history.
 
     @returns: A ServoHost object or None. See comments above.
 
@@ -1650,6 +1685,10 @@ def create_servo_host(dut, servo_args, try_lab_servo=False,
         return None, servo_constants.SERVO_STATE_NO_SSH
 
     newhost = ServoHost(**servo_args)
+    if not newhost.is_up_fast():
+        # We do not have any option to recover servo_host.
+        # If servo_host is not pingable then we can stop here.
+        return None, servo_constants.SERVO_STATE_NO_SSH
 
     # Reset or reboot servo device only during AdminRepair tasks.
     if try_servo_repair:
@@ -1669,6 +1708,18 @@ def create_servo_host(dut, servo_args, try_lab_servo=False,
         newhost.set_dut_hostname(dut.hostname)
     if dut_host_info:
         newhost.set_dut_host_info(dut_host_info)
+    if dut_health_profile and (try_lab_servo or try_servo_repair):
+        try:
+            if newhost.is_localhost():
+                logging.info('Servohost is a localhost, skip device'
+                             ' health profile setup...')
+            else:
+                dut_health_profile.init_profile(newhost)
+                newhost.set_dut_health_profile(dut_health_profile)
+        except Exception as e:
+            logging.info(
+                    '[Non-critical] Unexpected error while trying to'
+                    ' load device health profile; %s', e)
 
     if try_lab_servo or try_servo_repair:
         try:

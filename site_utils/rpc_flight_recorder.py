@@ -165,19 +165,6 @@ class RpcFlightRecorder(object):
         self._stop_event.set()
 
 
-    def termitate(self):
-        """Terminate processes"""
-        self.close()
-        if self._poll_rpc_server_ps:
-            self._poll_rpc_server_ps.terminate()
-
-        if self._update_shards_ps:
-            self._update_shards_ps.terminate()
-
-        if self._manager:
-            self._manager.shutdown()
-
-
     def join(self, timeout=None):
         """Blocking call until closed and processes complete
 

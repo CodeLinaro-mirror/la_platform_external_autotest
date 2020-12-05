@@ -4,8 +4,7 @@
 
 AUTHOR = 'dbeckett'
 NAME = 'policy_ExtensionAllowedTypes.none'
-# Disable this test until it can be fixed: http://b/171582298
-# ATTRIBUTES = 'suite:ent-nightly, suite:policy'
+ATTRIBUTES = 'suite:ent-nightly, suite:policy'
 TIME = 'SHORT'
 TEST_CATEGORY = 'General'
 TEST_CLASS = 'enterprise'

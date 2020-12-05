@@ -118,7 +118,7 @@ class UIPrinterHelper(object):
     def is_see_more_menu_open(self):
         """Return True if the print menu is open."""
         try:
-            self.ui.wait_for_ui_obj("Select a destination", role="dialog")
+            self.ui.wait_for_ui_obj("Select a destination")
         except error.TestError:
             return False
         return True

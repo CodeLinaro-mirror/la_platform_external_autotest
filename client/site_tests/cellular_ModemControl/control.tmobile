@@ -8,7 +8,7 @@ PURPOSE = "Verify commands sent to a modem manager are reflected in flimflam."
 CRITERIA = """
 This test will fail if modem manager state differs from flimflam state.
 """
-ATTRIBUTES = "suite:cellular_ota_tmobile"
+ATTRIBUTES = "suite:cellular_ota_flaky"
 TIME = "SHORT"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "network"
@@ -27,6 +27,6 @@ from autotest_lib.client.cros.cellular import test_environment
 
 test_env = test_environment.CellularOTATestEnvironment()
 job.run_test('cellular_ModemControl', test_env=test_env, autoconnect=False,
-             tag='no-autoconnect-fibocom-l850gl')
+             tag='no-autoconnect')
 job.run_test('cellular_ModemControl', test_env=test_env, autoconnect=True,
-             tag='autoconnect-fibocom-l850gl')
+             tag='autoconnect')

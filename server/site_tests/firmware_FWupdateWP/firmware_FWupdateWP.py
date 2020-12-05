@@ -41,9 +41,9 @@ class firmware_FWupdateWP(FirmwareTest):
 
         self.backup_firmware()
 
-        self.set_hardware_write_protect(False)
+        self.set_ap_write_protect_and_reboot(False)
         self.faft_client.bios.set_write_protect_region(self.WP_REGION, True)
-        self.set_hardware_write_protect(True)
+        self.set_ap_write_protect_and_reboot(True)
 
     def get_installed_versions(self):
         """Get the installed versions of BIOS and EC firmware.
@@ -71,11 +71,11 @@ class firmware_FWupdateWP(FirmwareTest):
                     % (self.MODE, write_protected))
 
         # Unlock the protection of the wp-enable and wp-range registers
-        self.set_hardware_write_protect(False)
+        self.set_ap_write_protect_and_reboot(False)
 
         if write_protected:
             self.faft_client.bios.set_write_protect_region(self.WP_REGION, True)
-            self.set_hardware_write_protect(True)
+            self.set_ap_write_protect_and_reboot(True)
         else:
             self.faft_client.bios.set_write_protect_region(
                     self.WP_REGION, False)
@@ -168,7 +168,7 @@ class firmware_FWupdateWP(FirmwareTest):
         No EC reboot is needed, because the test doesn't actually reboot the EC
         with the "new" firmware.
         """
-        self.set_hardware_write_protect(False)
+        self.set_ap_write_protect_and_reboot(False)
         self.faft_client.bios.set_write_protect_range(0, 0, False)
 
         if self.flashed:

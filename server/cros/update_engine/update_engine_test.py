@@ -825,7 +825,11 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
         return payload_url
 
 
-    def update_device(self, payload_uri, clobber_stateful=False, tag='source'):
+    def update_device(self,
+                      payload_uri,
+                      clobber_stateful=False,
+                      tag='source',
+                      ignore_appid=False):
         """
         Updates the device.
 
@@ -838,6 +842,10 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
                                  TPM ownership should be cleared. By default,
                                  set to False.
         @param tag: An identifier string added to each log filename.
+        @param ignore_appid: True to tell Nebraska to ignore the App ID field
+                             when parsing the update request. This allows
+                             the target update to use a different board's
+                             image, which is needed for kernelnext updates.
 
         @raise error.TestFail if anything goes wrong with the update.
 
@@ -860,7 +868,8 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
                     do_stateful_update=True,
                     staging_server=self._autotest_devserver.url(),
                     transfer_class=auto_updater_transfer.
-                    LabEndToEndPayloadTransfer)
+                    LabEndToEndPayloadTransfer,
+                    ignore_appid=ignore_appid)
 
             try:
                 updater.RunUpdate()

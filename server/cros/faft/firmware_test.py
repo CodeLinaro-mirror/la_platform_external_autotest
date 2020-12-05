@@ -16,6 +16,7 @@ import uuid
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
+from autotest_lib.client.common_lib.cros import retry
 from autotest_lib.client.common_lib.cros import tpm_utils
 from autotest_lib.server import test
 from autotest_lib.server.cros import vboot_constants as vboot
@@ -29,6 +30,13 @@ from autotest_lib.server.cros.servo import chrome_cr50
 from autotest_lib.server.cros.servo import chrome_ec
 from autotest_lib.server.cros.servo import servo
 from autotest_lib.server.cros.faft import telemetry
+
+# Experimentally tuned time in minutes to wait for partition device nodes on a
+# USB stick to be ready after plugging in the stick.
+PARTITION_TABLE_READINESS_TIMEOUT = 0.1  # minutes
+# Experimentally tuned time in seconds to wait for the first retry of reading
+# the sysfs node of a USB stick's partition device node.
+PARTITION_TABLE_READINESS_FIRST_RETRY_DELAY = 1  # seconds
 
 ConnectionError = mode_switcher.ConnectionError
 
@@ -567,6 +575,28 @@ class FirmwareTest(test.test):
         rootfs = '%s%s' % (usb_dev, self._ROOTFS_PARTITION_NUMBER)
         logging.info('usb dev is %s', usb_dev)
         tmpd = self.servo.system_output('mktemp -d -t usbcheck.XXXX')
+        # After the USB key is muxed from the DUT to the servo host, there
+        # appears to be a delay between when servod can confirm that a sysfs
+        # entry exists for the disk (as done by probe_host_usb_dev) and when
+        # sysfs entries get populated for the disk's partitions.
+        @retry.retry(error.AutoservRunError,
+                     timeout_min=PARTITION_TABLE_READINESS_TIMEOUT,
+                     delay_sec=PARTITION_TABLE_READINESS_FIRST_RETRY_DELAY)
+        def confirm_rootfs_partition_device_node_readable():
+            """Repeatedly poll for the RootFS partition sysfs node."""
+            self.servo.system('ls {}'.format(rootfs))
+
+        # Incremental rollout of a large scale test change.
+        # TODO(kmshelton): Rollout to all platforms.
+        if self.faft_config.platform.lower() in ['coral', 'nami']:
+            try:
+                confirm_rootfs_partition_device_node_readable()
+            except error.AutoservRunError as e:
+                usb_info = telemetry.collect_usb_state(self.servo)
+                raise error.TestError((
+                        'Could not ls the device node for the RootFS on the USB '
+                        'device. %s: %s\nMore telemetry: %s') %
+                                      (type(e).__name__, e, usb_info))
         try:
             self.servo.system('mount -o ro %s %s' % (rootfs, tmpd))
         except error.AutoservRunError as e:
@@ -964,6 +994,15 @@ class FirmwareTest(test.test):
         """
         self.servo.set('fw_wp_state', 'force_on' if enable else 'force_off')
 
+    def set_ap_write_protect_and_reboot(self, enable):
+        """Set AP write protect status and reboot to take effect.
+
+        @param enable: True if asserting write protect. Otherwise, False.
+        """
+        self.set_hardware_write_protect(enable)
+        self.sync_and_ec_reboot()
+        self.switcher.wait_for_client()
+
     def run_chromeos_firmwareupdate(self, mode, append=None, options=(),
             ignore_status=False):
         """Use RPC to get the command to run, but do the actual run via ssh.
@@ -1027,7 +1066,9 @@ class FirmwareTest(test.test):
         else:
             # Reboot after deasserting hardware write protect pin to deactivate
             # write protect. And then remove software write protect flag.
-            self.sync_and_ec_reboot(flags='hard')
+            # Some ITE ECs can only clear their WP status on a power-on reset,
+            # no software-initiated reset will do.
+            self.sync_and_ec_reboot(flags='cold')
             self.ec.set_flash_write_protect(enable)
 
     def _setup_ec_write_protect(self, ec_wp):
@@ -1423,12 +1464,16 @@ class FirmwareTest(test.test):
         @param flags: Optional, a space-separated string of flags passed to EC
                       reboot command, including:
                           default: EC soft reboot;
-                          'hard': EC cold/hard reboot.
+                          'hard': EC hard reboot.
+                          'cold': Cold reboot via servo.
         @param extra_sleep: Optional, int or float for extra wait time for EC
                             reboot in seconds.
         """
         self.blocking_sync(freeze_for_reset=True)
-        self.ec.reboot(flags)
+        if flags == 'cold':
+            self.servo.get_power_state_controller().reset()
+        else:
+            self.ec.reboot(flags)
         time.sleep(self.faft_config.ec_boot_to_console + extra_sleep)
         self.check_lid_and_power_on()
 
