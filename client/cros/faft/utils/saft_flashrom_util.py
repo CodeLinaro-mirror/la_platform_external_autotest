@@ -41,6 +41,9 @@ class LayoutScraper(object):
             "FW_MAIN_B": "FVMAINB",
             "RW_FWID_A": "RW_FWID_A",
             "RW_FWID_B": "RW_FWID_B",
+            # Intel CSME FW Update sections
+            "ME_RW_A": "ME_RW_A",
+            "ME_RW_B": "ME_RW_B",
             # Memory Training data cache for recovery boots
             # Added on Nov 09, 2016
             "RECOVERY_MRC_CACHE": "RECOVERY_MRC_CACHE",

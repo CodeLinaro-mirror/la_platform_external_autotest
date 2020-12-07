@@ -31,6 +31,10 @@ class platform_PrintJob(test.test):
     def cleanup(self):
         if hasattr(self, 'browser'):
             self.browser.close()
+        if self.printer_capture_started:
+            self.usb_printer.StopCapturingPrinterData()
+        if self.printer_connected:
+            self.usb_printer.Unplug()
 
     def check_notification(self, notification):
         """Polls for successful print job notification"""
@@ -61,6 +65,9 @@ class platform_PrintJob(test.test):
 
     def run_once(self, host, args):
         """Run the test."""
+        # Set these to know if the usb_printer needs to be handled post test.
+        self.printer_capture_started = False
+        self.printer_connected = False
 
         # Make chameleon host known to the DUT host crbug.com/862646
         chameleon_args = 'chameleon_host=' + host.hostname + '-chameleon'
@@ -68,12 +75,13 @@ class platform_PrintJob(test.test):
 
         chameleon_board = chameleon.create_chameleon_board(host.hostname, args)
         chameleon_board.setup_and_reset(self.outputdir)
-        usb_printer = chameleon_board.get_usb_printer()
-        usb_printer.SetPrinterModel(1008, 17, _PRINTER_NAME)
+        self.usb_printer = chameleon_board.get_usb_printer()
+        self.usb_printer.SetPrinterModel(1008, 17, _PRINTER_NAME)
 
         with chrome.Chrome(autotest_ext=True,
                            init_network_controller=True) as self.cr:
-            usb_printer.Plug()
+            self.usb_printer.Plug()
+            self.printer_connected = True
             self.check_notification(_USB_PRINTER_CONNECTED_NOTIF)
             logging.info('Chameleon printer connected!')
             self.navigate_to_pdf()
@@ -81,8 +89,7 @@ class platform_PrintJob(test.test):
             logging.info('PDF file opened in browser!')
             self.ui_helper = ui_utils_helpers.UIPrinterHelper(chrome=self.cr)
             self.ui_helper.print_to_custom_printer("Chameleon " + _PRINTER_NAME)
-            usb_printer.StartCapturingPrinterData()
+            self.usb_printer.StartCapturingPrinterData()
+            self.printer_capture_started = True
             self.check_notification(_PRINTING_NOTIF)
             self.check_notification(_PRINTING_COMPLETE_NOTIF)
-            usb_printer.StopCapturingPrinterData()
-            usb_printer.Unplug()

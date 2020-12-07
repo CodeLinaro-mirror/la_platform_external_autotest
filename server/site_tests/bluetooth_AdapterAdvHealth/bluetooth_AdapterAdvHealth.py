@@ -74,12 +74,14 @@ class bluetooth_AdapterAdvHealth(BluetoothAdapterQuickTests,
 
         self.advertising_peer_test(device)
 
-
     @test_wrapper('Advertising Nearby test')
     def adv_nearby_test(self):
         """Verify minimal Nearby advertising requirements"""
 
-        self.test_case_nearby_mediums_fast()
+        self.run_le_advertising_test(self.host,
+                                     advertisements_data.ADVERTISEMENTS,
+                                     'nearby',
+                                     num_iterations=1)
 
     @test_wrapper('Broadcast advertising test')
     def adv_broadcast_test(self):
@@ -87,7 +89,11 @@ class bluetooth_AdapterAdvHealth(BluetoothAdapterQuickTests,
 
         self.test_case_broadcast()
 
-    @test_wrapper('Advertising suspend peer test', devices={'BLE_MOUSE': 1})
+    # TODO(b/150897528) - Scarlet Dru loses firmware around suspend
+    @test_wrapper('Advertising suspend peer test',
+                  devices={'BLE_MOUSE': 1},
+                  skip_models=['dru', 'druwl'],
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def adv_suspend_peer_test(self):
         """Verify advertising around suspend from a peer"""
 

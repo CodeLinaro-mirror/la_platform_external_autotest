@@ -637,12 +637,15 @@ class FirmwareTest(test.test):
         @raise TestError: If Servo v4 not setup properly.
         """
 
-        # PD FAFT is only tested with a least a servo V4 with servo micro.
+        # PD FAFT is only tested with a least a servo V4 with servo micro
+        # or C2D2.
         if pd_faft and (
-                'servo_v4_with_servo_micro' not in self.pdtester.servo_type):
-            raise error.TestError('servo_v4_with_servo_micro is a mandatory '
-                                  'setup for PD FAFT. Got %s.'
-                                  % self.pdtester.servo_type)
+                'servo_v4_with_servo_micro' not in self.pdtester.servo_type
+        ) and ('servo_v4_with_c2d2' not in self.pdtester.servo_type):
+            raise error.TestError('servo_v4_with_servo_micro or '
+                                  'servo_v4_with_c2d2 is a mandatory setup '
+                                  'for PD FAFT. Got %s.' %
+                                  self.pdtester.servo_type)
 
         # Ensure the battery is enough for testing, this should be done before
         # all the following setup.

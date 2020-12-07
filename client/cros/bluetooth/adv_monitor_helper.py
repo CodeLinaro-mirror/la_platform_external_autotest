@@ -17,7 +17,6 @@ DBUS_OM_IFACE = 'org.freedesktop.DBus.ObjectManager'
 DBUS_PROP_IFACE = 'org.freedesktop.DBus.Properties'
 
 BLUEZ_SERVICE_NAME = 'org.bluez'
-BLUEZ_MANAGER_PATH = '/'
 
 ADV_MONITOR_MANAGER_IFACE = 'org.bluez.AdvertisementMonitorManager1'
 ADV_MONITOR_IFACE = 'org.bluez.AdvertisementMonitor1'
@@ -275,16 +274,11 @@ class AdvMonitorApp(dbus.service.Object):
         self.bus = bus
         self.mainloop = dbus_mainloop
         self.advmon_mgr = advmon_manager
-
         self.app_path = ADV_MONITOR_APP_BASE_PATH + str(app_id)
-        self.root_path = BLUEZ_MANAGER_PATH
 
         self.monitors = dict()
 
-        # BlueZ expects InterfacesAdded and InterfacesRemoved signals to be
-        # emitted on the root path. So, register the App object with root path
-        # to be able to emit those signals correctly.
-        super(AdvMonitorApp, self).__init__(self.bus, self.root_path)
+        super(AdvMonitorApp, self).__init__(self.bus, self.app_path)
 
 
     def get_app_path(self):

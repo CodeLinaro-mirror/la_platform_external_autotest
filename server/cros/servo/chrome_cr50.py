@@ -85,7 +85,7 @@ class ChromeCr50(chrome_ec.ChromeConsole):
     FWMP_LOCKED_DBG = ['Ignoring FWMP unlock setting']
     MAX_RETRY_COUNT = 5
     CCDSTATE_MAX_RETRY_COUNT = 20
-    START_STR = ['(.*Console is enabled;)']
+    START_STR = ['((Havn|UART).*Console is enabled;)']
     REBOOT_DELAY_WITH_CCD = 60
     REBOOT_DELAY_WITH_FLEX = 3
     ON_STRINGS = ['enable', 'enabled', 'on']
@@ -326,21 +326,21 @@ class ChromeCr50(chrome_ec.ChromeConsole):
         # ccd info
         self._servo.set_nocheck('cr50_uart_timeout', self.CONSERVATIVE_CCD_WAIT)
         for i in range(self.GET_CAP_TRIES):
-          try:
-            # If some ccd output is dropped and the output doesn't match the
-            # expected ccd output format, send_command_get_output will wait the
-            # full CONSERVATIVE_CCD_WAIT even though ccd is done printing. Use
-            # re to search the command output instead of
-            # send_safe_command_get_output, so we don't have to wait the full
-            # timeout if output is dropped.
-            rv = self.send_command_retry_get_output('ccd', ['ccd.*>'],
-                    safe=True)[0]
-            matched_output = re.search(match_value, rv, re.DOTALL)
-            if matched_output:
-                break
-            logging.info('try %d: could not match ccd output %s', i, rv)
-          except Exception as e:
-            logging.info('try %d got error %s', i, str(e))
+            try:
+                # If some ccd output is dropped and the output doesn't match the
+                # expected ccd output format, send_command_get_output will wait the
+                # full CONSERVATIVE_CCD_WAIT even though ccd is done printing. Use
+                # re to search the command output instead of
+                # send_safe_command_get_output, so we don't have to wait the full
+                # timeout if output is dropped.
+                rv = self.send_command_retry_get_output('ccd', ['ccd.*>'],
+                                                        safe=True)[0]
+                matched_output = re.search(match_value, rv, re.DOTALL)
+                if matched_output:
+                    break
+                logging.info('try %d: could not match ccd output %s', i, rv)
+            except Exception as e:
+                logging.info('try %d got error %s', i, str(e))
 
         self._servo.set_nocheck('cr50_uart_timeout', original_timeout)
         if not matched_output:

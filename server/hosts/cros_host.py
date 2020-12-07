@@ -2914,11 +2914,12 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             return
         needs_manual_repair = False
         dhp = self.health_profile
-        if dhp and dhp.get_repair_fail_count() > 168:
-            # 168 = 24 times during 7 days.
+        if dhp and dhp.get_repair_fail_count() > 49:
+            # 42 = 6 times during 7 days. (every 4 hour repair)
+            # round up to 50 in case somebody will run some attempt on it.
             logging.info(
                     'DUT is not sshable and fail %s times.'
-                    ' Limit to try repair is 168 times',
+                    ' Limit to try repair is 50 times',
                     dhp.get_repair_fail_count())
             needs_manual_repair = True
 

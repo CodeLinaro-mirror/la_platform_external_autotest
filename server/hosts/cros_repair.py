@@ -450,23 +450,49 @@ class HWIDVerifier(hosts.Verifier):
     @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         # pylint: disable=missing-docstring
-        try:
-            info = host.host_info_store.get()
+        info = host.host_info_store.get()
+        if not info.board or not info.model:
+            # if board or model missed in host_info file then it is empty
+            # skip verifier
+            return
+        info_hwid = info.attributes.get('HWID')
+        info_serial_number = info.attributes.get('serial_number')
 
-            hwid = host.run('crossystem hwid', ignore_status=True).stdout
-            if hwid:
-                info.attributes['HWID'] = hwid
+        if not info_hwid or not info_serial_number:
+            logging.info('Missing HWID or/and SerialNumber.'
+                         ' Probably device was not deployed properly.'
+                         ' Marking DUT for need re-deployment.')
+            host.set_device_repair_state(
+                    cros_constants.DEVICE_STATE_NEEDS_DEPLOY)
+            return
 
-            serial_number = host.run('vpd -g serial_number',
-                                     ignore_status=True).stdout
-            if serial_number:
-                info.attributes['serial_number'] = serial_number
+        host_hwid = host.run('crossystem hwid', ignore_status=True).stdout
+        host_serial_number = host.run('vpd -g serial_number',
+                                      ignore_status=True).stdout
+        if not host_hwid or not host_serial_number:
+            raise hosts.AutoservVerifyError(
+                    'Failed to get HWID & Serial Number for host %s' %
+                    host.hostname)
 
-            if info != host.host_info_store.get():
-                host.host_info_store.commit(info)
-        except Exception as e:
-            logging.exception('Failed to get HWID & Serial Number for host '
-                              '%s: %s', host.hostname, str(e))
+        if host_hwid != info_hwid:
+            # We not fail verifier as it not critical for majority tests.
+            metrics.Counter('chromeos/autotest/repair/hwid_change').increment(
+                    fields={
+                            'host': host.hostname,
+                            'board': info.board or ''
+                    })
+            logging.info(
+                    'HWID changed to: %s required manual work'
+                    ' to fix it.', host_hwid)
+
+        if host_serial_number and host_serial_number != info_serial_number:
+            logging.info(
+                    'The SerialNumber mismatch detected %s != %s.'
+                    ' Probably attempt to replace DUT without deployment.'
+                    ' Marking DUT for need re-deployment.', info_serial_number,
+                    host_serial_number)
+            host.set_device_repair_state(
+                    cros_constants.DEVICE_STATE_NEEDS_DEPLOY)
 
     @property
     def description(self):

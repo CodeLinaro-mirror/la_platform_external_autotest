@@ -1926,10 +1926,17 @@ class BluetoothAdapterTests(test.test):
 
         device_type = self.host.get_board_type().lower()
         alias_format = '%s_[a-z0-9]{4}' % device_type
-        if not re.match(alias_format, alias.lower()):
-            return False
 
-        return True
+        self.results = {}
+
+        alias_was_correct = True
+        if not re.match(alias_format, alias.lower()):
+            alias_was_correct = False
+            logging.info('unexpected alias %s found', alias)
+            self.results['alias_found'] = alias
+
+        self.results['alias_was_correct'] = alias_was_correct
+        return all(self.results.values())
 
 
     # -------------------------------------------------------------------
@@ -4278,6 +4285,58 @@ class BluetoothAdapterTests(test.test):
         }
         return all(self.results.values())
 
+
+    @test_retry_and_log
+    def test_battery_reporting(self, device):
+        """ Tests that battery reporting through GATT can be received
+
+        @param device: the meta device containing a Bluetooth device
+
+        @returns: true if battery reporting is received
+        """
+
+        percentage = self.bluetooth_facade.get_battery_property(
+                device.address, 'Percentage')
+
+        return percentage > 0
+
+    def _apply_new_adapter_alias(self, alias):
+        """ Sets new system alias and applies discoverable setting
+
+        @param alias: string alias to be applied to Adapter->Alias property
+        """
+
+        # Set Adapter's Alias property
+        self.bluetooth_facade.set_adapter_alias(alias)
+
+        # Set discoverable setting on
+        self.bluetooth_facade.set_discoverable(True)
+
+    @test_retry_and_log(False)
+    def test_set_adapter_alias(self, alias):
+        """ Validates that a new adapter alias is applied correctly
+
+        @param alias: string alias to be applied to Adapter->Alias property
+
+        @returns: True if the applied alias is properly applied in btmon trace
+        """
+
+        orig_alias = self.get_adapter_properties()['Alias']
+        self.bluetooth_le_facade = self.bluetooth_facade
+
+        # 1. Capture btmon logs around alias set operation
+        self._get_btmon_log(lambda: self._apply_new_adapter_alias(alias))
+
+        # 2. Verify that name appears in btmon trace with the following format:
+        # "Name (complete): Chromebook_BA0E" as appears in EIR data set
+        expected_alias_str = 'Name (complete): ' + alias
+        alias_found = self.bluetooth_facade.btmon_find(expected_alias_str)
+
+        # 3. Re-apply previous bluez alias as other tests expect default
+        self.bluetooth_facade.set_adapter_alias(orig_alias)
+
+        self.results = {'alias_found': alias_found}
+        return all(self.results.values())
 
     # -------------------------------------------------------------------
     # Autotest methods

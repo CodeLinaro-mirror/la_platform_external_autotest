@@ -6,6 +6,8 @@
 DEVICE_STATE_NEEDS_REPLACEMENT = 'needs_replacement'
 # Device required manual attention to be fixed
 DEVICE_STATE_NEEDS_MANUAL_REPAIR = 'needs_manual_repair'
+# Device required re-deployment to be fixed
+DEVICE_STATE_NEEDS_DEPLOY = 'needs_deploy'
 
 # Timeout for verifiers.
 SHORT_VERIFY_TIMEOUT_SEC = 60

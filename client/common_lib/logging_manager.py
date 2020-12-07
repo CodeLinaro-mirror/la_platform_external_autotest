@@ -41,7 +41,14 @@ python logging in a very consistent way.
 """
 
 
-import fcntl, logging, os, signal, sys, time, warnings
+import fcntl
+import logging
+import os
+import signal
+import six
+import sys
+import time
+import warnings
 
 # primary public APIs
 
@@ -129,7 +136,11 @@ if sys.version_info[:2] > (2, 7):
 
 # Monkey patch our way around logging's design...
 _original_logger__find_caller = logging.Logger.findCaller
-logging.Logger.findCaller = _logging_manager_aware_logger__find_caller
+# Do not overwrite in Python 3 and on. It breaks the "<module>:<line num>|"
+# formatting in Python 3.
+if six.PY2:
+    logging.Logger.findCaller = _logging_manager_aware_logger__find_caller
+
 
 
 class LoggingFile(object):
