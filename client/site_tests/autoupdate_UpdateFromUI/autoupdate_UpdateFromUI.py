@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
+
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import chrome
@@ -13,15 +15,16 @@ class autoupdate_UpdateFromUI(update_engine_test.UpdateEngineTest):
     """Starts an update from the Chrome OS Settings app. """
     version = 1
 
-    _NOTIFICATION_TITLE = "Update available"
-    _NOTIFICATION_TIMEOUT = 10
     _NOTIFICATION_INTERVAL = 1
+    _NOTIFICATION_TIMEOUT = 10
+    _NOTIFICATION_TITLE = "Update available"
 
 
     def initialize(self):
         """Test setup."""
         super(autoupdate_UpdateFromUI, self).initialize()
         self._clear_custom_lsb_release()
+        self._cr = None
 
 
     def cleanup(self):
@@ -29,17 +32,12 @@ class autoupdate_UpdateFromUI(update_engine_test.UpdateEngineTest):
         self._clear_custom_lsb_release()
         super(autoupdate_UpdateFromUI, self).cleanup()
 
-    def _wait_for_update_notification(self, cr):
-        """
-        Waits for the post-update notification to appear.
-
-        @param cr: Chrome instance.
-
-        """
+    def _wait_for_update_notification(self):
+        """Waits for the post-update notification to appear. """
 
         def find_notification():
             """Polls for visibility of the post-update notification. """
-            notifications = cr.get_visible_notifications()
+            notifications = self._cr.get_visible_notifications()
             if notifications is None:
                 return False
             return any(n for n in notifications
@@ -47,21 +45,31 @@ class autoupdate_UpdateFromUI(update_engine_test.UpdateEngineTest):
 
         utils.poll_for_condition(
                 condition=find_notification,
-                desc='Post-update notification not found',
+                exception=error.TestFail('Post-update notification not found'),
                 timeout=self._NOTIFICATION_TIMEOUT,
                 sleep_interval=self._NOTIFICATION_INTERVAL)
 
 
     def run_once(self, payload_url):
         """
-        Tests that a Chrome OS software update can be completed from the UI.
+        Tests that a Chrome OS software update can be completed from the UI,
+        and that the post-update notification appears when the update is
+        complete.
 
         @param payload_url: The payload url to use.
 
         """
         with nebraska_wrapper.NebraskaWrapper(
             log_dir=self.resultsdir, payload_url=payload_url) as nebraska:
-            with chrome.Chrome(autotest_ext=True) as cr:
+            # To check the post-update notification, we need to remain logged
+            # in after the update completes. However, the DUT will auto-reboot
+            # if we log out after completing an update. This will cause the
+            # server test to fail when returning from the client test. To avoid
+            # this, we stay logged in at the end of the client test by not
+            # using a context manager for the Chrome session.
+            try:
+                self._cr = chrome.Chrome(autotest_ext=True)
+
                 # Need to create a custom lsb-release file to point the UI
                 # update button to Nebraska instead of the default update
                 # server.
@@ -69,7 +77,7 @@ class autoupdate_UpdateFromUI(update_engine_test.UpdateEngineTest):
                     nebraska.get_update_url(critical_update=True))
 
                 # Go to the OS settings page and check for an update.
-                tab = cr.browser.tabs[0]
+                tab = self._cr.browser.tabs[0]
                 tab.Navigate('chrome://os-settings/help')
                 tab.WaitForDocumentReadyStateToBeComplete()
                 self._take_screenshot('before_check_for_updates.png')
@@ -81,4 +89,13 @@ class autoupdate_UpdateFromUI(update_engine_test.UpdateEngineTest):
                         'Failed to find and click Check For Updates button.')
                 self._take_screenshot('after_check_for_updates.png')
                 self._wait_for_update_to_complete()
-                self._wait_for_update_notification(cr)
+
+            except Exception as e:
+                # The update didn't complete, so we can close the Chrome
+                # session without worrying about auto-reboot.
+                logging.exception("Failed to perform the update: %s", e)
+                if self._cr:
+                    self._cr.close()
+                raise error.TestFail("Failed to perform the update: %s" % e)
+
+            self._wait_for_update_notification()

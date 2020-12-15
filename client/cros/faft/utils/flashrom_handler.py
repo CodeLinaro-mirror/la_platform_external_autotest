@@ -201,6 +201,8 @@ class FlashromHandler(object):
                     'ro': FvSection(None, None, 'RO_FRID'),
                     'a': FvSection('VBOOTA', 'FVMAIN', 'RW_FWID_A'),
                     'b': FvSection('VBOOTB', 'FVMAINB', 'RW_FWID_B'),
+                    'me_a': FvSection(None, 'ME_RW_A'),
+                    'me_b': FvSection(None, 'ME_RW_B'),
                     'rec': FvSection(None, 'RECOVERY_MRC_CACHE'),
                     'ec_a': FvSection(None, 'ECMAINA'),
                     'ec_b': FvSection(None, 'ECMAINB'),

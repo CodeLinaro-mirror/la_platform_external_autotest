@@ -117,7 +117,7 @@ def get_machine_dicts(machine_names, store_dir, in_lab, use_shadow_store,
             'host_info_store': A host_info.CachingHostInfoStore object to obtain
                     host information. A stub if in_lab is False.
             'connection_pool': ssh_multiplex.ConnectionPool instance to share
-                    master ssh connection across control scripts. This is set to
+                    ssh connection across control scripts. This is set to
                     None, and should be overridden for connection sharing.
     """
     # See autoserv_parser.parse_args. Only one of in_lab or host_attributes can

@@ -269,9 +269,16 @@ class firmware_PDPowerSwap(FirmwareTest):
             else:
                 dual_mode = 'snk'
 
-            logging.info('Setting dualrole mode to %s', dual_mode)
-            self.dut_port.drp_set(dual_mode)
-            time.sleep(self.PD_ROLE_DELAY)
-            # Expect behavior now is that DUT will reject power swap
-            self._test_power_swap_reject()
-            logging.info('Power Swap request rejected by DUT as expected')
+            # Save current dual role setting
+            current_dual_role = self.dut_port.drp_get()
+
+            try:
+                logging.info('Setting dualrole mode to %s', dual_mode)
+                self.dut_port.drp_set(dual_mode)
+                time.sleep(self.PD_ROLE_DELAY)
+                # Expect behavior now is that DUT will reject power swap
+                self._test_power_swap_reject()
+                logging.info('Power Swap request rejected by DUT as expected')
+            finally:
+                # Restore dual role setting
+                self.dut_port.drp_set(current_dual_role)

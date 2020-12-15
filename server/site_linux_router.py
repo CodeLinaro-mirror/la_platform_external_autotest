@@ -1109,14 +1109,14 @@ class LinuxRouter(site_linux_system.LinuxSystem):
     def setup_bridge_mode_dhcp_server(self):
         """Setup an DHCP server for bridge mode.
 
-        Setup an DHCP server on the master interface of the virtual ethernet
+        Setup an DHCP server on the main interface of the virtual ethernet
         pair, with peer interface connected to the bridge interface. This is
         used for testing APs in bridge mode.
 
         """
-        # Start a local server on master interface of virtual ethernet pair.
+        # Start a local server on main interface of virtual ethernet pair.
         self.start_local_server(
-                self.get_virtual_ethernet_master_interface())
+                self.get_virtual_ethernet_main_interface())
         # Add peer interface to the bridge.
         self.add_interface_to_bridge(
                 self.get_virtual_ethernet_peer_interface())

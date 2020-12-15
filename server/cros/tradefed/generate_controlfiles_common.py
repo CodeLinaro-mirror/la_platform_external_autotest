@@ -199,6 +199,8 @@ def get_bundle_abi(filename):
     """
     if filename.endswith('arm.zip'):
         return 'arm'
+    if filename.endswith('arm64.zip'):
+        return 'arm64'
     if filename.endswith('x86.zip'):
         return 'x86'
 

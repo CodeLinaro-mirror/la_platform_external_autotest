@@ -20,6 +20,10 @@ class platform_StageAndRecover(test.test):
     _RECOVERY_LOG = '/recovery_logs*/recovery.log'
     _SET_DELAY = 2
 
+    def cleanup(self):
+        """ Clean up by switching servo usb towards servo host. """
+        self.host.servo.switch_usbkey('host')
+
 
     def initialize(self, host):
         """ Preparing servo to see only DUT_HUB1.
@@ -138,12 +142,6 @@ class platform_StageAndRecover(test.test):
         self.wait_for_dut_ping_after('RECOVERY', self._INSTALL_DELAY_TIMEOUT)
         self.verify_recovery_log()
 
-        if self.error_messages:
-          raise error.TestFail('Failures: %s' % ' '.join(self.error_messages))
-
-
-    def cleanup(self):
-        """Installs test-image."""
         try:
             # Post-recovery exception handling : Test image installation is
             # out of scope of the test verification and these failures should
@@ -159,6 +157,6 @@ class platform_StageAndRecover(test.test):
                 self.host.reboot()
         except error.AutoservRunError:
             pass
-        finally:
-            self.host.servo.switch_usbkey('host')
 
+        if self.error_messages:
+            raise error.TestFail('Failures: %s' % ' '.join(self.error_messages))

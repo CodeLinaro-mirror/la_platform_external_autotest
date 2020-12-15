@@ -68,12 +68,6 @@ class test(models.test):
         return iteration.load_from_keyval(keyval_path)
 
 
-    @staticmethod
-    def load_perf_values(perf_values_file):
-        return perf_value_iteration.load_from_perf_values_file(
-                perf_values_file)
-
-
 class iteration(models.iteration):
     """Represents an iteration."""
 

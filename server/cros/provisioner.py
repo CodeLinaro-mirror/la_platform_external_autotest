@@ -259,10 +259,9 @@ class ChromiumOSProvisioner(object):
             cmd += [os.path.join('/mnt/stateful_partition', f)]
         # TODO(b/165024723): This is a temporary measure until we figure out the
         # root cause of this bug.
-        cmd += [
-                '/mnt/stateful_partition/dev_image/share/tast/data/chromiumos/'
-                'tast/local/bundles/'
-        ]
+        for f in ('dev_image/share/tast/data', 'dev_image/libexec/tast',
+                  'dev_image/tmp/tast'):
+            cmd += [os.path.join('/mnt/stateful_partition', f)]
         cmd += [_TARGET_VERSION, '2>&1']
         self._run(cmd)
 

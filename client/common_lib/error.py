@@ -513,7 +513,7 @@ class AutoservDiskSizeUnknownError(AutoservHostError):
 
 # This MUST remain at the end of the file.
 # Limit 'from error import *' to only import the exception instances.
-for _name, _thing in locals().items():
+for _name, _thing in list(locals().items()):
     try:
         if issubclass(_thing, Exception):
             __all__.append(_name)

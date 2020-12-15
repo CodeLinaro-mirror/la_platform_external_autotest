@@ -137,10 +137,11 @@ class ServoHost(base_servohost.BaseServoHost):
 
     # Mapping servo board with their vid-pid
     SERVO_VID_PID = {
-        'servo_v4':'18d1:501b',
-        'ccd_cr50':'18d1:5014',
-        'servo_micro':'18d1:501a',
-        'servo_v3':['18d1:5004', '0403:6014'],
+            'servo_v4': '18d1:501b',
+            'ccd_cr50': '18d1:5014',
+            'servo_micro': '18d1:501a',
+            'servo_v3': ['18d1:5004', '0403:6014'],
+            'c2d2': '1d81:5041',
     }
 
     def _init_attributes(self):

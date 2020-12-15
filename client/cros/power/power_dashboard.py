@@ -69,6 +69,17 @@ _HTML_CHART_STR = '''
 </html>
 '''
 
+_HTML_LINK_STR = '''
+<!DOCTYPE html>
+<html>
+<body>
+<a href="http://chrome-power.appspot.com/dashboard?board={board}&test={test}&datetime={datetime}">
+  Link to power dashboard
+</a>
+</body>
+</html>
+'''
+
 
 class BaseDashboard(object):
     """Base class that implements method for prepare and upload data to power
@@ -156,6 +167,16 @@ class BaseDashboard(object):
             resultsdir: directory to save HTML page
             filename: filename to append to
         """
+        # Generate link to power dashboard,
+        board = powerlog_dict['dut']['board']
+        test = powerlog_dict['test']
+        datetime = time.strftime('%Y%m%d%H%M',
+                                 time.gmtime(powerlog_dict['timestamp']))
+
+        html_str = _HTML_LINK_STR.format(board=board,
+                                         test=test,
+                                         datetime=datetime)
+
         # Create dict from type to sorted list of rail names.
         rail_type = collections.defaultdict(list)
         for r, t in powerlog_dict['power']['type'].iteritems():
@@ -163,7 +184,6 @@ class BaseDashboard(object):
         for t in rail_type:
             rail_type[t] = sorted(rail_type[t])
 
-        html_str = ''
         row_indent = ' ' * 12
         for t in rail_type:
             data_str_list = []

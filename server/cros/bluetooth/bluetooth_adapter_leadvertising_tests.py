@@ -1365,7 +1365,6 @@ class bluetooth_AdapterLEAdvertising(
         # sharing service
         advertisements = [advertisements_data.NEARBY_MEDIUMS_FAST_ADV]
 
-        self.bluetooth_le_facade = self.bluetooth_facade
         self.test_reset_advertising()
 
         # Nearby share requires general discoverable advertising flag be set.
@@ -1482,3 +1481,6 @@ class bluetooth_AdapterLEAdvertising(
                 self.test_case_SI200_RA3_CD_PC_CD_UA3()
                 self.test_case_RA3_CD_SI200_CD_PC_CD_UA3()
                 self.test_case_RA1_CD_SI200_CD_PC_CD_UA1()
+
+        elif test_type == 'nearby':
+            self.test_case_nearby_mediums_fast()

@@ -6,6 +6,11 @@
 """This script creates a allowlist of test attributes based on the 'suite' read
 from test control files.
 """
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import argparse
 
 import common
@@ -45,7 +50,7 @@ def _WriteToFile(allowlist, path):
     path: path to the file.
   """
     with open(path, 'wb') as attr_file:
-        attr_file.write('\n'.join(allowlist))
+        attr_file.write('\n'.join(allowlist).encode('utf-8'))
 
 
 if __name__ == '__main__':

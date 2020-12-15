@@ -95,6 +95,18 @@ class bluetooth_AdapterLEHealth(BluetoothAdapterQuickTests,
         self.run_keyboard_tests(device=device)
 
 
+    @test_wrapper('Battery Reporting', devices={'BLE_MOUSE': 1})
+    def battery_reporting(self):
+        """Run battery reporting tests"""
+
+        device = self.devices['BLE_MOUSE'][0]
+        # Let the adapter pair, and connect to the target device.
+        self.assert_on_fail(self.test_discover_device(device.address))
+        self.assert_on_fail(
+                self.test_pairing(device.address, device.pin, trusted=True))
+
+        self.run_battery_reporting_tests(device=device)
+
     @test_wrapper('Auto Reconnect', devices={'BLE_MOUSE':1})
     def le_auto_reconnect(self):
         """LE reconnection loop by reseting HID and check reconnection"""

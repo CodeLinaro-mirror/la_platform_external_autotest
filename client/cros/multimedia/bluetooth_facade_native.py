@@ -344,6 +344,7 @@ class BluetoothFacadeNative(object):
     BLUEZ_DEBUG_LOG_IFACE = 'org.chromium.Bluetooth.Debug'
     BLUEZ_MANAGER_IFACE = 'org.freedesktop.DBus.ObjectManager'
     BLUEZ_ADAPTER_IFACE = 'org.bluez.Adapter1'
+    BLUEZ_BATTERY_IFACE = 'org.bluez.Battery1'
     BLUEZ_DEVICE_IFACE = 'org.bluez.Device1'
     BLUEZ_GATT_SERV_IFACE = 'org.bluez.GattService1'
     BLUEZ_GATT_CHAR_IFACE = 'org.bluez.GattCharacteristic1'
@@ -1244,6 +1245,20 @@ class BluetoothFacadeNative(object):
         return True
 
     @xmlrpc_server.dbus_safe(False)
+    def set_adapter_alias(self, alias):
+        """Set the adapter alias.
+
+        @param alias: adapter alias to set with type String
+
+        @return True on success, False otherwise.
+        """
+        self._adapter.Set(self.BLUEZ_ADAPTER_IFACE,
+                          'Alias',
+                          dbus.String(alias),
+                          dbus_interface=dbus.PROPERTIES_IFACE)
+        return True
+
+    @xmlrpc_server.dbus_safe(False)
     def _get_adapter_properties(self):
         """Read the adapter properties from the Bluetooth Daemon.
 
@@ -1478,6 +1493,29 @@ class BluetoothFacadeNative(object):
 
         return self._encode_base64_json(prop_val)
 
+    @xmlrpc_server.dbus_safe(None)
+    def get_battery_property(self, address, prop_name):
+        """Read a property from Battery1 interface.
+
+        @param address: Address of the device to query
+        @param prop_name: Property to be queried
+
+        @return The battery percentage value, or None if does not exist.
+        """
+
+        prop_val = None
+
+        # Grab dbus object, _find_battery will catch any thrown dbus error
+        battery_obj = self._find_battery(address)
+
+        if battery_obj:
+            # Query dbus object for property
+            prop_val = battery_obj.Get(self.BLUEZ_BATTERY_IFACE,
+                                       prop_name,
+                                       dbus_interface=dbus.PROPERTIES_IFACE)
+
+        return dbus_util.dbus2primitive(prop_val)
+
     @xmlrpc_server.dbus_safe(False)
     def set_discovery_filter(self, filter):
         """Set the discovery filter.
@@ -1668,6 +1706,25 @@ class BluetoothFacadeNative(object):
             obj = self._system_bus.get_object(self.BLUEZ_SERVICE_NAME, path)
             return dbus.Interface(obj, self.BLUEZ_DEVICE_IFACE)
         logging.info('Device not found')
+        return None
+
+    @xmlrpc_server.dbus_safe(None)
+    def _find_battery(self, address):
+        """Finds the battery with a given address.
+
+        Find the battery with a given address and returns the
+        battery interface.
+
+        @param address: Address of the device.
+
+        @returns: An 'org.bluez.Battery1' interface to the device.
+                  None if device can not be found.
+        """
+        path = self._get_device_path(address)
+        if path:
+            obj = self._system_bus.get_object(self.BLUEZ_SERVICE_NAME, path)
+            return dbus.Interface(obj, self.BLUEZ_BATTERY_IFACE)
+        logging.info('Battery not found')
         return None
 
     @xmlrpc_server.dbus_safe(False)

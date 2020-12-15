@@ -5,6 +5,7 @@ import logging
 
 
 def dprint(msg):
+    """Log a message on the DEBUG level."""
     logging.debug('%s', msg)
 
 
@@ -77,4 +78,5 @@ def get_skylab_task_id(tag):
 
 
 def is_skylab_task(tag):
+    """Given a tag, determine whether it represents a Skylab task."""
     return get_skylab_task_id(tag) is not None
