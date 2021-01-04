@@ -233,6 +233,8 @@ def create_btpeer_host(dut, btpeer_args_list):
             ret_args['chameleon_host'] = args['btpeer_host']
         if 'btpeer_port' in args:
             ret_args['chameleon_port'] = args['btpeer_port']
+        if 'btpeer_ssh_port' in args:
+            ret_args['port'] = int(args['btpeer_ssh_port'])
         return ret_args
 
     if not utils.is_in_container():

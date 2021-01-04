@@ -4,6 +4,7 @@
 
 import glob
 import logging
+import re
 import os
 import shutil
 import time
@@ -460,3 +461,22 @@ class platform_BootPerf(test.test):
         self._copy_console_ramoops()
 
         self.write_perf_keyval(results)
+
+        if utils.system('crossystem mainfw_type?normal',
+                        ignore_status=True) != 0:
+            raise error.TestNAError(
+                    'Firmware boot times are not accurate in developer mode. '
+                    'Please run this test in normal mode.')
+        if 'EC returned from reboot' in utils.system_output('cbmem -1'):
+            raise error.TestNAError(
+                    'Firmware boot times should be measured without an EC reboot. '
+                    'Please warm reboot this system by running the "reboot" userspace command, then rerun the test.'
+            )
+        # This is looking for the LB_TAG_SERIAL entry in the coreboot table.
+        # 0x0000000f = tag, 0x00000020 = size, 0x0001c200 = 115200 baud.
+        if re.search('\x0f\0\0\0\x20\0\0\0........\0\xc2\x01\0',
+                     utils.system_output('cbmem -r 43425442')):
+            raise error.TestNAError(
+                    'Firmware boot times should be measured without serial output. '
+                    'Please rerun this test with a production image (image.bin, not image.dev.bin).'
+            )

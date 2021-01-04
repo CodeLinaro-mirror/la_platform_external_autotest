@@ -7,7 +7,6 @@ import glob
 import logging
 import os
 import pipes
-import re
 import shutil
 import socket
 import sys
@@ -93,17 +92,6 @@ def restart_adb():
     logging.debug('killing and restarting adb server')
     utils.system('killall --quiet --wait -KILL adb')
     utils.system('adb start-server')
-
-
-def adb_connect():
-    """Attempt to connect ADB to the Android container.
-
-    Returns true if successful. Do not call this function directly. Call
-    wait_for_adb_ready() instead.
-    """
-    if utils.system('adb connect localhost:22', ignore_status=True) != 0:
-        return False
-    return is_adb_connected()
 
 
 def is_adb_connected():
@@ -207,7 +195,7 @@ def _restart_adb_and_wait_for_ready(timeout):
     timeout -= (time.time() - start_time)
 
     try:
-        utils.poll_for_condition(condition=adb_connect,
+        utils.poll_for_condition(condition=is_adb_connected,
                                  timeout=timeout)
         return True
     except (utils.TimeoutError):
@@ -354,16 +342,6 @@ def get_android_data_root():
     return _ANDROID_DATA_ROOT_PATH
 
 
-def get_job_pid(job_name):
-    """Returns the PID of an upstart job."""
-    status = utils.system_output('status %s' % job_name)
-    match = re.match(r'^%s start/running, process (\d+)$' % job_name,
-                     status)
-    if not match:
-        raise error.TestError('Unexpected status: "%s"' % status)
-    return match.group(1)
-
-
 def get_container_pid():
     """Returns the PID of the container."""
     return utils.read_one_line(get_container_pid_path())
@@ -375,34 +353,6 @@ def get_adbd_pid():
         # The adbd proxy does not run on all boards.
         return None
     return utils.read_one_line(_ADBD_PID_PATH)
-
-
-def get_sdcard_pid():
-    """Returns the PID of the sdcard container."""
-    return utils.read_one_line(_SDCARD_PID_PATH)
-
-
-def get_mount_passthrough_pid_list():
-    """Returns PIDs of ARC mount-passthrough daemon jobs."""
-    JOB_NAMES = [ 'arc-myfiles', 'arc-myfiles-default',
-                  'arc-myfiles-read', 'arc-myfiles-write',
-                  'arc-removable-media', 'arc-removable-media-default',
-                  'arc-removable-media-read', 'arc-removable-media-write' ]
-    pid_list = []
-    for job_name in JOB_NAMES:
-        try:
-            pid = get_job_pid(job_name)
-            pid_list.append(pid)
-        except Exception, e:
-            logging.warning('Failed to find PID for %s : %s', job_name, e)
-            continue
-
-    return pid_list
-
-
-def get_obb_mounter_pid():
-    """Returns the PID of the OBB mounter."""
-    return utils.system_output('pgrep -f -u root ^/usr/bin/arc-obb-mounter')
 
 
 def is_android_process_running(process_name):

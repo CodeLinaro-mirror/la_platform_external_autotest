@@ -6,6 +6,7 @@ import logging
 
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
+from autotest_lib.client.common_lib import lsbrelease_utils
 from autotest_lib.client.common_lib.cros import chrome
 from autotest_lib.client.cros.cellular import test_environment
 from autotest_lib.client.cros.update_engine import nebraska_wrapper
@@ -48,7 +49,11 @@ class autoupdate_StartOOBEUpdate(update_engine_test.UpdateEngineTest):
                                         critical_update=critical_update,
                                         full_payload=full_payload)
         # Start chrome instance to interact with OOBE.
-        self._chrome = chrome.Chrome(auto_login=False)
+        extra_browser_args = []
+        if lsbrelease_utils.get_device_type() != 'CHROMEBOOK':
+            extra_browser_args.append('--disable-hid-detection-on-oobe')
+        self._chrome = chrome.Chrome(auto_login=False,
+                                     extra_browser_args=extra_browser_args)
         self._oobe = self._chrome.browser.oobe
         self._skip_to_oobe_update_screen()
 

@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2018 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,7 +8,7 @@ import json
 import logging
 from lxml import etree
 import os
-import StringIO
+import six
 import time
 
 from autotest_lib.client.common_lib import error, utils
@@ -111,7 +112,7 @@ class DUTFixture:
             renumbered from 0.
         """
         tree = etree.parse(
-                StringIO.StringIO(content),
+                six.StringIO(content),
                 parser=etree.XMLParser(compact=False))
         root = tree.getroot()
         profiles = root.findall('CamcorderProfiles')

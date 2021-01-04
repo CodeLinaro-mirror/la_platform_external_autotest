@@ -14,25 +14,27 @@ SERVO_BOARD_ATTR = 'servo_board'
 # Model is inferred from host labels.
 SERVO_MODEL_ATTR = 'servo_model'
 SERVO_SERIAL_ATTR = 'servo_serial'
+# Indicates what type of servo setup, example value: REGULAR or DUAL_V4.
+SERVO_SETUP_ATTR = 'servo_setup'
+SERVO_SETUP_VALUE_DUAL_V4 = 'DUAL_V4'
 SERVO_ATTR_KEYS = (
         SERVO_BOARD_ATTR,
         SERVO_HOST_ATTR,
         SERVO_PORT_ATTR,
         SERVO_SERIAL_ATTR,
+        SERVO_SETUP_ATTR,
 )
+
+# Additional args that will be appended to servod start command.
+ADDITIONAL_SERVOD_ARGS = 'additional_servod_args'
 
 # Timeout value for stop/start servod process.
 SERVOD_TEARDOWN_TIMEOUT = 3
 SERVOD_QUICK_STARTUP_TIMEOUT = 20
 SERVOD_STARTUP_TIMEOUT = 60
 
-# pools that support dual v4. (go/cros-fw-lab-strategy)
-POOLS_SUPPORT_DUAL_V4 = {'faft-cr50',
-                         'faft-cr50-tot',
-                         'faft-cr50-debug',
-                         'faft_cr50_debug'
-                         'faft-pd-debug',
-                         'faft_pd_debug'}
+# Prefix of pools that require servod cr50 config.
+CR50_CONFIG_POOL_PREFIX = 'faft-cr50'
 
 ENABLE_SSH_TUNNEL_FOR_SERVO = _CONFIG.get_config_value(
         'CROS', 'enable_ssh_tunnel_for_servo', type=bool, default=False)
@@ -47,10 +49,13 @@ SERVO_STATE_WRONG_CONFIG = 'WRONG_CONFIG'
 SERVO_STATE_NO_SSH = 'NO_SSH'
 SERVO_STATE_NOT_CONNECTED = 'NOT_CONNECTED'
 SERVO_STATE_NEED_REPLACEMENT = 'NEED_REPLACEMENT'
+SERVO_STATE_CR50_CONSOLE_MISSING = 'CR50_CONSOLE_MISSING'
 SERVO_STATE_CCD_TESTLAB_ISSUE = 'CCD_TESTLAB_ISSUE'
 SERVO_STATE_SERVOD_ISSUE = 'SERVOD_ISSUE'
 SERVO_STATE_LID_OPEN_FAILED = 'LID_OPEN_FAILED'
 SERVO_STATE_BAD_RIBBON_CABLE = 'BAD_RIBBON_CABLE'
+SERVO_STATE_TOPOLOGY_ISSUE = 'TOPOLOGY_ISSUE'
+SERVO_STATE_DUT_NOT_CONNECTED = 'DUT_NOT_CONNECTED'
 SERVO_STATE_EC_BROKEN = 'EC_BROKEN'
 SERVO_STATE_BROKEN = 'BROKEN'
 SERVO_STATE_WORKING = 'WORKING'

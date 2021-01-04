@@ -46,8 +46,11 @@ class _BaseUpdateServoFw(object):
         # keep flag that class support and can run updater
         self._supported = None
 
-    def check_needs(self):
-        """Check if class supports update for particular servo type"""
+    def check_needs(self, ignore_version=False):
+        """Check if class supports update for particular servo type.
+
+        @params ignore_version: do not check the version on the device.
+        """
         if self._supported is None:
             if not self._host:
                 self._supported = False
@@ -57,11 +60,13 @@ class _BaseUpdateServoFw(object):
                 self._supported = False
             elif not self._check_needs():
                 self._supported = False
-            else:
+            elif not ignore_version:
                 self._supported = self._is_outdated_version()
+            else:
+                self._supported = True
         return self._supported
 
-    def update(self, force_update=False):
+    def update(self, force_update=False, ignore_version=False):
         """Update firmware on the servo.
 
         Steps:
@@ -70,8 +75,11 @@ class _BaseUpdateServoFw(object):
         3) Updating firmware.
 
         @params force_update: run updater with force option.
+        @params ignore_version: do not check the version on the device.
         """
-        if not self.check_needs():
+        if not self.check_needs(ignore_version):
+            logging.info('The board %s does not need update or '
+                         'not present in the setup.', self.get_board())
             return
         if not self.get_serial_number():
             logging.info('Serial number is not detected. It means no update'
@@ -245,33 +253,28 @@ SERVO_UPDATERS = (
 )
 
 
-def update_servo_firmware(host, force_update=False):
+def update_servo_firmware(host, force_update=False, ignore_version=False):
     """Update firmware on servo devices.
 
-    @params host: ServoHost instance to run all required commands
-    @params dut_hostname: hostname of the DUT for track errors
-    @params force_update: run updater with force option
+    @params host: ServoHost instance to run all required commands.
+    @params force_update: run updater with force option.
+    @params ignore_version: do not check the version on the device.
     """
+    if ignore_version:
+        logging.debug('Running servo_updater with ignore_version=True')
+
     # to run updater we need make sure the servod is not running
     host.stop_servod()
     # initialize all updaters
     updaters = [updater(host) for updater in SERVO_UPDATERS]
 
     for updater in updaters:
-        # check if we need update
-        need_update = updater.check_needs()
-        board = updater.get_board()
-        if not need_update:
-            # We do not need update when:
-            #  - the board is not present
-            #  - not configuration info for device to run updater
-            #  - device already has latest version
-            logging.info('The board %s does not need update.', board)
-            continue
-        logging.info('Updating board %s firmware.', board)
+        logging.info('Try to update board: %s', updater.get_board())
         try:
-            updater.update(force_update)
+            updater.update(force_update=force_update,
+                           ignore_version=ignore_version)
         except Exception as e:
+            board = updater.get_board()
             data = {'host': host.get_dut_hostname() or '',
                     'board': board}
             metrics.Counter(

@@ -6,7 +6,7 @@
 
 AUTHOR = 'ARC++ Team'
 NAME = 'cheets_CTS_P.arm.CtsCameraTestCases'
-ATTRIBUTES = 'suite:cts_P'
+ATTRIBUTES = 'suite:cts_P, suite:cts'
 DEPENDENCIES = 'arc, lighting'
 JOB_RETRIES = 1
 TEST_TYPE = 'server'

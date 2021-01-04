@@ -24,25 +24,24 @@ load("//{path}", {unique_name} = "TESTS")
 _append_tests({unique_name})
 """
 
-
 def main():
-    """Main entry point of this script."""
-    root_dir = os.path.realpath(
-            os.path.join(os.path.realpath(__file__), "../../.."))
-    os.chdir(root_dir)
-    output = HEADER
-    for test_type in ["client", "server"]:
-        for path in glob.iglob(test_type + "/site_tests/*/*.star"):
-            head, file_name = os.path.split(path)
-            head, test_folder = os.path.split(head)
-            unique_name = "_".join(
-                    [test_type, test_folder, file_name[:-len(".star")]])
-            output += TEMPLATE.format(path=path, unique_name=unique_name)
+  """Main entry point of this script."""
+  root_dir = os.path.realpath(
+      os.path.join(os.path.realpath(__file__), "../../.."))
+  os.chdir(root_dir)
+  output = HEADER
+  for test_type in ["client", "server"]:
+    for path in glob.iglob(test_type + "/site_tests/*/*.star"):
+      head, file_name = os.path.split(path)
+      head, test_folder = os.path.split(head)
+      unique_name = "_".join(
+          [test_type, test_folder, file_name[:-len(".star")]])
+      output += TEMPLATE.format(path=path, unique_name=unique_name)
 
-    with open(OUTPUT_FILE, 'w') as fh:
-        fh.write(output)
-    print("Wrote output to", OUTPUT_FILE)
+  with open(OUTPUT_FILE, 'w') as fh:
+    fh.write(output)
+  print("Wrote output to", OUTPUT_FILE)
 
 
 if __name__ == '__main__':
-    main()
+  main()

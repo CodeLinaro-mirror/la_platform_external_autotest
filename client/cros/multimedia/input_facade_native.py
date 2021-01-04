@@ -38,17 +38,19 @@ class InputFacadeNative(object):
         self._player.emulate(input_type=input_type, property_file=property_file)
         self._player.find_connected_inputs()
 
-    def initialize_input_recorder(self, device_name):
+    def initialize_input_recorder(self, device_name, uniq):
         """Initialize an input event recorder object.
 
         @param device_name: the name of the input device to record.
+        @param uniq: Unique address of input device (None if not used)
 
         """
         with self.recorders_lock:
             self.recorders[device_name] = \
-                input_event_recorder.InputEventRecorder(device_name)
-            logging.info('input event device: %s (%s)',
+                input_event_recorder.InputEventRecorder(device_name, uniq)
+            logging.info('input event device: %s [uniq=%s] (%s)',
                          self.recorders[device_name].device_name,
+                         self.recorders[device_name].uniq,
                          self.recorders[device_name].device_node)
 
 

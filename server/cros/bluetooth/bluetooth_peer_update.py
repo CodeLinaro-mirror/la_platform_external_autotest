@@ -8,6 +8,8 @@ which downloads chameleond bundle from google cloud storage and updates
 peer device associated with a DUT
 """
 
+from __future__ import absolute_import
+
 import logging
 import os
 import sys
@@ -16,6 +18,7 @@ import time
 
 from datetime import datetime
 
+import common
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 
@@ -163,24 +166,20 @@ def update_peer(peer, latest_commit):
 def update_peers(host, latest_commit):
     """Update the chameleond on alll peer devices of an host"""
 
-    peer_list = host.btpeer_list[:]
-    if host.chameleon is not None:
-        peer_list.append(host.chameleon)
-
-    if peer_list == []:
+    if host.btpeer_list == []:
         raise error.TestError('Bluetooth Peer not present')
 
     status = {}
-    for peer in peer_list:
+    for peer in host.btpeer_list:
         #TODO(b:160782273) Make this parallel
         status[peer] = {}
         status[peer]['update_needed'] = is_update_needed(peer,latest_commit)
 
     logging.debug(status)
-    # If none of the peer need update raise TestNA
     if not any([v['update_needed'] for v in status.values()]):
-        raise error.TestNAError('Update not needed')
-    for peer in peer_list:
+        logging.info("Update not needed on any of the peers")
+        return
+    for peer in host.btpeer_list:
         if status[peer]['update_needed']:
             status[peer]['updated'], status[peer]['reason'] = \
             update_peer(peer, latest_commit)

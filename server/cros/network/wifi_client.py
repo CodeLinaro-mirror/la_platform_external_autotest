@@ -718,6 +718,18 @@ class WiFiClient(site_linux_system.LinuxSystem):
         self._shill_proxy.do_suspend_bg(seconds)
 
 
+    def flush_bss(self, age=0):
+        """Flush supplicant's cached BSS on the DUT.
+
+        @param age: BSS older than |age| seconds will be removed from the cache.
+        """
+        result = self._wpa_cli_proxy.run_wpa_cli_cmd('bss_flush %d' % age,
+                                                     check_result=False);
+        logging.info('wpa_cli bss_flush %d: out:%r err:%r', age, result.stdout,
+                     result.stderr)
+        return result.stdout, result.stderr
+
+
     def clear_supplicant_blacklist(self):
         """Clear's the AP blacklist on the DUT.
 

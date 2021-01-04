@@ -4,9 +4,11 @@
 
 """Bluetooth DBus API tests."""
 
+from __future__ import absolute_import
 
 import logging
 
+import common
 from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
 
 # Assigning local names for some frequently used long method names.

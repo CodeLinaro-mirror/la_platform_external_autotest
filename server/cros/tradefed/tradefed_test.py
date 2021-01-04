@@ -27,11 +27,11 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import urlparse
 
 from autotest_lib.client.bin import utils as client_utils
 from autotest_lib.client.common_lib import error
-from autotest_lib.client.common_lib.cros import dev_server
 from autotest_lib.server import test
 from autotest_lib.server import utils
 from autotest_lib.server.cros.tradefed import cts_expected_failure_parser
@@ -69,8 +69,12 @@ class TradefedTest(test.test):
     _num_media_bundles = 0
     _abilist = []
 
+    # A job will be aborted after 16h. Subtract 30m for setup/teardown.
+    _MAX_LAB_JOB_LENGTH_IN_SEC = 16 * 60 * 60 - 30 * 60
+    _job_deadline = None
+
     def _log_java_version(self):
-        """Quick sanity and spew of java version installed on the server."""
+        """Log java version to debug failures due to version mismatch."""
         utils.run(
             'java',
             args=('-version',),
@@ -91,6 +95,9 @@ class TradefedTest(test.test):
                    hard_reboot_on_failure=False,
                    use_jdk9=False):
         """Sets up the tools and binary bundles for the test."""
+        if utils.is_in_container() and not client_utils.is_moblab():
+            self._job_deadline = time.time() + self._MAX_LAB_JOB_LENGTH_IN_SEC
+
         self._install_paths = []
         # TODO(pwang): Remove host if we enable multiple hosts everywhere.
         self._hosts = [host] if host else hosts
@@ -134,18 +141,24 @@ class TradefedTest(test.test):
 
         # If use_jdk9 is set true, use jdk9 than default jdk8.
         if use_jdk9:
-            logging.info('Using JDK9')
-            try:
-                os.environ['JAVA_HOME'] = '/usr/lib/jvm/jdk-9.0.4'
-                os.environ['PATH'] = os.environ['JAVA_HOME']\
-                                  + '/bin:' + os.environ['PATH']
-                logging.info(subprocess.check_output(['java', '-version'], stderr=subprocess.STDOUT))
-            except OSError:
-                logging.error('Can\'t change current PATH directory')
+            if utils.is_in_container() and not client_utils.is_moblab():
+                logging.info('Lab: switching to JDK9')
+                try:
+                    os.environ['JAVA_HOME'] = '/usr/lib/jvm/jdk-9.0.4'
+                    os.environ['PATH'] = os.environ['JAVA_HOME']\
+                                      + '/bin:' + os.environ['PATH']
+                    logging.info(
+                            subprocess.check_output(['java', '-version'],
+                                                    stderr=subprocess.STDOUT))
+                except OSError:
+                    logging.error('Can\'t change current PATH directory')
+            else:
+                logging.info('Non-lab environment: should be using JDK9+')
 
         # Install the tradefed bundle.
         bundle_install_path = self._install_bundle(
-            uri or self._get_default_bundle_url(bundle))
+                self._get_latest_bundle_url(bundle) if uri == 'LATEST' else (
+                        uri or self._get_default_bundle_url(bundle)))
         self._repository = os.path.join(bundle_install_path,
                                         self._get_tradefed_base_dir())
 
@@ -625,41 +638,17 @@ class TradefedTest(test.test):
                 verbose=True)
             return output
 
-        if not client_utils.is_moblab():
-            # If the machine can access to the storage server directly,
-            # defer to "gsutil" for downloading.
-            logging.info('Not in lab. Downloading %s directly to %s.',
-                         uri, output)
-            # b/17445576: gsutil rsync of individual files is not implemented.
+        # If the machine can access to the storage server directly,
+        # defer to "gsutil" for downloading.
+        logging.info('Downloading %s directly to %s.', uri, output)
+        # b/17445576: gsutil rsync of individual files is not implemented.
+        res = utils.run('gsutil',
+                        args=('cp', uri, output),
+                        verbose=True,
+                        ignore_status=True)
+        if not res or res.exit_status != 0:
+            logging.warning('Retrying download...')
             utils.run('gsutil', args=('cp', uri, output), verbose=True)
-            return output
-
-        # We are in the moblab. Because the machine cannot access the storage
-        # server directly, use dev server to proxy.
-        logging.info('In lab. Downloading %s by staging to %s.',
-                     uri, output)
-
-        dirname = os.path.dirname(parsed.path)
-        archive_url = '%s://%s%s' % (parsed.scheme, parsed.netloc, dirname)
-
-        # First, request the devserver to download files into the lab network.
-        # TODO(ihf): Switch stage_artifacts to honor rsync. Then we don't have
-        # to shuffle files inside of tarballs.
-        info = self._hosts[0].host_info_store.get()
-        ds = dev_server.ImageServer.resolve(info.build)
-        ds.stage_artifacts(
-            info.build, files=[filename], archive_url=archive_url)
-
-        # Then download files from the dev server.
-        # TODO(ihf): use rsync instead of wget. Are there 3 machines involved?
-        # Itself, dev_server plus DUT? Or is there just no rsync in moblab?
-        ds_src = '/'.join([ds.url(), 'static', dirname, filename])
-        logging.info('dev_server URL: %s', ds_src)
-        # Calls into DUT to pull uri from dev_server.
-        utils.run(
-            'wget',
-            args=('--report-speed=bits', '-O', output, ds_src),
-            verbose=True)
         return output
 
     def _instance_copyfile(self, cache_path):
@@ -797,6 +786,7 @@ class TradefedTest(test.test):
         match = re.search(r'Saved log to /tmp/(tradefed_global_log_.*\.txt)',
                           result.stdout)
         if not match:
+            logging.debug(result.stdout)
             logging.error('no tradefed_global_log file is found')
             return
 
@@ -998,8 +988,11 @@ class TradefedTest(test.test):
         self._collect_tradefed_global_log(output, result_destination)
         # Result parsing must come after all other essential operations as test
         # warnings, errors and failures can be raised here.
-        return tradefed_utils.parse_tradefed_result(output.stdout,
-                                                    self._waivers)
+        base = self._default_tradefed_base_dir()
+        path = tradefed_utils.get_test_result_xml_path(base)
+        return tradefed_utils.parse_tradefed_testresults_xml(
+            test_result_xml_path=path,
+            waivers=self._waivers)
 
     def _setup_result_directories(self):
         """Sets up the results and logs directories for tradefed.
@@ -1155,6 +1148,15 @@ class TradefedTest(test.test):
 
     def _run_tradefed(self, command):
         timeout = self._timeout * self._timeout_factor
+        if self._job_deadline is not None:
+            clipped = int(min(timeout, self._job_deadline - time.time()))
+            # Even the shortest tradefed run takes 1.5 minutes. Took 2x'ed
+            # value as a threshold that a meaningful test can run.
+            if clipped < 3 * 60:
+                raise error.TestError(
+                        'Hitting job time limit: only %s seconds left' %
+                        clipped)
+            timeout = clipped
         return self._run_tradefed_with_timeout(command, timeout)
 
     def _run_tradefed_with_retries(self,
@@ -1213,6 +1215,15 @@ class TradefedTest(test.test):
             steps += 1
             keep_media = media_asset and media_asset.uri and steps >= 1
             self._run_commands(login_precondition_commands, ignore_status=True)
+            # TODO(kinaba): Make it a general config (per-model choice
+            # of tablet,clamshell,default) if the code below works.
+            if utils.is_in_container() and not client_utils.is_moblab():
+                # Force all hatch devices run the test in laptop mode,
+                # regardless of their physical placement.
+                if board == 'hatch' or board == 'hatch-arc-r':
+                    self._run_commands(
+                        ['inject_powerd_input_event --code=tablet --value=0'],
+                        ignore_status=True)
             with login.login_chrome(
                     hosts=self._hosts,
                     board=board,
@@ -1313,6 +1324,15 @@ class TradefedTest(test.test):
                 self.summary += msg
                 logging.info('RESULT: %s %s', msg, result)
 
+                # Overwrite last_all_done if the executed test count is equal
+                # to the known test count of the job.
+                if (not last_all_done and executable_test_count != None and
+                    (last_passed + last_failed in executable_test_count)):
+                    logging.warning('Overwriting all_done as True, since the '
+                                    'explicitly set executable_test_count '
+                                    'tests have run.')
+                    last_all_done = True
+
                 # Check for no-test modules. We use the "all_done" indicator
                 # provided by list_results to decide if there are outstanding
                 # modules to iterate over (similar to missing tests just on a
@@ -1335,15 +1355,10 @@ class TradefedTest(test.test):
                         current_login.need_reboot()
                     continue
 
+                # After the no-test check, commit the pass/fail count.
                 waived = last_waived
-                session_id, passed, failed, all_done  = result
-                if (not all_done and executable_test_count != None and
-                        (passed + failed ==
-                         executable_test_count * self._test_count_factor)):
-                    logging.warning('Overwriting all_done as True, since the '
-                                    'explicitly set executable_test_count '
-                                    'tests have run.')
-                    all_done = True
+                session_id, passed, failed, all_done =\
+                    last_session_id, last_passed, last_failed, last_all_done
 
                 # Check if all the tests passed.
                 if failed <= waived and all_done:

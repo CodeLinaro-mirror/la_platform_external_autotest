@@ -334,10 +334,21 @@ class parser(base.parser):
             """
             Prints the ignored_lines using tko_utils.dprint method.
             """
-            tko_utils.dprint('The following lines were ignored:')
-            for line in ignored_lines:
-                tko_utils.dprint(line)
-            tko_utils.dprint('---------------------------------')
+            num_lines = len(ignored_lines)
+            if num_lines > 2:
+                tko_utils.dprint('The following %s lines were ignored:' %
+                                 num_lines)
+                tko_utils.dprint('%r' % ignored_lines[0])
+                tko_utils.dprint('...')
+                tko_utils.dprint('%r' % ignored_lines[-1])
+            elif num_lines == 2:
+                tko_utils.dprint('The following %s lines were ignored:' %
+                                 num_lines)
+                tko_utils.dprint('%r' % ignored_lines[0])
+                tko_utils.dprint('%r' % ignored_lines[-1])
+            elif num_lines == 1:
+                tko_utils.dprint('The following line was ignored:')
+                tko_utils.dprint('%r' % ignored_lines[0])
 
         # Create a RUNNING SERVER_JOB entry to represent the entire test.
         running_job = test.parse_partial_test(self.job, '----', 'SERVER_JOB',

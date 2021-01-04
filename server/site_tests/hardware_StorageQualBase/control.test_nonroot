@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 AUTHOR = "asavery"
-NAME = "StorageQualBase.test_nonroot"
+NAME = "hardware_StorageQualBase.test_nonroot"
 TIME = "LONG"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "suite"

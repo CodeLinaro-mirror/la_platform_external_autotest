@@ -11,19 +11,19 @@ from autotest_lib.server.cros.network import wifi_cell_test_base
 from autotest_lib.server.cros.network import hostap_config
 
 class network_WiFi_RoamFT(wifi_cell_test_base.WiFiCellTestBase):
-    """Tests roam on low signal using FT-PSK between APs
+    """Tests roams on ROAM D-Bus command using FT auth suites
 
     This test seeks to associate the DUT with an AP with a set of
     association parameters, create a second AP with a second set of
-    parameters but the same SSID, and lower the transmission power of
-    the first AP. We seek to observe that the DUT successfully
+    parameters but the same SSID, and ask, via D-Bus, the DUT to roam
+    to the second AP. We seek to observe that the DUT successfully
     connects to the second AP in a reasonable amount of time.
 
-    Roaming using FT-PSK is different from standard roaming in that
-    there is a special key exchange protocol that needs to occur
-    between the APs prior to a successful roam. In order for this
-    communication to work, we need to construct a specific interface
-    architecture as shown below:
+    Roaming using FT is different from standard roaming in that there
+    is a special key exchange protocol that needs to occur between the
+    APs prior to a successful roam. In order for this communication to
+    work, we need to construct a specific interface architecture as
+    shown below:
                  _________                       _________
                 |         |                     |         |
                 |   br0   |                     |   br1   |
@@ -128,8 +128,11 @@ class network_WiFi_RoamFT(wifi_cell_test_base.WiFiCellTestBase):
                        r0kh='%s %s %s' % (mac0, id0, key1),
                        r1kh='%s %s %s' % (mac0, mac0, key0),
                        bridge=br1)
+        bgscan_none = xmlrpc_datatypes.BgscanConfiguration(
+            method=xmlrpc_datatypes.BgscanConfiguration.SCAN_METHOD_NONE)
         client_conf = xmlrpc_datatypes.AssociationParameters(
-                      security_config=config)
+                      security_config=config,
+                      bgscan_config=bgscan_none)
 
         # Configure the inital AP.
         logging.info('Bringing up first AP')
@@ -140,48 +143,50 @@ class network_WiFi_RoamFT(wifi_cell_test_base.WiFiCellTestBase):
         client_conf.ssid = router_ssid
         self.context.assert_connect_wifi(client_conf)
 
-        # Setup a second AP with the same SSID.
-        logging.info('Bringing up second AP')
-        router1_conf.ssid = router_ssid
-        self.context.configure(router1_conf, multi_interface=True)
+        # Note that we assume that only one roam happens here. It's possible,
+        # despite bgscan being turned off, that shill kicks off a scan and we
+        # roam before the ROAM D-Bus command is issued, in which case we will
+        # end up with more than one disconnect event. This will cause the test
+        # to fail, but as it is, we don't have a great solution for this. Table
+        # this until we port this test to Tast.
+        with self.context.client.assert_disconnect_count(1):
+            # Setup a second AP with the same SSID.
+            logging.info('Bringing up second AP')
+            router1_conf.ssid = router_ssid
+            self.context.configure(router1_conf, multi_interface=True)
 
-        # Get BSSIDs of the two APs.
-        bssid0 = self.context.router.get_hostapd_mac(0)
-        bssid1 = self.context.router.get_hostapd_mac(1)
-        curr_ap_if = self.context.router.get_hostapd_interface(0)
+            # Get BSSIDs of the two APs.
+            bssid0 = self.context.router.get_hostapd_mac(0)
+            bssid1 = self.context.router.get_hostapd_mac(1)
+            curr_ap_if = self.context.router.get_hostapd_interface(0)
 
-        interface = self.context.client.wifi_if
+            interface = self.context.client.wifi_if
 
-        # Set the tx power of the current AP interface.
-        # This should fix the tx power at 100mBm == 1dBm. It turns out that
-        # set_tx_power does not actually change the signal level seen from the
-        # DUT sufficiently to force a roam (it might vary from -45 to -30), so
-        # this Autotest also takes advantage of wpa_supplicant's preference for
-        # 5GHz channels.
-        self.context.router.iw_runner.set_tx_power(curr_ap_if, 'fixed 100')
+            # Wait for DUT to see the second AP
+            # TODO(matthewmwang): wait_for_bss uses iw to check whether or not
+            # the BSS appears in the scan results, but when we request a roam
+            # with wpa_supplicant afterward, we race with wpa_supplicant
+            # receiving the updated scan results. When migrating the test to
+            # Tast, poll wpa_supplicant for scan results instead.
+            self.context.client.wait_for_bss(bssid1)
 
-        # Expect that the DUT will re-connect to the new AP.
-        self.context.client.shill.request_scan()
-        logging.info('Attempting to roam %s -> %s', bssid0, bssid1)
-        if not self.context.client.wait_for_roam(
-               bssid1, timeout_seconds=self.TIMEOUT_SECONDS):
-            self.context.client.shill.request_scan()
-            logging.info('Attempting to roam again.')
+            logging.info('Requesting roam from %s to %s', bssid0, bssid1)
+            # Ask shill to request a roam from wpa_supplicant via D-Bus.
+            if not self.context.client.request_roam_dbus(bssid1, interface):
+                raise error.TestFail('Failed to send roam command')
+
+            # Expect that the DUT will re-connect to the new AP.
             if not self.context.client.wait_for_roam(
-                   bssid1, timeout_seconds=self.TIMEOUT_SECONDS):
-                curr = self.context.client.iw_runner.get_current_bssid(
-                        interface)
-                raise error.TestFail(
-                        'Failed to roam: current BSS %s, expected %s' %
-                            (curr, bssid1))
-        # We've roamed at the 802.11 layer, but make sure Shill brings the
-        # connection up completely (DHCP).
-        # TODO(https://crbug.com/1070321): Note that we don't run any ping
-        # test.
-        # Check that we don't disconnect along the way here, in case we're
-        # ping-ponging around APs -- and after the first (failed) roam, the
-        # second re-connection will not be testing FT at all.
-        with self.context.client.assert_no_disconnects():
+                    bssid1, timeout_seconds=self.TIMEOUT_SECONDS):
+                raise error.TestFail('Failed to roam')
+
+            # We've roamed at the 802.11 layer, but make sure Shill brings the
+            # connection up completely (DHCP).
+            # TODO(https://crbug.com/1070321): Note that we don't run any ping
+            # test.
+            # Check that we don't disconnect along the way here, in case we're
+            # ping-ponging around APs -- and after the first (failed) roam, the
+            # second re-connection will not be testing FT at all.
             self.context.client.wait_for_connection(router_ssid)
             curr = self.context.client.iw_runner.get_current_bssid(interface)
             if curr != bssid1:
@@ -195,8 +200,6 @@ class network_WiFi_RoamFT(wifi_cell_test_base.WiFiCellTestBase):
     def run_once(self,host):
         """
         Set global FT switch and call test_body.
-
-        TODO(matthewmwang): rewrite test so that it is more reliable.
         """
         self.context.client.require_capabilities(
             [site_linux_system.LinuxSystem.CAPABILITY_SUPPLICANT_ROAMING])

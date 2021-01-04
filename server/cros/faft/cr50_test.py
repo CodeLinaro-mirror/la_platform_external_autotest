@@ -94,6 +94,10 @@ class Cr50Test(FirmwareTest):
                 info=self.cr50.CAP_SETTING)
 
         self.host = host
+        # SSH commands should complete within 3 minutes. Change the default, so
+        # it doesn't take half an hour for commands to timeout when the DUT is
+        # down.
+        self.host.set_default_run_timeout(180)
         tpm_utils.ClearTPMOwnerRequest(self.host, wait_for_ready=True)
         # Clear the FWMP, so it can't disable CCD.
         self.clear_fwmp()
@@ -119,6 +123,8 @@ class Cr50Test(FirmwareTest):
         try:
             self._save_eraseflashinfo_image(
                     full_args.get('cr50_eraseflashinfo_image_path', ''))
+            if self.cr50.uses_board_property('BOARD_EC_CR50_COMM_SUPPORT'):
+                raise error.TestError('Board cannot boot EFI image')
             self._saved_state |= self.ERASEFLASHINFO_IMAGE
         except Exception as e:
             logging.warning('Error saving eraseflashinfo image: %s', str(e))
@@ -596,7 +602,7 @@ class Cr50Test(FirmwareTest):
         operation. Open the cr50 uart file and count the number of times this is
         printed. Log the number of errors.
         """
-        cr50_uart_file = self.get_uart_capture_result_path('cr50')
+        cr50_uart_file = self.servo.get_uart_logfile('cr50')
         if not cr50_uart_file:
             logging.info('There is not a cr50 uart file')
             return
@@ -672,6 +678,11 @@ class Cr50Test(FirmwareTest):
 
     def _try_quick_ccd_cleanup(self):
         """Try to clear all ccd state."""
+        # This is just a first pass at cleanup. Don't raise any errors.
+        try:
+            self.cr50.ccd_enable()
+        except Exception as e:
+            logging.warn('Ignored exception enabling ccd %r', str(e))
         self.cr50.send_command('ccd testlab open')
         self.cr50.send_command('rddkeepalive disable')
         self.cr50.send_command('ccd reset')
@@ -928,9 +939,9 @@ class Cr50Test(FirmwareTest):
         image_rw = self._cr50_run_update(path)
 
         # Running the update may cause cr50 to reboot. Wait for that before
-        # sending more commands. The reboot should happen quickly. Wait a
-        # maximum of 10 seconds.
-        self.cr50.wait_for_reboot(timeout=10)
+        # sending more commands. The reboot should happen quickly.
+        self.cr50.wait_for_reboot(
+                timeout=self.faft_config.gsc_update_wait_for_reboot)
 
         if rollback:
             self.cr50.rollback()
@@ -950,6 +961,12 @@ class Cr50Test(FirmwareTest):
         set_pwd_cmd = utils.sh_escape(cmd)
         full_ssh_command = '%s "%s"' % (self.host.ssh_command(options='-tt'),
                                         set_pwd_cmd)
+        logging.info('Running: %s', cmd)
+        logging.info('Password: %s', password)
+
+        # Make sure the test waits long enough to avoid ccd rate limiting.
+        time.sleep(self.cr50.CCD_PASSWORD_RATE_LIMIT)
+
         stdout = StringIO.StringIO()
         # Start running the gsctool Command in the background.
         gsctool_job = utils.BgJob(
@@ -1004,8 +1021,12 @@ class Cr50Test(FirmwareTest):
         if not self.cr50.testlab_is_on():
             raise error.TestError('Will not set password unless testlab mode '
                                   'is enabled.')
-        self.run_gsctool_cmd_with_password(password, 'gsctool -a -P',
-                                           'set_password', expect_error)
+        try:
+            self.run_gsctool_cmd_with_password(password, 'gsctool -a -P',
+                                               'set_password', expect_error)
+        finally:
+            logging.info('Cr50 password is %s',
+                         'cleared' if self.cr50.password_is_reset() else 'set')
 
     def ccd_unlock_from_ap(self, password=None, expect_error=False):
         """Unlock cr50"""

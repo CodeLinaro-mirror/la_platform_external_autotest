@@ -1,5 +1,6 @@
 import mock
 import unittest
+import re
 
 import common
 
@@ -177,6 +178,29 @@ class ServoHostInformationExistor(unittest.TestCase):
         self.assertFalse(servo_host._is_servo_host_information_exist('', port))
         self.assertFalse(servo_host._is_servo_host_information_exist(None, port))
         self.assertFalse(servo_host._is_servo_host_information_exist('  ', port))
+
+
+class ValidateUSBCPigtailRegex(unittest.TestCase):
+    """Tests to verify logic in servo host present"""
+    def test_good_cases(self):
+        host = MockHost()
+        message = "[475635.476044 PD TMOUT RX 1/1]"
+        self.assertTrue(bool(re.match(host.USBC_PIGTAIL_TIMEOUT_RE, message)))
+        message = "[475635.476044654 PD TMOUT RX 1/1]"
+        self.assertTrue(bool(re.match(host.USBC_PIGTAIL_TIMEOUT_RE, message)))
+        message = "475635.476044654 PD TMOUT RX 1/1"
+        self.assertFalse(bool(re.match(host.USBC_PIGTAIL_TIMEOUT_RE, message)))
+
+    def test_bad_cases(self):
+        host = MockHost()
+        message = "PD TMOUT RX 1/1"
+        self.assertFalse(bool(re.match(host.USBC_PIGTAIL_TIMEOUT_RE, message)))
+        message = "[PD TMOUT RX 1/1]"
+        self.assertFalse(bool(re.match(host.USBC_PIGTAIL_TIMEOUT_RE, message)))
+        message = "PD TMOUT RX"
+        self.assertFalse(bool(re.match(host.USBC_PIGTAIL_TIMEOUT_RE, message)))
+        message = "something other"
+        self.assertFalse(bool(re.match(host.USBC_PIGTAIL_TIMEOUT_RE, message)))
 
 
 if __name__ == '__main__':

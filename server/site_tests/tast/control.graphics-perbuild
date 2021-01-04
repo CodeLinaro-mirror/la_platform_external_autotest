@@ -25,8 +25,10 @@ See http://go/tast-failures for information about investigating failures.
 '''
 
 def run(machine):
+    host=hosts.create_host(machine)
+    host.reboot()
     job.run_test('tast',
-                 host=hosts.create_host(machine),
+                 host=host,
                  test_exprs=['("group:graphics" && graphics_perbuild && !graphics_trace && !graphics_video)'],
                  ignore_test_failures=True, max_run_sec=10800,
                  command_args=args)

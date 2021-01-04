@@ -1,6 +1,13 @@
+# Lint as: python2, python3
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import logging
 import os
+from six.moves import range
 import time
+
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils
 
@@ -13,7 +20,7 @@ class UIScreenshoter(object):
 
     def __init__(self):
         if not os.path.exists(self._SCREENSHOT_DIR_PATH):
-            os.mkdir(self._SCREENSHOT_DIR_PATH, 0755)
+            os.mkdir(self._SCREENSHOT_DIR_PATH, 0o755)
         self.screenshot_num = 0
 
     def take_ss(self):
@@ -296,7 +303,7 @@ class UI_Handler(object):
         self.doDefault_on_obj(item_to_click,
                               role=click_role,
                               isRegex=isRegex_click)
-        for retry in xrange(3):
+        for retry in range(3):
             try:
                 self.wait_for_ui_obj(item_to_wait_for,
                                      role=wait_role,

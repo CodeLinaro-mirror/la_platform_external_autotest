@@ -1,13 +1,14 @@
+# Lint as: python2, python3
 # Copyright (c) 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import httplib
+import six.moves.http_client
 import logging
 import socket
 import tempfile
 import time
-import xmlrpclib
+import six.moves.xmlrpc_client
 
 import common
 from autotest_lib.client.bin import utils
@@ -183,14 +184,14 @@ class RpcServerTracker(object):
             proxy = TimeoutXMLRPCServerProxy(
                     rpc_url, timeout=request_timeout_seconds, allow_none=True)
         else:
-            proxy = xmlrpclib.ServerProxy(rpc_url, allow_none=True)
+            proxy = six.moves.xmlrpc_client.ServerProxy(rpc_url, allow_none=True)
 
         if ready_test_name is not None:
             # retry.retry logs each attempt; calculate delay_sec to
             # keep log spam to a dull roar.
             @retry.retry((socket.error,
-                          xmlrpclib.ProtocolError,
-                          httplib.BadStatusLine),
+                          six.moves.xmlrpc_client.ProtocolError,
+                          six.moves.http_client.BadStatusLine),
                          timeout_min=timeout_seconds / 60.0,
                          delay_sec=min(max(timeout_seconds / 20.0, 0.1), 1))
             def ready_test():
@@ -221,7 +222,7 @@ class RpcServerTracker(object):
                         type(exc).__module__, type(exc).__name__,
                         str(exc).rstrip('.'))
 
-                if isinstance(exc, httplib.BadStatusLine):
+                if isinstance(exc, six.moves.http_client.BadStatusLine):
                     # BadStatusLine: inject the last log line into the message,
                     # using the 'line' and 'args' attributes.
                     if log_lines:
@@ -346,7 +347,7 @@ class RpcServerTracker(object):
             self.disconnect(port)
 
 
-class TimeoutXMLRPCServerProxy(xmlrpclib.ServerProxy):
+class TimeoutXMLRPCServerProxy(six.moves.xmlrpc_client.ServerProxy):
     """XMLRPC ServerProxy supporting timeout."""
     def __init__(self, uri, timeout=20, *args, **kwargs):
         """Initializes a TimeoutXMLRPCServerProxy.
@@ -359,10 +360,10 @@ class TimeoutXMLRPCServerProxy(xmlrpclib.ServerProxy):
         """
         if timeout:
             kwargs['transport'] = TimeoutXMLRPCTransport(timeout=timeout)
-        xmlrpclib.ServerProxy.__init__(self, uri, *args, **kwargs)
+        six.moves.xmlrpc_client.ServerProxy.__init__(self, uri, *args, **kwargs)
 
 
-class TimeoutXMLRPCTransport(xmlrpclib.Transport):
+class TimeoutXMLRPCTransport(six.moves.xmlrpc_client.Transport):
     """A Transport subclass supporting timeout."""
     def __init__(self, timeout=20, *args, **kwargs):
         """Initializes a TimeoutXMLRPCTransport.
@@ -372,7 +373,7 @@ class TimeoutXMLRPCTransport(xmlrpclib.Transport):
         @param **kwargs: kwargs to xmlrpclib.Transport.
 
         """
-        xmlrpclib.Transport.__init__(self, *args, **kwargs)
+        six.moves.xmlrpc_client.Transport.__init__(self, *args, **kwargs)
         self.timeout = timeout
 
 
@@ -384,5 +385,5 @@ class TimeoutXMLRPCTransport(xmlrpclib.Transport):
         @return: A httplib.HTTPConnection connecting to host with timeout.
 
         """
-        conn = httplib.HTTPConnection(host, timeout=self.timeout)
+        conn = six.moves.http_client.HTTPConnection(host, timeout=self.timeout)
         return conn

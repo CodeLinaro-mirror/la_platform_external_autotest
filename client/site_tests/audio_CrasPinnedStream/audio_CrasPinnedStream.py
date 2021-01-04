@@ -59,7 +59,8 @@ class audio_CrasPinnedStream(audio_helper.cras_rms_test):
                                               'loopback_recorded.raw')
         internal_mic_recorded_file = os.path.join(self.resultsdir,
                                                   'internal_mic_recorded.raw')
-        node_type = audio_spec.get_internal_mic_node(utils.get_board(),
+        node_type = audio_spec.get_internal_mic_node(utils.get_board_type(),
+                                                     utils.get_board(),
                                                      utils.get_platform(),
                                                      utils.get_sku())
         device_id = int(

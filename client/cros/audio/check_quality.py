@@ -6,6 +6,9 @@
 
 """Command line tool to analyze wave file and detect artifacts."""
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import argparse
 import collections
 import json
@@ -15,6 +18,7 @@ import pprint
 import subprocess
 import tempfile
 import wave
+from six.moves import range
 
 # Normal autotest environment.
 try:
@@ -295,7 +299,7 @@ class QualityChecker(object):
 
         """
         self.has_data()
-        for channel_idx in xrange(self._raw_data.channel):
+        for channel_idx in range(self._raw_data.channel):
             signal = self._raw_data.channel_data[channel_idx]
             max_abs = max(numpy.abs(signal))
             logging.debug('Channel %d max abs signal: %f', channel_idx, max_abs)

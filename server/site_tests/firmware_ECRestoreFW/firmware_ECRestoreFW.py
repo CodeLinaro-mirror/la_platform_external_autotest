@@ -7,8 +7,6 @@
 import logging
 import re
 
-from chromite.lib import cros_logging as logging
-
 from autotest_lib.client.common_lib import error
 from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
 

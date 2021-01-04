@@ -37,7 +37,7 @@ calculated for each obtained document and it is used for comparison.
 A function for digests calculation is in the 'helpers.py' file. Not all
 outputs can be tested this way because for some PPD files produced contents
 differ between runs. List of PPD files for which we cannot calculate
-constant digest is saved in the file digests_blacklist.txt. Files with
+constant digest is saved in the file digests_denylist.txt. Files with
 expected digests for every test document are stored in the directory "digests".
 If a digests for given pair (test document, PPD file) is missing, the test
 checks only check if the output is not empty (or not too short).

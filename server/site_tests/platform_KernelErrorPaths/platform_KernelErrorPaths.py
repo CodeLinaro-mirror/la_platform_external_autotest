@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import logging, os, time
 
 from autotest_lib.client.common_lib import error
@@ -24,7 +26,7 @@ class platform_KernelErrorPaths(test.test):
             # connection wedged for a long time.
             self.client.run(
                 'sh -c "sync; sleep 1; %s" >/dev/null 2>&1 &' % command)
-        except error.AutoservRunError, e:
+        except error.AutoservRunError as e:
             # It is expected that this will cause a non-zero exit status.
             pass
 
@@ -114,20 +116,21 @@ class platform_KernelErrorPaths(test.test):
 
         # give the crash_reporter some time to log the crash
         try:
-          utils.poll_for_condition(
-              condition=lambda: self.client.list_files_glob(kcrash_file_path),
-              timeout=self.KCRASH_TIMEOUT_SECONDS,
-              sleep_interval=self.POLLING_INTERVAL_SECONDS,
-              desc="crash_reporter logging crash")
+            utils.poll_for_condition(
+                    condition=lambda: self.client.list_files_glob(
+                            kcrash_file_path),
+                    timeout=self.KCRASH_TIMEOUT_SECONDS,
+                    sleep_interval=self.POLLING_INTERVAL_SECONDS,
+                    desc="crash_reporter logging crash")
         except utils.TimeoutError:
-          raise error.TestFail('No kcrash files found on client')
+            raise error.TestFail('No kcrash files found on client')
 
         result = self.client.run('cat %s/kernel.*.kcrash' %
                                  self._crash_log_dir)
         if not type(text) == tuple:
-           match = (text,)
+            match = (text, )
         else:
-           match = text
+            match = text
         if not any(s in result.stdout for s in match):
             raise error.TestFail(
                 "'%s' not found in log after sending '%s' on cpu %d" %

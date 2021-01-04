@@ -2,9 +2,17 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
+
 from autotest_lib.client.common_lib import error
 from autotest_lib.server import autotest, test
 
+
+# TODO(b/163372205): Some models before unibuild have ambient light sensors
+# only on certain skus. However, has_ambient_light_sensor powerd pref has to
+# be set for all skus. For these models, skip checking the existence of ambient
+# light sensors against has_ambient_light_sensor powerd pref.
+IGNORE_ALS_PREF_MODELS = ['caroline']
 
 class power_BrightnessResetAfterReboot(test.test):
     """Verifies that the panel brightness level resets after device reboots.
@@ -25,20 +33,23 @@ class power_BrightnessResetAfterReboot(test.test):
         cmd = 'check_powerd_config --ambient_light_sensor'
         num_als_pref = int(host.run_output(cmd, ignore_status=True))
 
-        cmd = 'backlight_tool --get_ambient_light_path'
+        cmd = 'backlight_tool --get_ambient_light_lux'
         result = host.run(cmd, ignore_status=True)
         als_exists = not result.exit_status # 0 is cmd success.
-        als_path = result.stdout.rstrip()
 
         if num_als_pref and not als_exists:
-            raise error.TestFail('Powerd pref indicates %d ambient light '
-                                 'sensor(s) but device is unable to find it'
-                                 '(them).' % num_als_pref)
+            model = host.get_platform()
+            msg = ('Powerd pref indicates %d ambient light sensor(s) but device '
+                   'is unable to find it (them).' % num_als_pref)
+            if model in IGNORE_ALS_PREF_MODELS:
+                logging.info('%s However, skip this check for model: %s.',
+                             msg, model)
+            else:
+                raise error.TestFail(msg)
 
         initial_lux = -1
         if als_exists:
-            cmd = 'cat %s' % als_path
-            initial_lux = int(host.run_output(cmd))
+            initial_lux = int(result.stdout.rstrip())
             lux_domain = [initial_lux / 2, initial_lux * 2]
             brightness_range = \
                     [get_backlight(host, lux) for lux in lux_domain]

@@ -44,13 +44,18 @@ def lock(filename):
                 # team, break the lock and report a failure. This should fix
                 # the lock for following tests. If the failure affects more than
                 # one job look for a deadlock or dev server overload.
-                logging.error('Permanent lock failure. Trying to break lock.')
-                # TODO(ihf): Think how to do this cleaner without having a
-                # recursive lock breaking problem. We may have to kill every
-                # job that is currently waiting. The main goal though really is
-                # to have a cache that does not corrupt. And cache updates
-                # only happen once a month or so, everything else are reads.
-                filelock.break_lock()
+                age = filelock.age_of_lock()
+                logging.error('Permanent lock failure. Lock age = %d.', age)
+                # Breaking a lock is a destructive operation that causes
+                # abort of locking jobs, cleanup and redowloading of cache
+                # contents. When the error was due to overloaded server,
+                # it cause even more cascade of lock errors. Wait 4 hours
+                # before breaking the lock. Tasks inside the critical section
+                # is about downloading a few gigabytes of files. Taking 4 hours
+                # strongly implies the job had went wrong.
+                if age > 4 * 60 * 60:
+                    logging.error('Trying to break lock.')
+                    filelock.break_lock()
                 raise error.TestFail('Error: permanent cache lock failure.')
         else:
             logging.info('Acquired cache lock after %d attempts.', attempts)
@@ -95,6 +100,57 @@ def adb_keepalive(targets, extra_paths):
             common_utils.nuke_subprocess(job.sp)
         common_utils.join_bg_jobs(jobs)
 
+
+def parse_tradefed_testresults_xml(test_result_xml_path, waivers=None):
+    """ Check the result from tradefed through test_results.xml
+    @param waivers: a set() of tests which are permitted to fail.
+    """
+    waived_count = dict()
+    failed_tests = set()
+    try:
+        root = ElementTree.parse(test_result_xml_path)
+        for module in root.iter('Module'):
+            module_name = module.get('name')
+            for testcase in module.iter('TestCase'):
+                testcase_name = testcase.get('name')
+                for test in testcase.iter('Test'):
+                    test_case = test.get('name')
+                    test_res = test.get('result')
+                    test_name = '%s#%s' % (testcase_name, test_case)
+
+                    if test_res == "fail":
+                        test_fail = test.find('Failure')
+                        failed_message = test_fail.get('message')
+                        failed_stacktrace = test_fail.find('StackTrace').text
+
+                        if waivers and test_name in waivers:
+                            waived_count[test_name] = (
+                                waived_count.get(test_name, 0) + 1)
+                        else:
+                            failed_tests.add(test_name)
+
+        # Check for test completion.
+        for summary in root.iter('Summary'):
+            modules_done = summary.get('modules_done')
+            modules_total = summary.get('modules_total')
+
+        if failed_tests:
+            logging.error('Failed (but not waived) tests:\n%s',
+                          '\n'.join(sorted(failed_tests)))
+
+        waived = []
+        for testname, fail_count in waived_count.items():
+            waived += [testname] * fail_count
+            logging.info('Waived failure for %s %d time(s)',
+                         testname, fail_count)
+        logging.info('>> Total waived = %s', waived)
+        return waived, True
+
+    except Exception as e:
+        logging.warning(
+            'Exception raised in '
+            '|tradefed_utils.parse_tradefed_result_xml|: {'
+            '0}'.format(e))
 
 def parse_tradefed_result(result, waivers=None):
     """Check the result from the tradefed output.

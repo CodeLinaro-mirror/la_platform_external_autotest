@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import difflib
 import logging
 import math
@@ -49,7 +51,7 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
                                     'servo flex')
 
         # Reset the device
-        self.servo.get_power_state_controller().reset()
+        self.host.reset_via_servo()
 
         # Save the original version, so we can make sure cr50 doesn't rollback.
         self.original_cr50_version = self.cr50.get_active_version_info()
@@ -112,7 +114,7 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
 
         for i in range(suspend_count):
             # Power off the device
-            self.servo.get_power_state_controller().power_off()
+            self.host.power_off_via_servo()
             time.sleep(self.MIN_SUSPEND)
 
             # Power on the device
@@ -157,7 +159,7 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
 
         # TODO(b/135147658): Raise an error once CCD disable is fixed.
         logging.info('Resetting DUT')
-        self.servo.get_power_state_controller().reset()
+        self.host.reset_via_servo()
         if not self._dut_is_responsive():
             return msg
 
@@ -224,7 +226,7 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
 
         errors = []
         if exp_count and not hibernate:
-                errors.append('reset during suspend')
+            errors.append('reset during suspend')
 
         # Use the absolute value, because cr50 shouldn't suspend more or less
         # than expected.
@@ -296,7 +298,7 @@ class firmware_Cr50DeepSleepStress(FirmwareTest):
                 self.run_reboots(suspend_count)
             elif reset_type == 'mem':
                 self.run_suspend_resume(suspend_count)
-        except Exception, e:
+        except Exception as e:
             main_error = e
 
         errors = []

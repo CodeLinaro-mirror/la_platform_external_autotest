@@ -18,6 +18,7 @@ class firmware_CorruptRecoveryCache(FirmwareTest):
     it will be recreated and still boot into recovery mode.
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     REBUILD_CACHE_MSG = "MRC: cache data 'RECOVERY_MRC_CACHE' needs update."
     RECOVERY_CACHE_SECTION = 'RECOVERY_MRC_CACHE'

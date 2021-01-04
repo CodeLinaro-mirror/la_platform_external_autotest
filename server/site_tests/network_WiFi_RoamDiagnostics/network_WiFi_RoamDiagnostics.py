@@ -118,8 +118,8 @@ class network_WiFi_RoamDiagnostics(wifi_cell_test_base.WiFiCellTestBase):
                                    stats, units='roams',
                                    higher_is_better=False)
             for i, roams in enumerate(stats):
-                logging.info('%d roams %d%% with diff >= %d',
-                             roams, 100 * roams/total, i * 2)
+                logging.info('%d roams out of %d with diff >= %d', roams,
+                             total, i * 2)
 
     def run_once(self):
         """Body of the test."""

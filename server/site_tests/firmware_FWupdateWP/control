@@ -18,6 +18,10 @@ test_that --board=BOARD --args 'servo_host=SERVO3_IP' DUT_IP firmware_FWupdateWP
 Remove servo_host param for V2 servo.
 Default mode is recovery, add mode=factory to use factory mode.
 
+Note that the test modifies FWIDs, then restores them. If the test dies in a way
+that doesn't run cleanup, then they will be left modified.
+In that case, you may want to reflash the firmware to undo the changes.
+
 """
 
 from autotest_lib.client.common_lib import utils

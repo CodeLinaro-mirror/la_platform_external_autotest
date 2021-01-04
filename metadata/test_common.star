@@ -16,6 +16,44 @@ _COMMON_DEPS = {
 }
 
 
+
+def _define_test(
+    name,
+    *,
+    suites = [],
+    main_package = 'NOT SET',
+    main_args = [],
+):
+    """Define a single Tauto test.
+
+    Args:
+        name: The globally unique name of the test, as known to the scheduling
+                infrastructure.
+        suites: A list of test suites this test belongs to, without the 'suite:'
+                prefix.
+        main_package: Python package that contains the entry function.
+                e.g. autotest_lib.client.site_tests.dummy_Pass.dummy_Pass
+        main_args: A list of arguments to the entry function.
+    """
+    test_args = google_pb.ListValue(values = [
+        google_pb.Value(string_value = a) for a in main_args
+    ])
+    informational = metadata_pb.Informational(
+        details = google_pb.Struct(fields = {
+            "main": google_pb.Value(struct_value = google_pb.Struct(fields = {
+                "python_package": google_pb.Value(string_value = main_package),
+                "test_args": google_pb.Value(list_value = test_args),
+            })),
+        }),
+    )
+    return metadata_pb.Test(
+        name = _TEST_NAME_PREFIX + name,
+        attributes = [metadata_pb.Attribute(name = "suite:" + s)
+                      for s in suites],
+        informational = informational,
+    )
+
+
 def _define_client_test(
     test_name,
     purpose,
@@ -67,4 +105,5 @@ def _define_client_test(
 
 test_common = struct(
     define_client_test = _define_client_test,
+    define_test = _define_test,
 )

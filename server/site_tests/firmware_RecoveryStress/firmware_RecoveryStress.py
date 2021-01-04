@@ -15,6 +15,7 @@ class firmware_RecoveryStress(FirmwareTest):
       - Recovery boot with USB stick using power_state:rec_force_mrc
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     REBUILD_CACHE_MSG = "MRC: cache data 'RECOVERY_MRC_CACHE' needs update."
     FIRMWARE_LOG_CMD = 'cbmem -1' + ' | grep ' + REBUILD_CACHE_MSG[:3]

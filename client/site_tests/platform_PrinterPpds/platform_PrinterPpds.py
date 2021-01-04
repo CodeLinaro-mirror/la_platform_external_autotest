@@ -156,14 +156,14 @@ class platform_PrinterPpds(test.test):
             for doc_name in self._docs:
                 self._digests[doc_name] = dict()
         else:
-            path_blacklist = os.path.join(location_of_digests_files,
-                    'blacklist.txt')
-            blacklist = helpers.load_blacklist(path_blacklist)
+            path_denylist = os.path.join(location_of_digests_files,
+                                         'denylist.txt')
+            denylist = helpers.load_denylist(path_denylist)
             for doc_name in self._docs:
                 digests_name = doc_name + '.digests'
                 path = os.path.join(location_of_digests_files, digests_name)
-                self._digests[doc_name] = helpers.parse_digests_file(path,
-                        blacklist)
+                self._digests[doc_name] = helpers.parse_digests_file(
+                        path, denylist)
 
         # Prepare a working directory for pipelines
         if debug_mode:

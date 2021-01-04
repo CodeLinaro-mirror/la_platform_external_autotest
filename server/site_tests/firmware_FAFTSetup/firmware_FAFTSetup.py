@@ -20,6 +20,7 @@ class firmware_FAFTSetup(FirmwareTest):
       - No terminal opened on EC console
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     # Delay to ensure client is ready to read the key press.
     KEY_PRESS_DELAY = 2

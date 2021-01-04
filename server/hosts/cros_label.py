@@ -1,8 +1,13 @@
+# Lint as: python2, python3
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """This class defines the CrosHost Label class."""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import collections
 import logging
@@ -18,8 +23,7 @@ from autotest_lib.server.hosts import base_label
 from autotest_lib.server.hosts import common_label
 from autotest_lib.server.hosts import servo_constants
 from autotest_lib.site_utils import hwid_lib
-from autotest_lib.site_utils.admin_audit import verifiers as audit_verify
-from autotest_lib.site_utils.admin_audit import constants as audit_const
+from six.moves import zip
 
 # pylint: disable=missing-docstring
 LsbOutput = collections.namedtuple('LsbOutput', ['unibuild', 'board'])
@@ -63,9 +67,8 @@ class DeviceSkuLabel(base_label.StringPrefixLabel):
         return []
 
     def update_for_task(self, task_name):
-        # This label is stored in the lab config, so only deploy tasks update it
-        # or when no task name is mentioned.
-        return task_name in (DEPLOY_TASK_NAME, '')
+        # This label is stored in the lab config.
+        return task_name in (DEPLOY_TASK_NAME, REPAIR_TASK_NAME, '')
 
 
 class BrandCodeLabel(base_label.StringPrefixLabel):
@@ -214,70 +217,6 @@ class ChameleonConnectionLabel(base_label.StringPrefixLabel):
 
     def generate_labels(self, host):
         return [host.chameleon.get_label()]
-
-    def update_for_task(self, task_name):
-        # This label is stored in the lab config, so only deploy tasks update it
-        # or when no task name is mentioned.
-        return task_name in (DEPLOY_TASK_NAME, '')
-
-
-class ChameleonPeripheralsLabel(base_label.StringPrefixLabel):
-    """Return the Chameleon peripherals labels.
-
-    The 'chameleon:bt_hid' label is applied if the bluetooth
-    classic hid device, i.e, RN-42 emulation kit, is detected.
-
-    Any peripherals plugged into the chameleon board would be
-    detected and applied proper labels in this class.
-    """
-
-    _NAME = 'chameleon'
-
-    def exists(self, host):
-        return host._chameleon_host is not None
-
-    def generate_labels(self, host):
-        labels = []
-        try:
-            bt_hid_device = host.chameleon.get_bluetooth_hid_mouse()
-            if bt_hid_device.CheckSerialConnection():
-                labels.append('bt_hid')
-        except:
-            logging.error('Error with initializing bt_hid_mouse')
-
-        try:
-            ble_hid_device = host.chameleon.get_ble_mouse()
-            if ble_hid_device.CheckSerialConnection():
-                labels.append('bt_ble_hid')
-        except:
-            logging.error('Error with initializing ble_hid_mouse')
-
-        try:
-            bt_a2dp_sink = host.chameleon.get_bluetooth_a2dp_sink()
-            if bt_a2dp_sink.CheckSerialConnection():
-                labels.append('bt_a2dp_sink')
-        except:
-            logging.error('Error with initializing bt_a2dp_sink')
-
-        try:
-            bt_audio_device = host.chameleon.get_bluetooth_audio()
-            if bt_audio_device.IsDetected():
-                labels.append('bt_audio')
-        except:
-            logging.error('Error in detecting bt_audio')
-
-        try:
-            bt_base_device = host.chameleon.get_bluetooth_base()
-            if bt_base_device.IsDetected():
-                labels.append('bt_base')
-        except:
-            logging.error('Error in detecting bt_base')
-
-        if labels != []:
-            labels.append('bt_peer')
-
-        logging.info('Chameleon Bluetooth labels are %s', labels)
-        return labels
 
     def update_for_task(self, task_name):
         # This label is stored in the lab config, so only deploy tasks update it
@@ -501,32 +440,11 @@ class HWIDLabel(base_label.StringLabel):
         return all_hwid_labels, all_hwid_labels
 
 
-class DutStorageLabel(base_label.StringPrefixLabel):
-    """Return the DUT storage label."""
-
-    _NAME = audit_const.DUT_STORAGE_STATE_PREFIX
-
-    def exists(self, host):
-        return host.servo is not None
-
-    def generate_labels(self, host):
-        verifier = audit_verify.VerifyDutStorage(host)
-        verifier.verify(set_label=False)
-        state = verifier.get_state()
-        return [state]
-
-    def update_for_task(self, task_name):
-        # This label is part of audit task, so updating it during deploy tasks
-        # update it or when no task name is mentioned.
-        return task_name in (DEPLOY_TASK_NAME, '')
-
-
 CROS_LABELS = [
     AudioLoopbackDongleLabel(), #STATECONFIG
     BluetoothPeerLabel(), #STATECONFIG
     ChameleonConnectionLabel(), #LABCONFIG
     ChameleonLabel(), #STATECONFIG
-    ChameleonPeripheralsLabel(), #LABCONFIG
     common_label.OSLabel(),
     DeviceSkuLabel(), #LABCONFIG
     HWIDLabel(),
@@ -536,7 +454,6 @@ CROS_LABELS = [
     # See crbug.com/1057719 for future tracking.
     Cr50Label(),
     Cr50ROKeyidLabel(),
-    DutStorageLabel(), #STATECONFIG
 ]
 
 LABSTATION_LABELS = [

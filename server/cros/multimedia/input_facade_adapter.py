@@ -49,13 +49,13 @@ class InputFacadeRemoteAdapter(object):
         self._input_proxy.blocking_playback_of_default_file(input_type,
                                                             filename)
 
-    def initialize_input_recorder(self, device_name):
+    def initialize_input_recorder(self, device_name, uniq=None):
         """Initialize an input event recorder object.
 
         @param device_name: the name of the input device to record.
 
         """
-        self._input_proxy.initialize_input_recorder(device_name)
+        self._input_proxy.initialize_input_recorder(device_name, uniq)
 
     def clear_input_events(self, device_name):
         """Clear the event list.

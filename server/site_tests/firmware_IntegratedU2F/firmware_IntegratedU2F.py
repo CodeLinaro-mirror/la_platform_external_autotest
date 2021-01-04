@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import logging
 import time
 import StringIO
@@ -81,14 +83,14 @@ class firmware_IntegratedU2F(FirmwareTest):
             'chaps_client --ping').stderr
 
     def wait_for_cr50(self):
-      """Wait for cr50 to complete any OOBE initialization"""
+        """Wait for cr50 to complete any OOBE initialization"""
 
-      if not utils.wait_for_value(self.attestation_init_complete,
-                                  True, timeout_sec=120):
+        if not utils.wait_for_value(
+                self.attestation_init_complete, True, timeout_sec=120):
             raise error.TestError('Attestation initialization did not complete')
 
-      if not utils.wait_for_value(self.chaps_init_complete,
-                                  True, timeout_sec=120):
+        if not utils.wait_for_value(
+                self.chaps_init_complete, True, timeout_sec=120):
             raise error.TestError('Chaps initialization did not complete')
 
 
@@ -97,13 +99,13 @@ class firmware_IntegratedU2F(FirmwareTest):
         self.host.run('rm -f /var/lib/u2f/force/*.force')
 
         if u2f:
-          self.host.run('touch %s' % self.U2F_FORCE_PATH)
+            self.host.run('touch %s' % self.U2F_FORCE_PATH)
 
         if g2f:
-          self.host.run('touch %s' % self.G2F_FORCE_PATH)
+            self.host.run('touch %s' % self.G2F_FORCE_PATH)
 
         if user_keys:
-          self.host.run('touch %s' % self.USER_KEYS_FORCE_PATH)
+            self.host.run('touch %s' % self.USER_KEYS_FORCE_PATH)
 
         # Restart u2fd so that flag change takes effect.
         self.host.run('restart u2fd')
@@ -124,7 +126,7 @@ class firmware_IntegratedU2F(FirmwareTest):
         path = '/sys/bus/hid/devices/*:%s:%s.*/hidraw' % (self.VID, self.PID)
         try:
             self.device = self.host.run('ls ' + path).stdout.strip()
-        except error.AutoservRunError, e:
+        except error.AutoservRunError as e:
             logging.info('Could not find device')
         return len(self.device)
 

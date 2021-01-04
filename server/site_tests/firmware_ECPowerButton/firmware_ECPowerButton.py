@@ -30,7 +30,7 @@ class firmware_ECPowerButton(FirmwareTest):
     POWER_BUTTON_IGNORE_PRESS_DURATION = 0.2
 
     # Delay after pressing power button to check power state
-    POWER_BUTTON_IGNORE_PRESS_DELAY = 5
+    POWER_BUTTON_IGNORE_PRESS_DELAY = 10
 
     def initialize(self, host, cmdline_args):
         super(firmware_ECPowerButton, self).initialize(host, cmdline_args)
@@ -75,7 +75,11 @@ class firmware_ECPowerButton(FirmwareTest):
         self.servo.power_key(shutdown_powerkey_duration)
 
         # Send a new line to wakeup EC from deepsleep,
-        # it can happen if the EC console is not used for some time
+        # it can happen if the EC console is not used for some time.
+        # Offset the wake_delay time by the delay (if any) waiting for the AP
+        # to start, so that the wake_delay time is the time to wait after the
+        # AP is actually up and running.
+        wake_delay += self.faft_config.delay_powerinfo_stable
         if wake_delay > 2:
             Timer(wake_delay - 1, self.ec.send_command, [""]).start()
 
@@ -126,12 +130,26 @@ class firmware_ECPowerButton(FirmwareTest):
                 raise error.TestFail("DUT shutdown from short 200ms power "
                                      "button press")
         else:
-            logging.info("No display connected, ignoring short 200ms power "
-                         "button check.")
+            logging.info("No display connected, check system shuts down from "
+                         "short 200ms power button check.")
+            self.servo.power_key(self.POWER_BUTTON_IGNORE_PRESS_DURATION)
+            time.sleep(self.POWER_BUTTON_IGNORE_PRESS_DELAY)
+            power_state = self.get_power_state()
+            logging.info("Power state = %s", power_state)
+            if (power_state != self.POWER_STATE_S5 and
+                power_state != self.POWER_STATE_G3):
+                self._reset_client()
+                raise error.TestFail("DUT didn't shutdown by "
+                                    "short power button press")
+            self.servo.power_key(self.faft_config.hold_pwr_button_poweron)
+            self.switcher.wait_for_client()
+            if self.get_power_state() != self.POWER_STATE_S0:
+                self._reset_client()
+                raise error.TestFail("DUT didn't boot by short power button press")
 
         logging.info("Shutdown when powerd is still running and wake from S5 "
                      "with short power button press.")
-        if self.servo.is_localhost():
+        if self.servo.is_localhost() and self.has_internal_display:
             self.check_state(self.debounce_power_button)
         self.switcher.mode_aware_reboot(
                 'custom',

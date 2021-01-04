@@ -90,7 +90,7 @@ except ImportError:
 pylint_version_parsed = tuple(map(int, pylint_version.split('.')))
 
 # some files make pylint blow up, so make sure we ignore them
-BLACKLIST = ['/site-packages/*', '/contrib/*', '/frontend/afe/management.py']
+SKIPLIST = ['/site-packages/*', '/contrib/*', '/frontend/afe/management.py']
 
 import astroid
 import pylint.lint
@@ -251,7 +251,7 @@ class CustomDocStringChecker(base.DocStringChecker):
     @staticmethod
     def _should_skip_arg(arg):
         """
-        @return: True if the argument given by arg is whitelisted, and does
+        @return: True if the argument given by arg is allowlisted, and does
                  not require a "@param" docstring.
         """
         return arg in ('self', 'cls', 'args', 'kwargs', 'dargs')
@@ -283,15 +283,15 @@ def batch_check_files(file_paths, base_opts):
 
 def should_check_file(file_path):
     """
-    Don't check blacklisted or non .py files.
+    Don't check skiplisted or non .py files.
 
     @param file_path: abs path of file to check.
-    @return: True if this file is a non-blacklisted python file.
+    @return: True if this file is a non-skiplisted python file.
     """
     file_path = os.path.abspath(file_path)
     if file_path.endswith('.py'):
         return all(not fnmatch.fnmatch(file_path, '*' + pattern)
-                   for pattern in BLACKLIST)
+                   for pattern in SKIPLIST)
     return False
 
 

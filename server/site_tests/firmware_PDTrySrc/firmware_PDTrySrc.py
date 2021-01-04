@@ -25,8 +25,8 @@ class firmware_PDTrySrc(FirmwareTest):
 
     version = 1
     CONNECT_ITERATIONS = 20
-    PD_DISCONNECT_TIME = 5
-    PD_CONNECT_DELAY = 10
+    PD_DISCONNECT_TIME = 1
+    PD_STABLE_DELAY = 3
     SNK = 0
     SRC = 1
     TRYSRC_OFF_THRESHOLD = 15.0
@@ -52,23 +52,24 @@ class firmware_PDTrySrc(FirmwareTest):
         # Try N disconnect/connects
         for attempt in xrange(self.CONNECT_ITERATIONS):
             try:
-                # Disconnect time from 1 to 2 seconds
-                disc_time = self.PD_DISCONNECT_TIME + random.random()
+                # Disconnect time from 1 to 1.5 seconds
+                disc_time = self.PD_DISCONNECT_TIME + random.random() / 2
                 logging.info('Disconnect time = %.2f seconds', disc_time)
                 # Set the TrySrc value on DUT
                 if trysrc is not None:
                     usbpd_dev.try_src(trysrc)
-                # Force disconnect/connect
-                pdtester_dev.cc_disconnect_connect(disc_time)
-                # Wait for connection to be reestablished
-                time.sleep(self.PD_DISCONNECT_TIME + self.PD_CONNECT_DELAY)
-                # Check power role and update connection stats
-                if pdtester_dev.is_snk():
-                    stats[self.SNK] += 1;
+                # Force disconnect/connect and get the connected state
+                state = pdtester_dev.get_connected_state_after_cc_reconnect(
+                        disc_time)
+                # Update connection stats according to the returned state
+                if pdtester_dev.is_snk(state):
+                    stats[self.SNK] += 1
                     logging.info('Power Role = SNK')
-                elif pdtester_dev.is_src():
-                    stats[self.SRC] += 1;
+                elif pdtester_dev.is_src(state):
+                    stats[self.SRC] += 1
                     logging.info('Power Role = SRC')
+                # Wait a bit before the next iteration, in case any PR_Swap
+                time.sleep(self.PD_STABLE_DELAY)
             except NotImplementedError:
                 raise error.TestFail('TrySRC disconnect requires PDTester')
         logging.info('SNK = %d: SRC = %d: Total = %d',

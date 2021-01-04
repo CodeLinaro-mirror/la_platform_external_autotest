@@ -21,6 +21,7 @@ class firmware_RecoveryButton(FirmwareTest):
     Both cases should lead to successful recovery boot.
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     def ensure_normal_boot(self):
         """Ensure normal mode boot this time.

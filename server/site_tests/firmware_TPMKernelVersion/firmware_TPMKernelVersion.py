@@ -13,6 +13,7 @@ class firmware_TPMKernelVersion(FirmwareTest):
     Automate 1.2.4 Check Kernel version in TPM is not corrupted.
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     def initialize(self, host, cmdline_args):
         """Initialize the test"""

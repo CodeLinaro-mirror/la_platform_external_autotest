@@ -2,9 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+
 import logging
 import time
 
+import common
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros.bluetooth import bluetooth_socket
 from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
@@ -12,7 +15,7 @@ from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
 DEVICE_ADDRESS = '01:02:03:04:05:06'
 ADDRESS_TYPE = 0
 
-class bluetooth_Sanity_DefaultStateTest(
+class bluetooth_Health_DefaultStateTest(
         bluetooth_adapter_tests.BluetoothAdapterTests):
     """
     This class implements the default state test

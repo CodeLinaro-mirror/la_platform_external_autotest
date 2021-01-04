@@ -117,27 +117,54 @@ class firmware_PDPowerSwap(FirmwareTest):
         while SNK-to-SRC power role request fails. Note that this is
         Chrome OS policy decision, not part of the PD spec.
 
+        When DUT doesn't provide power in suspend, set DUT power role
+        to sink, supend DUT and check if SNK-to-SRC power role request fails.
+
         """
         # Ensure DUT PD port is sourcing power.
         time.sleep(self.PD_CONNECT_DELAY)
-        if not self.dut_port.is_src():
-            if self._attempt_power_swap('rx') == False or not self.dut_port.is_src():
-                raise error.TestFail('Fail to set DUT power role to source.')
+        if self.faft_config.dut_can_source_power_in_suspend:
+            if not self.dut_port.is_src():
+                if self._attempt_power_swap('rx') == False or not self.dut_port.is_src():
+                    raise error.TestFail('Fail to set DUT power role to source.')
 
-        self.set_ap_off_power_mode('suspend')
+            self.set_ap_off_power_mode('suspend')
 
-        new_state = self.dut_port.get_pd_state()
-        if not self.dut_port.is_src(new_state):
-            raise error.TestFail('DUT power role changed to %s '
-                    'during S0-to-S3 transition!' % new_state)
+            new_state = self.dut_port.get_pd_state()
+            if not self.dut_port.is_src(new_state):
+                raise error.TestFail('DUT power role changed to %s '
+                        'during S0-to-S3 transition!' % new_state)
 
-        # If the DUT PD port supports DRP in S0, it should supports SRC-to-SNK
-        # power role swap in suspend mode. The other way around (SNK-to-SRC) in
-        # suspend mode should fail.
-        logging.info('Request a SRC-to-SNK power role swap to DUT PD port '
-                     'in suspend mode. Expect to succeed.')
-        if self._attempt_power_swap('rx') == False:
-            raise error.TestFail('SRC-to-SNK power role swap failed.')
+            # If the DUT PD port supports DRP in S0, it should supports SRC-to-SNK
+            # power role swap in suspend mode. The other way around (SNK-to-SRC) in
+            # suspend mode should fail.
+            logging.info('Request a SRC-to-SNK power role swap to DUT PD port '
+                         'in suspend mode. Expect to succeed.')
+            if self._attempt_power_swap('rx') == False:
+                raise error.TestFail('SRC-to-SNK power role swap failed.')
+
+            # If we define AC insertion as a wake source for this board, the
+            # SRC-to-SNK power role swap would wake up the DUT. In this case,
+            # we need to suspend the DUT again to proceed the test.
+            if self.wait_power_state(self.POWER_STATE_S0,
+                                     self.DEFAULT_PWR_RETRIES):
+                self.set_ap_off_power_mode('suspend')
+        else:
+            # If DUT can't source power in suspend we are going to test only if
+            # SNK-to-SRC transition fails, so make sure that port acts as sink
+            logging.info('DUT is not sourcing power in suspend - '
+                    'skip verification if SRC-to-SNK power swap works')
+            if not self.dut_port.is_snk():
+                if self._attempt_power_swap('rx') == False or not self.dut_port.is_snk():
+                    raise error.TestFail('Fail to set DUT power role to sink.')
+
+            self.set_ap_off_power_mode('suspend')
+
+            new_state = self.dut_port.get_pd_state()
+            if not self.dut_port.is_snk(new_state):
+                raise error.TestFail('DUT power role changed to %s '
+                        'during S0-to-S3 transition!' % new_state)
+
         logging.info('Request a SNK-to-SRC power role swap to DUT PD port '
                      'in suspend mode. Expect to fail.')
         self._test_power_swap_reject()
@@ -248,4 +275,3 @@ class firmware_PDPowerSwap(FirmwareTest):
             # Expect behavior now is that DUT will reject power swap
             self._test_power_swap_reject()
             logging.info('Power Swap request rejected by DUT as expected')
-

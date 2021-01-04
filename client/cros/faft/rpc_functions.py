@@ -7,10 +7,15 @@ These will be exposed via an xmlrpc server running on the DUT.
 
 @note: When adding categories, please also update server/cros/faft/rpc_proxy.pyi
 """
+
+from __future__ import print_function
+
+import binascii
 import httplib
 import logging
 import os
 import signal
+import six
 import sys
 import tempfile
 import traceback
@@ -79,6 +84,7 @@ class FaftXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         """
         logging.debug("%s: Serving FAFT functions", self.__class__.__name__)
         self._ready = True
+        self._os_if.start_file_logging()
 
     def __exit__(self, exception, value, traceback):
         """Exit the delegate context (when XmlRpcServer.run() finishes).
@@ -87,6 +93,7 @@ class FaftXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
         the wrong server when quitting one instance and starting another.
         """
         self._ready = False
+        self._os_if.stop_file_logging()
         logging.debug("%s: Done.", self.__class__.__name__)
 
     def quit(self):
@@ -136,7 +143,7 @@ class FaftXmlRpcDelegate(xmlrpc_server.XmlRpcDelegate):
                             traceback.format_exception_only(exc_class, exc))
                     exc = xmlrpclib.Fault(
                             fault_code, '%s. %s' % (message, exc_str.rstrip()))
-                raise exc, None, tb
+                six.reraise(exc, None, tb)
             finally:
                 del exc_info
                 del tb
@@ -614,11 +621,19 @@ class KernelServicer(object):
         @type os_if: os_interface.OSInterface
         """
         self._os_if = os_if
-        self._kernel_handler = kernel_handler.KernelHandler()
-        self._kernel_handler.init(
-                self._os_if,
-                dev_key_path='/usr/share/vboot/devkeys',
-                internal_disk=True)
+        self._real_kernel_handler = kernel_handler.KernelHandler(self._os_if)
+
+    @property
+    def _kernel_handler(self):
+        """Return the kernel handler, after initializing it if necessary
+
+        @rtype: kernel_handler.KernelHandler
+        """
+        if not self._real_kernel_handler.initialized:
+            self._real_kernel_handler.init(
+                    dev_key_path='/usr/share/vboot/devkeys',
+                    internal_disk=True)
+        return self._real_kernel_handler
 
     def corrupt_sig(self, section):
         """Corrupt the requested kernel section.
@@ -713,8 +728,17 @@ class RootfsServicer(object):
         @type os_if: os_interface.OSInterface
         """
         self._os_if = os_if
-        self._rootfs_handler = rootfs_handler.RootfsHandler()
-        self._rootfs_handler.init(self._os_if)
+        self._real_rootfs_handler = rootfs_handler.RootfsHandler(self._os_if)
+
+    @property
+    def _rootfs_handler(self):
+        """Return the rootfs handler, after initializing it if necessary
+
+        @rtype: rootfs_handler.RootfsHandler
+        """
+        if not self._real_rootfs_handler.initialized:
+            self._real_rootfs_handler.init()
+        return self._real_rootfs_handler
 
     def verify_rootfs(self, section):
         """Verifies the integrity of the root FS.
@@ -765,11 +789,7 @@ class SystemServicer(object):
         @param remove_log: Remove the log file after dump.
         @return: String of the log file content.
         """
-        with open(self._os_if.log_file) as f:
-            log = f.read()
-        if remove_log:
-            os.remove(self._os_if.log_file)
-        return log
+        return self._os_if.dump_log(remove_log=remove_log)
 
     def run_shell_command(self, command, block=True):
         """Run shell command.
@@ -1063,7 +1083,7 @@ class UpdaterServicer(object):
         """Return the hex string of the EC hash."""
         blob = self._updater.get_ec_hash()
         # Format it to a hex string
-        return ''.join('%02x' % ord(c) for c in blob)
+        return binascii.hexlify(blob)
 
     def resign_firmware(self, version):
         """Resign firmware with version.
@@ -1143,13 +1163,17 @@ class UpdaterServicer(object):
         """Sets up cbfstool work directory."""
         return self._updater.cbfs_setup_work_dir()
 
-    def cbfs_extract_chip(self, fw_name):
+    def cbfs_extract_chip(self,
+                          fw_name,
+                          extension='.bin',
+                          hash_extension='.hash'):
         """Runs cbfstool to extract chip firmware.
 
         @param fw_name: Name of chip firmware to extract.
         @return: Boolean success status.
         """
-        return self._updater.cbfs_extract_chip(fw_name)
+        return self._updater.cbfs_extract_chip(fw_name, extension,
+                                               hash_extension)
 
     def cbfs_extract_diagnostics(self, diag_name, local_filename):
         """Runs cbfstool to extract a diagnostics image.
@@ -1169,21 +1193,29 @@ class UpdaterServicer(object):
         """
         self._updater.cbfs_replace_diagnostics(diag_name, local_filename)
 
-    def cbfs_get_chip_hash(self, fw_name):
+    def cbfs_get_chip_hash(self, fw_name, hash_extension='.hash'):
         """Gets the chip firmware hash blob.
+
+        The hash data is returned as a list of stringified two-byte pieces:
+        \x12\x34...\xab\xcd\xef -> ['0x12', '0x34', ..., '0xab', '0xcd', '0xef']
 
         @param fw_name: Name of chip firmware whose hash blob to return.
         @return: Hex string of hash blob.
         """
-        return self._updater.cbfs_get_chip_hash(fw_name)
+        return self._updater.cbfs_get_chip_hash(fw_name, hash_extension)
 
-    def cbfs_replace_chip(self, fw_name):
+    def cbfs_replace_chip(self,
+                          fw_name,
+                          extension='.bin',
+                          hash_extension='.hash',
+                          regions=('a', 'b')):
         """Runs cbfstool to replace chip firmware.
 
         @param fw_name: Name of chip firmware to extract.
         @return: Boolean success status.
         """
-        return self._updater.cbfs_replace_chip(fw_name)
+        return self._updater.cbfs_replace_chip(fw_name, extension,
+                                               hash_extension, regions)
 
     def cbfs_sign_and_flash(self):
         """Runs cbfs signer and flash it.

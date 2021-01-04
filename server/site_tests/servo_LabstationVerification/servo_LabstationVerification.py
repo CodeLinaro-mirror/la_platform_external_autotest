@@ -13,9 +13,12 @@ import time
 from autotest_lib.client.common_lib import error
 from autotest_lib.server import test
 from autotest_lib.server import utils as server_utils
+from autotest_lib.server import site_utils
 from autotest_lib.server.hosts import servo_host as _servo_host
 from autotest_lib.server.hosts import servo_constants
 from autotest_lib.server.hosts import factory
+from autotest_lib.server.hosts import host_info
+
 
 class servo_LabstationVerification(test.test):
     """Wrapper test to run verifications on a labstation image.
@@ -60,7 +63,7 @@ class servo_LabstationVerification(test.test):
             if 'No control named' in e:
                 serial = servo_proxy.get('serialname')
             else:
-              raise e
+                raise e
         ctrl_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                  'serial_to_mac_map.json')
         with open(ctrl_path, 'r') as f:
@@ -275,16 +278,18 @@ class servo_LabstationVerification(test.test):
                                            'autoserv')
         return dut_ipv4
 
-    def _set_dut_stable_version(self, dut_host):
+    def _set_dut_stable_version(self, dut_host, stable_version=None):
         """Helper method to set stable_version in DUT host.
 
         @param dut_host: CrosHost object representing the DUT.
         """
-        logging.info('Setting stable_version to %s for DUT host.',
-                     self.cros_version)
-        host_info = dut_host.host_info_store.get()
-        host_info.stable_versions['cros'] = self.cros_version
-        dut_host.host_info_store.commit(host_info)
+        if not stable_version:
+            stable_version = self.cros_version
+        logging.info('Setting stable_version to %s for DUT %s.',
+                     stable_version, dut_host.hostname)
+        info = dut_host.host_info_store.get()
+        info.stable_versions['cros'] = stable_version
+        dut_host.host_info_store.commit(info)
 
     def _get_dut_info_from_config(self):
         """Get DUT info from json config file.
@@ -328,22 +333,28 @@ class servo_LabstationVerification(test.test):
             port = dut.get('servo_port')
             serial = dut.get('servo_serial')
             servo_args = {
-                servo_constants.SERVO_HOST_ATTR: self.labstation_host.hostname,
-                servo_constants.SERVO_PORT_ATTR: port,
-                servo_constants.SERVO_SERIAL_ATTR: serial,
-                servo_constants.SERVO_BOARD_ATTR: board,
-                'is_in_lab': False,
+                    servo_constants.SERVO_HOST_ATTR:
+                    self.labstation_host.hostname,
+                    servo_constants.SERVO_PORT_ATTR: port,
+                    servo_constants.SERVO_SERIAL_ATTR: serial,
+                    servo_constants.SERVO_BOARD_ATTR: board,
+                    servo_constants.ADDITIONAL_SERVOD_ARGS: 'DUAL_V4=1',
+                    'is_in_lab': False,
             }
 
             logging.info('Setting up servod for port %s', port)
-            servo_host, servo_state = _servo_host.create_servo_host(
-                None, servo_args)
+            # We need try_lab_servo option here, so servo firmware will get
+            # updated before run tests.
+            servo_host, _ = _servo_host.create_servo_host(None,
+                                                          servo_args,
+                                                          try_lab_servo=True)
             try:
                 validate_cmd = 'servodutil show -p %s' % port
                 servo_host.run_grep(validate_cmd,
                     stdout_err_regexp='No servod scratch entry found.')
             except error.AutoservRunError:
-                raise error.TestFail('Servod did not come up on labstation.')
+                raise error.TestFail('Servod of port %s did not come up on'
+                                     ' labstation.' % port)
 
             self.servo_hosts.append(servo_host)
 
@@ -361,15 +372,27 @@ class servo_LabstationVerification(test.test):
                              'static config or command-line. Will attempt '
                              'to infer through hardware address.')
                 dut_hostname = self.get_dut_on_servo_ip(servo_host)
-            logging.info('Running the DUT side on DUT %r', dut_hostname)
-            dut_host = factory.create_host(dut_hostname)
+            labels = []
+            if dut_info.get('board'):
+                labels.append('board:%s' % dut_info.get('board'))
+            if dut_info.get('model'):
+                labels.append('model:%s' % dut_info.get('model'))
+            info = host_info.HostInfo(labels=labels)
+            host_info_store = host_info.InMemoryHostInfoStore(info=info)
+            machine = {
+                    'hostname': dut_hostname,
+                    'host_info_store': host_info_store,
+                    'afe_host': site_utils.EmptyAFEHost()
+            }
+            dut_host = factory.create_host(machine)
             dut_host.set_servo_host(servo_host)
 
             # Copy labstation's stable_version to dut_host for later test
             # consume.
             # TODO(xianuowang@): remove this logic once we figured out how to
             # propagate DUT's stable_version to the test.
-            self._set_dut_stable_version(dut_host)
+            stable_version_from_config = dut_info.get('stable_version')
+            self._set_dut_stable_version(dut_host, stable_version_from_config)
             # Store |dut_host| in |machine_dict| so that parallel running can
             # find the host.
             self.machine_dict[dut_host.hostname] = dut_host
@@ -454,6 +477,8 @@ class servo_LabstationVerification(test.test):
         # debugging failures is cleaner given multiple setups.
 
     def cleanup(self):
-        """Clean up by stopping the servod instance again."""
-        for servo_host in self.servo_hosts:
-            servo_host.close()
+        """Clean up by calling close for dut host, which will also take care
+        of servo cleanup.
+        """
+        for _, dut in self.machine_dict.items():
+            dut.close()

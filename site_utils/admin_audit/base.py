@@ -23,6 +23,7 @@ class _BaseVerifier(object):
 
     def __init__(self, dut_host):
         self._dut_host = dut_host
+        self._result_dir = None
 
     def verify(self):
         """Main method to start the verifier"""
@@ -66,6 +67,15 @@ class _BaseVerifier(object):
         """Check if servo host is up and available by ssh"""
         return (self._dut_host._servo_host
             and self._dut_host._servo_host.is_up(timeout=20))
+
+    def set_result_dir(self, result_dir):
+        """Set result directory path."""
+        logging.debug('Set result_dir: %s', result_dir)
+        self._result_dir = result_dir
+
+    def get_result_dir(self):
+        """Provide result directory path."""
+        return self._result_dir
 
 
 class _BaseDUTVerifier(_BaseVerifier):

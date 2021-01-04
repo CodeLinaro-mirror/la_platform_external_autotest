@@ -8,7 +8,6 @@ AUTHOR = 'harpreet'
 TIME = 'SHORT'
 NAME = 'cellular_ChromeEndToEnd.ethernetPreferred'
 TEST_TYPE = 'Server'
-ATTRIBUTES = 'suite:cellular_endtoend'
 DEPENDENCIES = 'servo_state:WORKING'
 
 DOC = """

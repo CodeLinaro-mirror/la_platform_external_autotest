@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import logging
 import time
 
@@ -48,7 +50,7 @@ class firmware_Cr50Open(Cr50Test):
         #Make sure open doesn't work from the console.
         try:
             self.cr50.set_ccd_level('open')
-        except error.TestFail, e:
+        except error.TestFail as e:
             if not batt_pres:
                 raise error.TestFail('Unable to open cr50 from console with '
                                      'batt disconnected: %s' % str(e))
@@ -69,14 +71,14 @@ class firmware_Cr50Open(Cr50Test):
             cr50_utils.GSCTool(self.host, ['-a', '-o'])
             # Wait long enough for cr50 to open ccd and wipe the tpm.
             time.sleep(10)
-            if 'Open' not in self.cr50.get_ccd_info()['State']:
+            if self.cr50.OPEN != self.cr50.get_ccd_level():
                 raise error.TestFail('Unable to open cr50 from AP with batt '
                                      'disconnected')
             return
         #Make sure open only works from the AP when the device is in dev mode.
         try:
             self.ccd_open_from_ap()
-        except error.TestFail, e:
+        except error.TestFail as e:
             logging.info(e)
             # ccd open should work if the device is in dev mode or ccd open
             # isn't restricted. If open failed for some reason raise the error.

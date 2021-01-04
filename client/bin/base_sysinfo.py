@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 import abc
 import glob
 import logging
@@ -42,10 +43,18 @@ _DEFAULT_FILES_TO_LOG_PER_BOOT = [
     '/var/log/storage_info.txt',
 ] + list(constants.LOG_PSTORE_DIRS)
 _DEFAULT_FILES_TO_LOG_BEFORE_ITERATION = [
-    '/proc/schedstat', '/proc/meminfo', '/proc/slabinfo', '/proc/interrupts'
+    '/proc/diskstats',
+    '/proc/schedstat',
+    '/proc/meminfo',
+    '/proc/slabinfo',
+    '/proc/interrupts'
 ]
 _DEFAULT_FILES_TO_LOG_AFTER_ITERATION = [
-    '/proc/schedstat', '/proc/meminfo', '/proc/slabinfo', '/proc/interrupts'
+    '/proc/diskstats',
+    '/proc/schedstat',
+    '/proc/meminfo',
+    '/proc/slabinfo',
+    '/proc/interrupts'
 ]
 
 
@@ -375,9 +384,9 @@ class base_sysinfo(object):
                                               os.path.dirname(symlink_dest))
         try:
             os.symlink(symlink_src, symlink_dest)
-        except Exception, e:
-            raise Exception, '%s: whilst linking %s to %s' % (e, symlink_src,
-                                                              symlink_dest)
+        except Exception as e:
+            raise Exception('%s: whilst linking %s to %s' % (e, symlink_src,
+                                                             symlink_dest))
 
         # run all the standard logging commands
         _run_loggables_ignoring_errors(self.test_loggables, test_sysinfodir)
@@ -450,7 +459,7 @@ class base_sysinfo(object):
             out_messages.write(in_messages.read())
             in_messages.close()
             out_messages.close()
-        except Exception, e:
+        except Exception as e:
             logging.error("/var/log/messages collection failed with %s", e)
 
 
@@ -524,7 +533,7 @@ def get_journal_cursor():
         prefix = "-- cursor: "
         pos = cursor.find(prefix) + len(prefix)
         return cursor[pos:]
-    except Exception, e:
+    except Exception as e:
         logging.error("error running journalctl --show-cursor: %s", e)
 
 def get_system_log_cursor():
@@ -537,5 +546,5 @@ def get_system_log_cursor():
         prefix = "-- cursor: "
         pos = cursor.find(prefix) + len(prefix)
         return cursor[pos:]
-    except Exception, e:
+    except Exception as e:
         logging.error("error running croslog --show-cursor: %s", e)

@@ -8,7 +8,7 @@ AUTHOR = 'chromeos-bluetooth'
 NAME = 'bluetooth_PeerUpdate'
 PURPOSE = 'Update chameleond on Bluetooth peer device'
 CRITERIA = 'Bluetooth peer should be present'
-ATTRIBUTES = 'suite:bluetooth_e2e, suite:bluetooth_flaky, suite:bluetooth_mtbf'
+ATTRIBUTES = 'suite:bluetooth_e2e, suite:bluetooth_mtbf'
 TIME = 'SHORT'    # This test takes about 1 minutes while running locally
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'bluetooth'
@@ -27,7 +27,7 @@ Please follow the steps to update chameleond version in the lab.
 
 1) Test and update chameleond code
 - Deploy the change in chameleon in a local bt peer
-  and run bluetooth_AdapterQuickSanity against it.
+  and run bluetooth_AdapterQuickHealth against it.
 - Merge the changes
 
 2) After chameleond changes are merged
@@ -54,7 +54,7 @@ args_dict = utils.args_to_dict(args)
 btpeer_args = hosts.CrosHost.get_btpeer_arguments(args_dict)
 
 def run(machine):
-    host = hosts.create_host(machine, btpeer_args=btpeer_args)
-    job.run_test('bluetooth_PeerUpdate', host=host)
+    host = hosts.create_host(machine)
+    job.run_test('bluetooth_PeerUpdate', host=host, btpeer_args=btpeer_args)
 
 parallel_simple(run, machines)

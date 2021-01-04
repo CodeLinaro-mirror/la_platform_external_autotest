@@ -14,7 +14,9 @@
 
 import logging
 import os
+import subprocess
 
+from autotest_lib.client.bin import utils as client_utils
 from autotest_lib.server import utils
 from autotest_lib.server.cros.tradefed import tradefed_test
 
@@ -25,10 +27,10 @@ _CTS_TIMEOUT_SECONDS = 3600
 _PUBLIC_CTS = 'https://dl.google.com/dl/android/cts/'
 _PARTNER_CTS = 'gs://chromeos-partner-cts/'
 _CTS_URI = {
-    'arm': _PUBLIC_CTS + 'android-cts_instant-9.0_r12-linux_x86-arm.zip',
-    'x86': _PUBLIC_CTS + 'android-cts_instant-9.0_r12-linux_x86-x86.zip',
+        'arm': _PUBLIC_CTS + 'android-cts_instant-9.0_r14-linux_x86-arm.zip',
+        'x86': _PUBLIC_CTS + 'android-cts_instant-9.0_r14-linux_x86-x86.zip',
 }
-_CTS_MEDIA_URI = _PUBLIC_CTS + 'android-cts-media-1.4.zip'
+_CTS_MEDIA_URI = _PUBLIC_CTS + 'android-cts-media-1.5.zip'
 _CTS_MEDIA_LOCALPATH = '/tmp/android-cts-media'
 
 
@@ -58,6 +60,23 @@ class cheets_CTS_Instant(tradefed_test.TradefedTest):
         if not utils.is_in_container():
             logging.info('Running outside of lab, adding extra debug options.')
             cmd.append('--log-level-display=DEBUG')
+            # Apply this PATH change only for chroot environment
+            if not client_utils.is_moblab():
+                try:
+                    os.environ['JAVA_HOME'] = '/opt/icedtea-bin-3.4.0'
+                    os.environ['PATH'] = os.environ['JAVA_HOME']\
+                                       + '/bin:' + os.environ['PATH']
+                    logging.info(
+                            subprocess.check_output(['java', '-version'],
+                                                    stderr=subprocess.STDOUT))
+                    # TODO(jiyounha): remove once crbug.com/1105515 is resolved.
+                    logging.info(
+                            subprocess.check_output(['whereis', 'java'],
+                                                    stderr=subprocess.STDOUT))
+                except OSError:
+                    logging.error('Can\'t change current PATH directory')
+        # Suppress redundant output from tradefed.
+        cmd.append('--quiet-output=true')
         return cmd
 
     def _get_default_bundle_url(self, bundle):

@@ -57,9 +57,9 @@ class ContainerBucket(object):
             try:
                 base_image_ok = True
                 container = BaseImage(self.container_path, base_name).get()
-            except error.ContainerError as e:
+            except error.ContainerError:
                 base_image_ok = False
-                raise e
+                raise
             finally:
                 metrics.Counter(METRICS_PREFIX + '/base_image',
                                 field_spec=[ts_mon.BooleanField('corrupted')]

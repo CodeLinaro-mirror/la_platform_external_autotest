@@ -122,6 +122,9 @@ _CONTROLFILE_TEMPLATE = Template(
     {%- if servo_support_needed %}
             hard_reboot_on_failure=True,
     {%- endif %}
+    {%- if camera_facing %}
+            load_waivers=False,
+    {%- endif %}
             timeout={{timeout}})
 
     {% if sync_count and sync_count > 1 -%}
@@ -172,21 +175,17 @@ def get_tradefed_revision(line):
                  Android Compatibility Test Suite for Instant Apps 1.0 (4898911)
     @return Tradefed CTS revision. Example: 6.0_r6.
     """
-    m = re.search(r'Android Google Mobile Services \(GMS\) Test Suite (.*) \(',
-                  line)
-    if m:
-        return m.group(1)
+    tradefed_identifier_list = [
+            r'Android Google Mobile Services \(GMS\) Test Suite (.*) \(',
+            r'Android Compatibility Test Suite(?: for Instant Apps)? (.*) \(',
+            r'Android Vendor Test Suite (.*) \(',
+            r'Android Security Test Suite (.*) \('
+    ]
 
-    m = re.search(
-        r'Android Compatibility Test Suite(?: for Instant Apps)? (.*) \(', line)
-    if m:
-        return m.group(1)
-
-    m = re.search(
-        r'Android Vendor Test Suite (.*) \(', line)
-
-    if m:
-        return m.group(1)
+    for identifier in tradefed_identifier_list:
+        m = re.search(identifier, line)
+        if m:
+            return m.group(1)
 
     logging.warning('Could not identify revision in line "%s".', line)
     return None
@@ -489,8 +488,9 @@ def get_extra_args(modules, is_public):
     # In such a case one should split the bookmarks in a way that the modules
     # with conflicting preconditions end up in separate control files.
     def deduped(lst):
-       """Keep only the first occurrence of each element."""
-       return [e for i, e in enumerate(lst) if e not in lst[0:i]]
+        """Keep only the first occurrence of each element."""
+        return [e for i, e in enumerate(lst) if e not in lst[0:i]]
+
     if preconditions:
         # To properly escape the public preconditions we need to format the list
         # manually using join.
@@ -586,7 +586,11 @@ def _get_special_command_line(modules, _is_public):
     return cmd
 
 
-def _format_modules_cmd(is_public, abi_to_run, modules=None, retry=False):
+def _format_modules_cmd(is_public,
+                        abi_to_run,
+                        modules=None,
+                        retry=False,
+                        whole_module_set=None):
     """Returns list of command tokens for tradefed."""
     if retry:
         assert(CONFIG['TRADEFED_RETRY_COMMAND'] == 'cts' or
@@ -606,12 +610,18 @@ def _format_modules_cmd(is_public, abi_to_run, modules=None, retry=False):
         elif len(modules) == 1:
             cmd += ['--module', list(modules)[0]]
         else:
-            assert (CONFIG['TRADEFED_CTS_COMMAND'] != 'cts-instant'), \
-                   'cts-instant cannot include multiple modules'
-            # We run each module with its own --include-filter command/option.
-            # https://source.android.com/compatibility/cts/run
-            for module in sorted(modules):
-                cmd += ['--include-filter', module]
+            if whole_module_set is None:
+                assert (CONFIG['TRADEFED_CTS_COMMAND'] != 'cts-instant'), \
+                       'cts-instant cannot include multiple modules'
+                # We run each module with its own --include-filter option.
+                # https://source.android.com/compatibility/cts/run
+                for module in sorted(modules):
+                    cmd += ['--include-filter', module]
+            else:
+                # CTS-Instant does not support --include-filter due to
+                # its implementation detail. Instead, exclude the complement.
+                for module in whole_module_set - set(modules):
+                    cmd += ['--exclude-filter', module]
 
         # For runs create a logcat file for each individual failure.
         # Not needed on moblab, nobody is going to look at them.
@@ -640,15 +650,23 @@ def _format_modules_cmd(is_public, abi_to_run, modules=None, retry=False):
     return cmd
 
 
-def get_run_template(modules, is_public, retry=False, abi_to_run=None):
+def get_run_template(modules,
+                     is_public,
+                     retry=False,
+                     abi_to_run=None,
+                     whole_module_set=None):
     """Command to run the modules specified by a control file."""
     no_intersection = not modules.intersection(get_collect_modules(is_public))
     collect_present = (_COLLECT in modules or _PUBLIC_COLLECT in modules)
     all_present = _ALL in modules
     if no_intersection or (all_present and not collect_present):
-      return _format_modules_cmd(is_public, abi_to_run, modules, retry=retry)
+        return _format_modules_cmd(is_public,
+                                   abi_to_run,
+                                   modules,
+                                   retry=retry,
+                                   whole_module_set=whole_module_set)
     elif collect_present:
-      return _format_collect_cmd(is_public, abi_to_run, retry=retry)
+        return _format_collect_cmd(is_public, abi_to_run, retry=retry)
     return None
 
 def get_retry_template(modules, is_public):
@@ -750,8 +768,10 @@ def get_controlfile_content(combined,
                             uri,
                             suites=None,
                             is_public=False,
+                            is_latest=False,
                             led_provision=None,
-                            camera_facing=None):
+                            camera_facing=None,
+                            whole_module_set=None):
     """Returns the text inside of a control file.
 
     @param combined: name to use for this combination of modules.
@@ -770,7 +790,7 @@ def get_controlfile_content(combined,
     if not suites:
         suites = get_suites(modules, abi, is_public, camera_facing)
     attributes = ', '.join(suites)
-    uri = None if is_public else uri
+    uri = 'LATEST' if is_latest else (None if is_public else uri)
     target_module = None
     if (combined not in get_collect_modules(is_public) and combined != _ALL):
         target_module = combined
@@ -778,45 +798,43 @@ def get_controlfile_content(combined,
         if combined in config['SUBMODULES']:
             target_module = target
     return _CONTROLFILE_TEMPLATE.render(
-        year=CONFIG['COPYRIGHT_YEAR'],
-        name=name,
-        base_name=CONFIG['TEST_NAME'],
-        test_func_name=CONFIG['CONTROLFILE_TEST_FUNCTION_NAME'],
-        attributes=attributes,
-        dependencies=get_dependencies(
-            modules,
-            abi,
-            is_public,
-            led_provision,
-            camera_facing),
-        extra_artifacts=get_extra_artifacts(modules),
-        extra_artifacts_host=get_extra_artifacts_host(modules),
-        job_retries=get_job_retries(modules, is_public, suites),
-        max_result_size_kb=get_max_result_size_kb(modules, is_public),
-        revision=revision,
-        build=build,
-        abi=abi,
-        needs_push_media=needs_push_media(modules),
-        enable_default_apps=enable_default_apps(modules),
-        tag=tag,
-        uri=uri,
-        DOC=get_doc(modules, abi, is_public),
-        servo_support_needed = servo_support_needed(modules, is_public),
-        max_retries=get_max_retries(modules, abi, suites, is_public),
-        timeout=calculate_timeout(modules, suites),
-        run_template=get_run_template(modules, is_public,
-                                      abi_to_run=CONFIG
-                                      .get('REPRESENTATIVE_ABI',{})
-                                      .get(abi, None)),
-        retry_template=get_retry_template(modules, is_public),
-        target_module=target_module,
-        target_plan=None,
-        test_length=get_test_length(modules),
-        priority=get_test_priority(modules, is_public),
-        extra_args=get_extra_args(modules, is_public),
-        authkey=get_authkey(is_public),
-        sync_count=get_sync_count(modules, abi, is_public),
-        camera_facing=camera_facing)
+            year=CONFIG['COPYRIGHT_YEAR'],
+            name=name,
+            base_name=CONFIG['TEST_NAME'],
+            test_func_name=CONFIG['CONTROLFILE_TEST_FUNCTION_NAME'],
+            attributes=attributes,
+            dependencies=get_dependencies(modules, abi, is_public,
+                                          led_provision, camera_facing),
+            extra_artifacts=get_extra_artifacts(modules),
+            extra_artifacts_host=get_extra_artifacts_host(modules),
+            job_retries=get_job_retries(modules, is_public, suites),
+            max_result_size_kb=get_max_result_size_kb(modules, is_public),
+            revision=revision,
+            build=build,
+            abi=abi,
+            needs_push_media=needs_push_media(modules),
+            enable_default_apps=enable_default_apps(modules),
+            tag=tag,
+            uri=uri,
+            DOC=get_doc(modules, abi, is_public),
+            servo_support_needed=servo_support_needed(modules, is_public),
+            max_retries=get_max_retries(modules, abi, suites, is_public),
+            timeout=calculate_timeout(modules, suites),
+            run_template=get_run_template(modules,
+                                          is_public,
+                                          abi_to_run=CONFIG.get(
+                                                  'REPRESENTATIVE_ABI',
+                                                  {}).get(abi, None),
+                                          whole_module_set=whole_module_set),
+            retry_template=get_retry_template(modules, is_public),
+            target_module=target_module,
+            target_plan=None,
+            test_length=get_test_length(modules),
+            priority=get_test_priority(modules, is_public),
+            extra_args=get_extra_args(modules, is_public),
+            authkey=get_authkey(is_public),
+            sync_count=get_sync_count(modules, abi, is_public),
+            camera_facing=camera_facing)
 
 
 def get_tradefed_data(path, is_public, abi):
@@ -844,9 +862,10 @@ def get_tradefed_data(path, is_public, abi):
     while True:
         line = p.stdout.readline().strip()
         # Android Compatibility Test Suite 7.0 (3423912)
-        if (line.startswith('Android Compatibility Test Suite ') or
-            line.startswith('Android Google ') or
-            line.startswith('Android Vendor Test Suite')):
+        if (line.startswith('Android Compatibility Test Suite ')
+                    or line.startswith('Android Google ')
+                    or line.startswith('Android Vendor Test Suite')
+                    or line.startswith('Android Security Test Suite')):
             logging.info('Unpacking: %s.', line)
             build = get_tradefed_build(line)
             revision = get_tradefed_revision(line)
@@ -886,12 +905,12 @@ def get_tradefed_data(path, is_public, abi):
         else:
             logging.warning('Ignoring "%s"', line)
     if p.poll() is None:
-      # Kill the process if alive.
-      p.kill()
+        # Kill the process if alive.
+        p.kill()
     p.wait()
 
     if not modules:
-      raise Exception("no modules found.")
+        raise Exception("no modules found.")
     return list(modules), build, revision
 
 
@@ -921,7 +940,7 @@ def pushd(d):
 def unzip(filename, destination):
     """Unzips a zip file to the destination directory."""
     with pushd(destination):
-        # We are trusting Android to have a sane zip file for us.
+        # We are trusting Android to have a valid zip file for us.
         with zipfile.ZipFile(filename) as zf:
             zf.extractall()
 
@@ -1039,12 +1058,28 @@ def combine_modules_by_bookmark(modules):
     return combined
 
 
-def write_controlfile(name, modules, abi, revision, build, uri, suites,
-                      is_public):
+def write_controlfile(name,
+                      modules,
+                      abi,
+                      revision,
+                      build,
+                      uri,
+                      suites,
+                      is_public,
+                      is_latest=False,
+                      whole_module_set=None):
     """Write a single control file."""
     filename = get_controlfile_name(name, abi, revision, is_public)
-    content = get_controlfile_content(name, modules, abi, revision, build, uri,
-                                      suites, is_public)
+    content = get_controlfile_content(name,
+                                      modules,
+                                      abi,
+                                      revision,
+                                      build,
+                                      uri,
+                                      suites,
+                                      is_public,
+                                      is_latest,
+                                      whole_module_set=whole_module_set)
     with open(filename, 'w') as f:
         f.write(content)
 
@@ -1059,12 +1094,16 @@ def write_moblab_controlfiles(modules, abi, revision, build, uri, is_public):
     less relative overhead spinning up jobs than the lab.
     """
     for module in modules:
+        # No need to generate control files with extra suffix, since --module
+        # option will cover variants with optional parameters.
+        if "[" in module:
+            continue
         write_controlfile(module, set([module]), abi, revision, build, uri,
                           [CONFIG['MOBLAB_SUITE_NAME']], is_public)
 
 
 def write_regression_controlfiles(modules, abi, revision, build, uri,
-                                  is_public):
+                                  is_public, is_latest):
     """Write all control files for stainless/ToT regression lab coverage.
 
     Regression coverage on tot currently relies heavily on watching stainless
@@ -1076,7 +1115,7 @@ def write_regression_controlfiles(modules, abi, revision, build, uri,
     combined = combine_modules_by_common_word(set(modules))
     for key in combined:
         write_controlfile(key, combined[key], abi, revision, build, uri, None,
-                          is_public)
+                          is_public, is_latest)
 
 
 def write_qualification_controlfiles(modules, abi, revision, build, uri,
@@ -1094,18 +1133,29 @@ def write_qualification_controlfiles(modules, abi, revision, build, uri,
                           uri, CONFIG.get('QUAL_SUITE_NAMES'), is_public)
 
 
-def write_qualification_and_regression_controlfile(abi, revision, build, uri,
-                                                   is_public):
+def write_qualification_and_regression_controlfile(modules, abi, revision,
+                                                   build, uri, is_public):
     """Write a control file to run "all" tests for qualification and regression.
     """
     # For cts-instant, qualication control files are expected to cover
     # regressions as well. Hence the 'suite:arc-cts' is added.
     suites = ['suite:arc-cts', 'suite:arc-cts-qual']
-    write_controlfile('all', set([_ALL]), abi, revision, build, uri, suites,
-                      is_public)
+    module_set = set(modules)
+    combined = combine_modules_by_bookmark(module_set)
+    for key in combined:
+        write_controlfile('all.' + key,
+                          combined[key],
+                          abi,
+                          revision,
+                          build,
+                          uri,
+                          suites,
+                          is_public,
+                          whole_module_set=module_set)
 
 
-def write_collect_controlfiles(_modules, abi, revision, build, uri, is_public):
+def write_collect_controlfiles(_modules, abi, revision, build, uri, is_public,
+                               is_latest):
     """Write all control files for test collection used as reference to
 
     compute completeness (missing tests) on the CTS dashboard.
@@ -1117,11 +1167,11 @@ def write_collect_controlfiles(_modules, abi, revision, build, uri, is_public):
                + CONFIG.get('QUAL_SUITE_NAMES', [])
     for module in get_collect_modules(is_public):
         write_controlfile(module, set([module]), abi, revision, build, uri,
-                          suites, is_public)
+                          suites, is_public, is_latest)
 
 
-def write_extra_controlfiles(_modules, abi, revision, build, uri,
-                             is_public):
+def write_extra_controlfiles(_modules, abi, revision, build, uri, is_public,
+                             is_latest):
     """Write all extra control files as specified in config.
 
     This is used by moblab to load balance large modules like Deqp, as well as
@@ -1130,8 +1180,9 @@ def write_extra_controlfiles(_modules, abi, revision, build, uri,
     """
     for module, config in get_extra_modules_dict(is_public, abi).items():
         for submodule in config['SUBMODULES']:
-            write_controlfile(submodule, set([submodule]), abi, revision, build,
-                              uri, config['SUITES'], is_public)
+            write_controlfile(submodule, set([submodule]), abi, revision,
+                              build, uri, config['SUITES'], is_public,
+                              is_latest)
 
 
 def write_extra_camera_controlfiles(abi, revision, build, uri, is_public):
@@ -1141,14 +1192,21 @@ def write_extra_camera_controlfiles(abi, revision, build, uri, is_public):
         for led_provision in ['led', 'noled']:
             name = get_controlfile_name(module, abi,
                                         revision, is_public, led_provision, facing)
-            content = get_controlfile_content(module, set([module]), abi,
-                                              revision, build, uri,
-                                              None, is_public, led_provision, facing)
+            content = get_controlfile_content(module,
+                                              set([module]),
+                                              abi,
+                                              revision,
+                                              build,
+                                              uri,
+                                              None,
+                                              is_public,
+                                              led_provision=led_provision,
+                                              camera_facing=facing)
             with open(name, 'w') as f:
                 f.write(content)
 
 
-def run(uris, is_public, cache_dir):
+def run(uris, is_public, is_latest, cache_dir):
     """Downloads each bundle in |uris| and generates control files for each
 
     module as reported to us by tradefed.
@@ -1180,10 +1238,11 @@ def run(uris, is_public, cache_dir):
             else:
                 if CONFIG['CONTROLFILE_WRITE_SIMPLE_QUAL_AND_REGRESS']:
                     write_qualification_and_regression_controlfile(
-                        abi, revision, build, uri, is_public)
+                            modules, abi, revision, build, uri, is_public)
                 else:
-                    write_regression_controlfiles(modules, abi, revision, build,
-                                                  uri, is_public)
+                    write_regression_controlfiles(modules, abi, revision,
+                                                  build, uri, is_public,
+                                                  is_latest)
                     write_qualification_controlfiles(modules, abi, revision,
                                                      build, uri, is_public)
 
@@ -1192,11 +1251,11 @@ def run(uris, is_public, cache_dir):
                                                     is_public)
 
             write_collect_controlfiles(modules, abi, revision, build, uri,
-                                       is_public)
+                                       is_public, is_latest)
 
             if CONFIG['CONTROLFILE_WRITE_EXTRA']:
                 write_extra_controlfiles(None, abi, revision, build, uri,
-                                         is_public)
+                                         is_public, is_latest)
 
 
 def main(config):
@@ -1210,25 +1269,32 @@ def main(config):
         description='Create control files for a CTS bundle on GS.',
         formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument(
-        'uris',
-        nargs='+',
-        help='List of Google Storage URIs to CTS bundles. Example:\n'
-        'gs://chromeos-arc-images/cts/bundle/P/'
-        'android-cts-9.0_r9-linux_x86-x86.zip')
+            'uris',
+            nargs='+',
+            help='List of Google Storage URIs to CTS bundles. Example:\n'
+            'gs://chromeos-arc-images/cts/bundle/P/'
+            'android-cts-9.0_r9-linux_x86-x86.zip')
     parser.add_argument(
-        '--is_public',
-        dest='is_public',
-        default=False,
-        action='store_true',
-        help='Generate the public control files for CTS, default generate'
-        ' the internal control files')
+            '--is_public',
+            dest='is_public',
+            default=False,
+            action='store_true',
+            help='Generate the public control files for CTS, default generate'
+            ' the internal control files')
     parser.add_argument(
-        '--cache_dir',
-        dest='cache_dir',
-        default=None,
-        action='store',
-        help='Cache directory for downloaded bundle file. Uses the cached '
-             'bundle file if exists, or caches a downloaded file to this '
-             'directory if not.')
+            '--is_latest',
+            dest='is_latest',
+            default=False,
+            action='store_true',
+            help='Generate the control files for CTS from the latest CTS bundle'
+            ' stored in the internal storage')
+    parser.add_argument(
+            '--cache_dir',
+            dest='cache_dir',
+            default=None,
+            action='store',
+            help='Cache directory for downloaded bundle file. Uses the cached '
+            'bundle file if exists, or caches a downloaded file to this '
+            'directory if not.')
     args = parser.parse_args()
-    run(args.uris, args.is_public, args.cache_dir)
+    run(args.uris, args.is_public, args.is_latest, args.cache_dir)

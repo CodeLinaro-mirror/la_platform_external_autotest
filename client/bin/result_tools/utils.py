@@ -27,6 +27,9 @@ The content of the json file looks like:
 }
 """
 
+from __future__ import division
+from __future__ import print_function
+
 import argparse
 import copy
 import fnmatch
@@ -43,6 +46,7 @@ import dedupe_file_throttler
 import delete_file_throttler
 import result_info
 import shrink_file_throttler
+from six.moves import range
 import throttler_lib
 import utils_lib
 import zip_file_throttler

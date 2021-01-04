@@ -224,7 +224,8 @@ class audio_AudioAfterSuspend(audio_test.AudioTest):
                 recorder_id=recorder)
 
         self.ignore_frequencies = None
-        if source == chameleon_audio_ids.CrosIds.SPEAKER:
+        if (source == chameleon_audio_ids.CrosIds.SPEAKER
+                    or bind_to == chameleon_audio_ids.CrosIds.EXTERNAL_MIC):
             self.ignore_frequencies = [50, 60]
 
         self.errors = []

@@ -49,13 +49,14 @@ CONFIG['CTS_MAX_RETRIES'] = {}
 # Modules that run very long are encoded here.
 CONFIG['CTS_TIMEOUT_DEFAULT'] = 0.2
 CONFIG['CTS_TIMEOUT'] = {
-    'GtsExoPlayerTestCases': 1.5,
-    'GtsGmscoreHostTestCases': 1.0,
-    'GtsMediaTestCases': 4,
-    'GtsYouTubeTestCases': 1.0,
-    _ALL: 24,
-    _COLLECT: 0.5,
-    _PUBLIC_COLLECT: 0.5,
+        'GtsExoPlayerTestCases': 1.5,
+        'GtsGmscoreHostTestCases': 1.0,
+        'GtsMediaTestCases': 4,
+        'GtsNetworkWatchlistTestCases': 1.0,
+        'GtsYouTubeTestCases': 1.0,
+        _ALL: 24,
+        _COLLECT: 0.5,
+        _PUBLIC_COLLECT: 0.5,
 }
 
 # Any test that runs as part as blocking BVT needs to be stable and fast. For
@@ -67,7 +68,9 @@ CONFIG['QUAL_TIMEOUT'] = 24
 
 CONFIG['QUAL_BOOKMARKS'] = sorted([
     'A',  # A bookend to simplify partition algorithm.
-    'GtsCameraTestCases',  # b/144659061 requires it separated from GtsAssistant
+    'GtsExoPlayerTestCases',
+    'GtsMediaTestCases',
+    'GtsMediaTestCasesz',  # runs the biggest module in a single job.
     'zzzzz'  # A bookend to simplify algorithm.
 ])
 
@@ -110,6 +113,7 @@ CONFIG['PUBLIC_DEPENDENCIES'] = {}
 # partner moblabs.
 CONFIG['PUBLIC_MODULE_RETRY_COUNT'] = {
   _ALL: 2,
+  'GtsExoPlayerTestCases': 5,  # TODO(b/149376356, b/164230246)
   'GtsMediaTestCases': 5,  # TODO(b/140841434)
   'GtsYouTubeTestCases': 5,  # TODO(b/149376356)
 }
@@ -145,9 +149,9 @@ CONFIG['EXTRA_ARTIFACTS'] = {}
 CONFIG['PREREQUISITES'] = {
     'GtsGmscoreHostTestCases': ['bluetooth'],
 }
+CONFIG['USE_JDK9'] = True
 
 from generate_controlfiles_common import main
 
 if __name__ == '__main__':
     main(CONFIG)
-

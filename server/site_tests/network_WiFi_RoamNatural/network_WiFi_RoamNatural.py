@@ -48,6 +48,10 @@ class network_WiFi_RoamNatural(wifi_cell_test_base.WiFiCellTestBase):
         @failure_stats int list with a single int element: used to log assoc
         failure stats
         """
+        # Reset the attenuation here since it won't have been reset after
+        # previous iterations of this function.
+        self.context.attenuator.set_variable_attenuation(0)
+
         min_atten = self.context.attenuator.get_minimal_total_attenuation()
         ap_pair[0].ssid = None
         self.context.configure(ap_pair[0])
@@ -131,6 +135,16 @@ class network_WiFi_RoamNatural(wifi_cell_test_base.WiFiCellTestBase):
                                 assoc_failure_log.write(dc + '\n')
                                 failure_stats[0] += 1
 
+                    # Reset the attenuation here. In some groamer cells, the
+                    # attenuation for 5GHz channels is miscalibrated such that
+                    # the RSSI is lower than expected. If we bring the AP back
+                    # up while it's still maximally attenuated, it may not be
+                    # visible to the DUT (the test was written deliberately so
+                    # that it wouldn't happen even at full attenuation for
+                    # properly calibrated cells, but this is apparently not
+                    # always a good assumption).
+                    self.context.attenuator.set_variable_attenuation(0)
+
                     self.context.configure(ap_pair[r / 2],
                                            configure_pcap=(r == 2))
                     host = self.context.router if r == 0 else \
@@ -139,7 +153,7 @@ class network_WiFi_RoamNatural(wifi_cell_test_base.WiFiCellTestBase):
 
         skip_roam_log.close()
         assoc_failure_log.close()
-        self.context.client.shill.disconnect(self.SSID)
+        self.context.client.shill.disconnect(ssid)
         self.context.router.deconfig()
         self.context.pcap_host.deconfig()
 

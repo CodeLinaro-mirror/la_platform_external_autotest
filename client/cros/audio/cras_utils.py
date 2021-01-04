@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -209,7 +210,7 @@ def get_cras_control_interface(private=False):
     """
     try:
         import dbus
-    except ImportError, e:
+    except ImportError as e:
         logging.exception(
                 'Can not import dbus: %s. This method should only be '
                 'called on Cros device.', e)
@@ -469,6 +470,7 @@ def set_single_selected_output_node(node_type):
 
     @param node_type: A node type.
 
+    @returns: True if the output node type is found and set active.
     """
     nodes = get_cras_nodes()
     for node in nodes:
@@ -476,6 +478,8 @@ def set_single_selected_output_node(node_type):
             continue
         if node['Type'] == node_type:
             set_active_output_node(node['Id'])
+            return True
+    return False
 
 
 def set_single_selected_input_node(node_type):
@@ -486,6 +490,7 @@ def set_single_selected_input_node(node_type):
 
     @param node_type: A node type.
 
+    @returns: True if the input node type is found and set active.
     """
     nodes = get_cras_nodes()
     for node in nodes:
@@ -493,6 +498,8 @@ def set_single_selected_input_node(node_type):
             continue
         if node['Type'] == node_type:
             set_active_input_node(node['Id'])
+            return True
+    return False
 
 
 def set_selected_output_nodes(types):
@@ -623,7 +630,7 @@ def get_device_id_of(node_id):
 
     @raise: CrasUtilsError: if device id is invalid.
     """
-    device_id = str(long(node_id) >> 32)
+    device_id = str(int(node_id) >> 32)
     if device_id == "0":
         raise CrasUtilsError('Got invalid device_id: 0')
     return device_id

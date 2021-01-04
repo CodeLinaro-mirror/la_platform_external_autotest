@@ -21,6 +21,7 @@ class firmware_UpdateFirmwareVersion(FirmwareTest):
     original shellball.
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     def check_firmware_version(self, expected_ver):
         """Checks the firmware version."""

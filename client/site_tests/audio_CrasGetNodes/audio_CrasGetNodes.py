@@ -67,12 +67,6 @@ class audio_CrasGetNodes(test.test):
                     raise error.TestFail('Volume is as expected: %d, got: %d',
                                          target_volume, volume)
 
-            # Checks max supported channels value is correct.
-            max_supported_channels = (
-                    cras_utils.get_active_output_node_max_supported_channels())
-            if max_supported_channels != 8:
-                raise error.TestFail('Max supported channels is not 8, got: %d',
-                                     max_supported_channels)
         finally:
             utils.stop_service('cras', ignore_status=True)
             utils.unload_module(self.ALOOP_MODULE_NAME)

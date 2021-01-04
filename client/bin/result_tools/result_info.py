@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -459,7 +460,7 @@ class ResultInfo(dict):
     def get_file_names(self):
         """Get a set of all the files under the result.
         """
-        return set([f.keys()[0] for f in self.files])
+        return set([list(f.keys())[0] for f in self.files])
 
     def get_file(self, name):
         """Get a file with the given name under the result.

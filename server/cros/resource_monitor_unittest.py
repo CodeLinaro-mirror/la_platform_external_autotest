@@ -1,7 +1,10 @@
+# Lint as: python2, python3
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 import logging
@@ -11,10 +14,13 @@ import csv
 import common
 import os
 
-from itertools import imap
+
 from autotest_lib.server.cros import resource_monitor
 from autotest_lib.server.hosts import abstract_ssh
 from autotest_lib.server import utils
+import six
+from six.moves import map
+from six.moves import range
 
 class HostMock(abstract_ssh.AbstractSSHHost):
     """Mocks a host object."""
@@ -260,11 +266,11 @@ class ResourceMonitorResultTest(unittest.TestCase):
                 testdata_file)
         with open(testans_file, "rb") as testans:
             csvreader = csv.reader(testans)
-            columns = csvreader.next()
+            columns = next(csvreader)
             self.assertEqual(list(columns),
                     resource_monitor.ResourceMonitorParsedResult._columns)
             utils_over_time = []
-            for util_val in imap(
+            for util_val in map(
                     resource_monitor.
                             ResourceMonitorParsedResult.UtilValues._make,
                     csvreader):

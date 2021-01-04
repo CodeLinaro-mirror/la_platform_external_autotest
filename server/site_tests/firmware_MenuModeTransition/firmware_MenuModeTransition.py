@@ -122,8 +122,9 @@ class MenuNavigator(BaseMenuNavigator):
             0. Language
             1. Recovery using phone
             2. Recovery using external disk
-            3. Advanced options
-            4. Power off
+            3. Launch diagnostics
+            4. Advanced options
+            5. Power off
 
         Menu items in advanced options screen:
             0. Language
@@ -140,8 +141,8 @@ class MenuNavigator(BaseMenuNavigator):
         (*) is the default selection.
         """
         self.test.wait_for('firmware_screen')
-        # Since the default selection is unknown, navigate to item 4 first
-        for _ in range(0, 4):
+        # Since the default selection is unknown, navigate to item 5 first
+        for _ in range(0, 5):
             self.menu_down()
             self.test.wait_for('confirm_screen')
         # Navigate to "Advanced options"

@@ -19,7 +19,7 @@ class policy_AlternateErrorPages(
     version = 1
 
     POLICY_NAME = 'AlternateErrorPagesEnabled'
-    SUGGESTED = 'Try running Connectivity Diagnostics.'
+    SUGGESTED = 'If spelling is correct, try running Connectivity Diagnostics.'
     RESULTS_DICT = {
         True: SUGGESTED,
         False: 'Checking the connection',

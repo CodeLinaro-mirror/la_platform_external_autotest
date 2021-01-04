@@ -4,6 +4,8 @@
 
 """This is a server side audio test using the Chameleon board."""
 
+from __future__ import print_function
+
 import logging
 import os
 import tempfile
@@ -52,7 +54,7 @@ class audio_AudioQualityAfterSuspend(audio_test.AudioTest):
                 os.path.basename(self.test_playback_file))
         with tempfile.NamedTemporaryFile() as tmpfile:
             file_utils.download_file(self.test_playback_file, tmpfile.name)
-            os.chmod(tmpfile.name, 0444)
+            os.chmod(tmpfile.name, 0o0444)
             self.host.send_file(tmpfile.name, host_file)
             logging.debug('Copied the file on the DUT at %s', host_file)
 

@@ -1,26 +1,33 @@
+# Lint as: python2, python3
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 from distutils import version
-import cStringIO
-import HTMLParser
-import httplib
 import json
 import logging
 import multiprocessing
 import os
 import re
+import six
+from six.moves import urllib
+import six.moves.html_parser
+import six.moves.http_client
+import six.moves.urllib.parse
 import time
-import urllib2
-import urlparse
 
 from autotest_lib.client.bin import utils as bin_utils
 from autotest_lib.client.common_lib import android_utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import global_config
+from autotest_lib.client.common_lib import seven
 from autotest_lib.client.common_lib import utils
 from autotest_lib.client.common_lib.cros import retry
+
 # TODO(cmasone): redo this class using requests module; http://crosbug.com/30107
 
 try:
@@ -139,7 +146,7 @@ class DevServerFailToLocateException(Exception):
     pass
 
 
-class MarkupStripper(HTMLParser.HTMLParser):
+class MarkupStripper(six.moves.html_parser.HTMLParser):
     """HTML parser that strips HTML tags, coded characters like &amp;
 
     Works by, basically, not doing anything for any tags, and only recording
@@ -169,7 +176,7 @@ def _strip_http_message(message):
     """
     strip = MarkupStripper()
     try:
-        strip.feed(message.decode('utf_32'))
+        strip.feed(seven.ensure_text(message, 'utf_32'))
     except UnicodeDecodeError:
         strip.feed(message)
     return strip.get_data()
@@ -236,7 +243,7 @@ def _reverse_lookup_from_config(address):
     @param address: IP address string
     @returns: hostname string, or original input if not found
     """
-    for hostname, addr in _get_hostname_addr_map().iteritems():
+    for hostname, addr in six.iteritems(_get_hostname_addr_map()):
         if addr == address:
             return hostname
     return address
@@ -272,7 +279,7 @@ def remote_devserver_call(timeout_min=DEVSERVER_IS_STAGING_RETRY_MIN,
     def inner_decorator(method):
         label = method.__name__ if hasattr(method, '__name__') else None
         def metrics_wrapper(*args, **kwargs):
-            @retry.retry((urllib2.URLError, error.CmdError,
+            @retry.retry((urllib.error.URLError, error.CmdError,
                           DevServerOverloadException),
                          timeout_min=timeout_min,
                          exception_to_raise=exception_to_raise,
@@ -281,7 +288,7 @@ def remote_devserver_call(timeout_min=DEVSERVER_IS_STAGING_RETRY_MIN,
                 """This wrapper actually catches the HTTPError."""
                 try:
                     return method(*args, **kwargs)
-                except urllib2.HTTPError as e:
+                except urllib.error.HTTPError as e:
                     error_markup = e.read()
                     raise DevServerException(_strip_http_message(error_markup))
 
@@ -317,7 +324,7 @@ def get_hostname(url):
     @param url: a Url string
     @return: a hostname string
     """
-    return urlparse.urlparse(url).hostname
+    return six.moves.urllib.parse.urlparse(url).hostname
 
 
 def get_resolved_hostname(url):
@@ -399,7 +406,7 @@ class DevServer(object):
 
         @return A devserver url, e.g., http://127.0.0.10:8080
         """
-        res = urlparse.urlparse(url)
+        res = six.moves.urllib.parse.urlparse(url)
         if res.netloc:
             return res.scheme + '://' + res.netloc
 
@@ -438,7 +445,7 @@ class DevServer(object):
             return cls.run_call(call, timeout=timeout_min*60)
 
         try:
-            return json.load(cStringIO.StringIO(get_load(devserver=devserver)))
+            return json.load(six.StringIO(get_load(devserver=devserver)))
         except Exception as e:
             logging.error('Devserver call failed: "%s", timeout: %s seconds,'
                           ' Error: %s', call, timeout_min * 60, e)
@@ -557,8 +564,10 @@ class DevServer(object):
         archive_url_args = _gs_or_local_archive_url_args(
                 kwargs.pop('archive_url', None))
         kwargs.update(archive_url_args)
-
-        argstr = '&'.join(map(lambda x: "%s=%s" % x, kwargs.iteritems()))
+        if 'is_async' in kwargs:
+            f = kwargs.pop('is_async')
+            kwargs['async'] = f
+        argstr = '&'.join(["%s=%s" % x for x in six.iteritems(kwargs)])
         return "%(host)s/%(method)s?%(argstr)s" % dict(
                 host=host, method=method, argstr=argstr)
 
@@ -609,10 +618,10 @@ class DevServer(object):
             return utils.urlopen_socket_timeout(
                     call, timeout=timeout).read()
         elif readline:
-            response = urllib2.urlopen(call)
+            response = urllib.request.urlopen(call)
             return [line.rstrip() for line in response]
         else:
-            return urllib2.urlopen(call).read()
+            return urllib.request.urlopen(call).read()
 
 
     @staticmethod
@@ -679,7 +688,7 @@ class DevServer(object):
 
         @param build: The build (e.g. x86-mario-release/R18-1586.0.0-a1-b1514).
         @param devservers: The devserver list to be chosen out a healthy one.
-        @param ban_list: The blacklist of devservers we don't want to choose.
+        @param ban_list: The ban_list of devservers we don't want to choose.
                 Default is None.
 
         @return: A DevServer object of a healthy devserver. Return None if no
@@ -759,7 +768,7 @@ class DevServer(object):
         @param hostname: The hostname of dut that requests a devserver. It's
                          used to make sure a devserver in the same subnet is
                          preferred.
-        @param ban_list: The blacklist of devservers shouldn't be chosen.
+        @param ban_list: The ban_list of devservers shouldn't be chosen.
 
         @raise DevServerException: If no devserver is available.
         """
@@ -853,8 +862,8 @@ class CrashServer(DevServer):
             if request.status_code == requests.codes.OK:
                 return request.text
 
-        error_fd = cStringIO.StringIO(request.text)
-        raise urllib2.HTTPError(
+        error_fd = six.StringIO(request.text)
+        raise urllib.error.HTTPError(
                 call, request.status_code, request.text, request.headers,
                 error_fd)
 
@@ -1060,10 +1069,10 @@ class ImageServerBase(DevServer):
                 result = self.run_call(call)
                 logging.debug('whether artifact is staged: %r', result)
                 return result == 'True'
-            except urllib2.HTTPError as e:
+            except urllib.error.HTTPError as e:
                 error_markup = e.read()
                 raise DevServerException(_strip_http_message(error_markup))
-            except urllib2.URLError as e:
+            except urllib.error.URLError as e:
                 # Could be connection issue, retry it.
                 # For example: <urlopen error [Errno 111] Connection refused>
                 logging.error('URLError happens in is_stage: %r', e)
@@ -1099,7 +1108,7 @@ class ImageServerBase(DevServer):
         @raise DevServerException upon any return code that's expected_response.
 
         """
-        call = self.build_call(call_name, async=True, **kwargs)
+        call = self.build_call(call_name, is_async=True, **kwargs)
         try:
             response = self.run_call(call)
             logging.debug('response for RPC: %r', response)
@@ -1108,7 +1117,7 @@ class ImageServerBase(DevServer):
                               'will retry in 30 seconds')
                 time.sleep(30)
                 raise DevServerOverloadException()
-        except httplib.BadStatusLine as e:
+        except six.moves.http_client.BadStatusLine as e:
             logging.error(e)
             raise DevServerException('Received Bad Status line, Devserver %s '
                                      'might have gone down while handling '
@@ -1320,11 +1329,11 @@ class ImageServerBase(DevServer):
         else:
             build_path = build
             kwargs['build'] = build
-        call = self.build_call('locate_file', async=False, **kwargs)
+        call = self.build_call('locate_file', is_async=False, **kwargs)
         try:
             file_path = self.run_call(call)
             return os.path.join(self.url(), 'static', build_path, file_path)
-        except httplib.BadStatusLine as e:
+        except six.moves.http_client.BadStatusLine as e:
             logging.error(e)
             raise DevServerException('Received Bad Status line, Devserver %s '
                                      'might have gone down while handling '
@@ -1382,7 +1391,7 @@ class ImageServerBase(DevServer):
         build = self.translate(build)
         call = self.build_call('list_suite_controls', build=build,
                                suite_name=suite_name)
-        return json.load(cStringIO.StringIO(self.run_call(call)))
+        return json.load(six.StringIO(self.run_call(call)))
 
 
 class ImageServer(ImageServerBase):
@@ -1542,7 +1551,7 @@ class ImageServer(ImageServerBase):
         call = self.build_call('setup_telemetry', archive_url=archive_url)
         try:
             response = self.run_call(call)
-        except httplib.BadStatusLine as e:
+        except six.moves.http_client.BadStatusLine as e:
             logging.error(e)
             raise DevServerException('Received Bad Status line, Devserver %s '
                                      'might have gone down while handling '
@@ -2080,7 +2089,7 @@ def resolve(build, hostname=None, ban_list=None):
                   Launch Control build: git_mnc_release/shamu-eng
     @param hostname: Hostname of a devserver for, default is None, which means
             devserver is not restricted by the network location of the host.
-    @param ban_list: The blacklist of devservers shouldn't be chosen.
+    @param ban_list: The ban_list of devservers shouldn't be chosen.
 
     @return: A DevServer instance that can be used to stage given build for the
              given host.

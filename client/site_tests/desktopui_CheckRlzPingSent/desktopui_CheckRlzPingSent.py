@@ -140,7 +140,12 @@ class desktopui_CheckRlzPingSent(test.test):
 
         """
         # Browser arg to make DUT send rlz ping after a short delay.
-        rlz_flag = '--rlz-ping-delay=%d' % ping_timeout
+        browser_args = ['--rlz-ping-delay=%d' % ping_timeout]
+
+        # TODO(crbug/1103298): keyboard input doesn't work in guest mode
+        # without disabling this flag. Remove when bug is fixed.
+        if pre_login == 'lock':
+            browser_args.append('--disable-features=ImeInputLogicFst')
 
         # If we are testing the ping is sent in guest mode (pre_login='lock'),
         # we need to first do a real login and wait for the DUT to become
@@ -151,15 +156,15 @@ class desktopui_CheckRlzPingSent(test.test):
             logging.debug("Logging in before main RLZ test with username "
                           "flag: %s", pre_login_username)
             with chrome.Chrome(logged_in=True, username=pre_login_username,
-                               extra_browser_args=rlz_flag):
+                               extra_browser_args=browser_args):
                 if pre_login is 'lock':
                     logging.debug("Waiting for device to be 'locked' for RLZ")
                     self._wait_for_rlz_lock()
 
         logging.debug("Starting RLZ check with username flag: %s", username)
         with chrome.Chrome(logged_in=pre_login is not 'lock',
-                           extra_browser_args=rlz_flag,
-                           username=username, dont_override_profile=True) as cr:
+                           extra_browser_args=browser_args, username=username,
+                           dont_override_profile=True) as cr:
             self._check_url_for_rlz(cr)
             self._verify_rlz_data(expect_caf_ping=expect_caf_ping,
                                   guest=pre_login is 'lock')

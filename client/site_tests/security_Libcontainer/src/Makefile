@@ -4,7 +4,7 @@
 
 PKG_CONFIG ?= pkg-config
 BASE_VER = $(shell cat $(SYSROOT)/usr/share/libchrome/BASE_VER)
-DEP_LIBS = libchrome-$(BASE_VER) libcontainer libminijail
+DEP_LIBS = libchrome libcontainer libminijail
 CXXFLAGS += $(shell $(PKG_CONFIG) --cflags $(DEP_LIBS))
 CXXFLAGS += -std=gnu++14 -Werror -Wall
 LDFLAGS += $(shell $(PKG_CONFIG) --libs $(DEP_LIBS))

@@ -103,11 +103,18 @@ class platform_StageAndRecover(test.test):
     def verify_recovery_log(self):
         """ Mount USB partition to servo and verify the recovery log. """
         recovery_info = ''
-
+        self.host.servo.set('usb_mux_oe3', 'off')
+        time.sleep(self._SET_DELAY)
         self.host.servo.set('usb_mux_sel1', 'servo_sees_usbkey')
         time.sleep(self._SET_DELAY)
-        self.host.servo.system('mount -r %s %s'
-                               % (self._USB_PARTITION, self._MOUNT_PATH))
+        try:
+            self.host.servo.system('mount -r %s %s'
+                                   % (self._USB_PARTITION, self._MOUNT_PATH))
+        except error.AutoservRunError:
+            servo_disk = self.host.servo.system_output('fdisk -l', ignore_status=True)
+            logging.info('Servo disk info : %s', servo_disk)
+            raise error.TestError('Issue with servo USB mount path %s'
+                                  % (self._USB_PARTITION))
         recovery_info = self.host.servo.system_output('cat %s%s'
                 % (self._MOUNT_PATH, self._RECOVERY_LOG), ignore_status=True)
         if recovery_info:
@@ -144,10 +151,11 @@ class platform_StageAndRecover(test.test):
             # Install the test image back on DUT and reboot
             if self.wait_for_dut_ping_after('TEST_IMAGE RECOVERY BOOT FROM USB',
                                             self._TEST_IMAGE_BOOT_DELAY):
-                self.host.run('chromeos-install --yes', ignore_status=True,
+                if self.host.wait_up(timeout=self._TEST_IMAGE_BOOT_DELAY):
+                    self.host.run('chromeos-install --yes', ignore_status=True,
                               timeout=self._INSTALL_DELAY_TIMEOUT)
                 self.host.reboot()
-        except error.AutotestError:
+        except error.AutoservRunError:
             pass
 
         if self.error_messages:

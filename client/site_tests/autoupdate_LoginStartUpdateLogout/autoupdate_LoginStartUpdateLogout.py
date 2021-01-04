@@ -49,3 +49,7 @@ class autoupdate_LoginStartUpdateLogout(update_engine_test.UpdateEngineTest):
                 if not self._update_continued_where_it_left_off(completed):
                     raise error.TestFail('The update did not continue where '
                                          'it left off after interruption.')
+
+        # Log in and out with a new user during the update.
+        with chrome.Chrome(logged_in=True, dont_override_profile=False):
+            pass

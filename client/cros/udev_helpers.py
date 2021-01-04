@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -28,8 +29,8 @@ class UdevadmInfo():
                                            shell=True)
 
         for line in rawprops.splitlines():
-            upper_key, value = line.split('=', 1)
-            props[upper_key.lower()] = value.strip('"')
+            upper_key, value = line.split(b'=', 1)
+            props[upper_key.lower()] = value.strip(b'"')
 
         return props
 

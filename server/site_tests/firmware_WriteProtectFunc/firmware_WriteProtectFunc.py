@@ -59,7 +59,7 @@ class firmware_WriteProtectFunc(FirmwareTest):
                 self.set_hardware_write_protect(current_hw_wp)
             # Recover HW WP status.
             if hasattr(self, '_original_hw_wp'):
-              self.set_hardware_write_protect(self._original_hw_wp)
+                self.set_hardware_write_protect(self._original_hw_wp)
         except Exception as e:
             logging.error('Caught exception: %s', str(e))
 
@@ -77,8 +77,11 @@ class firmware_WriteProtectFunc(FirmwareTest):
         """
         assert target in (BIOS, EC)
         if target == BIOS:
-            self.set_hardware_write_protect(enable)
+            # Unlock registers to alter the region/range
+            self.set_hardware_write_protect(False)
             self.faft_client.bios.set_write_protect_region('WP_RO', enable)
+            if enable:
+                self.set_hardware_write_protect(True)
         elif target == EC:
             self.switcher.mode_aware_reboot('custom',
                     lambda:self.set_ec_write_protect_and_reboot(enable))
@@ -138,6 +141,13 @@ class firmware_WriteProtectFunc(FirmwareTest):
         # Enable WP
         for target in self._targets:
             self._set_write_protect(target, True)
+
+        # Check WP is properly enabled at the start
+        for target in self._targets:
+            sw_wp_dict = self._rpcs[target].get_write_protect_status()
+            if not sw_wp_dict['enabled']:
+                raise error.TestFail('Failed to enable %s SW WP at '
+                                     'test start' % target.upper())
 
         reboots = (('shutdown cmd', lambda:self.run_shutdown_process(
                                         lambda:self.run_shutdown_cmd())),

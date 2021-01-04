@@ -1,5 +1,10 @@
+# Lint as: python2, python3
 # pylint: disable-msg=C0111
 # Copyright 2008 Google Inc. Released under the GPL v2
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import warnings
 with warnings.catch_warnings():
@@ -10,16 +15,18 @@ with warnings.catch_warnings():
 import logging
 import textwrap
 import re
+import six
 
-from autotest_lib.client.common_lib import enum
+from autotest_lib.client.common_lib import autotest_enum
 from autotest_lib.client.common_lib import global_config
 from autotest_lib.client.common_lib import priorities
 
 REQUIRED_VARS = set(['author', 'doc', 'name', 'time', 'test_type'])
 OBSOLETE_VARS = set(['experimental'])
 
-CONTROL_TYPE = enum.Enum('Server', 'Client', start_value=1)
-CONTROL_TYPE_NAMES =  enum.Enum(*CONTROL_TYPE.names, string_values=True)
+CONTROL_TYPE = autotest_enum.AutotestEnum('Server', 'Client', start_value=1)
+CONTROL_TYPE_NAMES = autotest_enum.AutotestEnum(*CONTROL_TYPE.names,
+                                                string_values=True)
 
 _SUITE_ATTRIBUTE_PREFIX = 'suite:'
 
@@ -50,7 +57,7 @@ def _validate_control_file_fields(control_file_path, control_file_vars,
                    '%s.') % (control_file_path, ', '.join(diff))
         if raise_warnings:
             raise ControlVariableException(warning)
-        print textwrap.wrap(warning, 80)
+        print(textwrap.wrap(warning, 80))
 
     obsolete = OBSOLETE_VARS & set(control_file_vars)
     if obsolete:
@@ -59,14 +66,15 @@ def _validate_control_file_fields(control_file_path, control_file_vars,
                    '%s.') % (control_file_path, ', '.join(obsolete))
         if raise_warnings:
             raise ControlVariableException(warning)
-        print textwrap.wrap(warning, 80)
+        print(textwrap.wrap(warning, 80))
 
 
 class ControlData(object):
     # Available TIME settings in control file, the list must be in lower case
     # and in ascending order, test running faster comes first.
     TEST_TIME_LIST = ['fast', 'short', 'medium', 'long', 'lengthy']
-    TEST_TIME = enum.Enum(*TEST_TIME_LIST, string_values=False)
+    TEST_TIME = autotest_enum.AutotestEnum(*TEST_TIME_LIST,
+                                           string_values=False)
 
     @staticmethod
     def get_test_time_index(time):
@@ -107,13 +115,13 @@ class ControlData(object):
 
         _validate_control_file_fields(self.path, vars, raise_warnings)
 
-        for key, val in vars.iteritems():
+        for key, val in six.iteritems(vars):
             try:
                 self.set_attr(key, val, raise_warnings)
-            except Exception, e:
+            except Exception as e:
                 if raise_warnings:
                     raise
-                print 'WARNING: %s; skipping' % e
+                print('WARNING: %s; skipping' % e)
 
         self._patch_up_suites_from_attributes()
 
@@ -316,7 +324,7 @@ class ControlData(object):
 
 def _extract_const(expr):
     assert(expr.__class__ == compiler.ast.Const)
-    assert(expr.value.__class__ in (str, int, float, unicode))
+    assert(expr.value.__class__ in (str, int, float, six.text_type))
     return str(expr.value).strip()
 
 
@@ -401,7 +409,7 @@ def parse_control_string(control, raise_warnings=False, path=''):
 def parse_control(path, raise_warnings=False):
     try:
         mod = compiler.parseFile(path)
-    except SyntaxError, e:
+    except SyntaxError as e:
         raise ControlVariableException("Error parsing %s because %s" %
                                        (path, e))
     return finish_parse(mod, path, raise_warnings)

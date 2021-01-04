@@ -16,14 +16,12 @@ EXPECTED_TEST_RESULTS = {'^SERVER_JOB$':                 ['GOOD'],
                          # This is related to dummy_Fail/control.dependency.
                          'dummy_Fail.dependency$':       ['TEST_NA'],
                          'login_LoginSuccess.*':         ['GOOD'],
-                         'provision_AutoUpdate.double':  ['GOOD'],
                          'dummy_Pass.*':                 ['GOOD'],
                          'dummy_Fail.Fail$':             ['FAIL'],
                          'dummy_Fail.Error$':            ['ERROR'],
                          'dummy_Fail.Warn$':             ['WARN'],
                          'dummy_Fail.NAError$':          ['TEST_NA'],
                          'dummy_Fail.Crash$':            ['GOOD'],
-                         'autotest_SyncCount$':          ['GOOD'],
                          }
 
 EXPECTED_TEST_RESULTS_DUMMY = {'^SERVER_JOB$':       ['GOOD'],

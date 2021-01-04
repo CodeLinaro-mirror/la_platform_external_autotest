@@ -17,6 +17,7 @@ class firmware_CorruptBothFwBodyAB(FirmwareTest):
     Chrome OS test image (built by "build_image --test").
     """
     version = 1
+    NEEDS_SERVO_USB = True
 
     def initialize(self, host, cmdline_args, dev_mode=False):
         """Initialize the test"""

@@ -7,6 +7,7 @@ import xmlrpclib
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.server.cros.faft.firmware_test import FirmwareTest
+from autotest_lib.server.cros.power import utils as PowerUtils
 
 
 class firmware_FWupdateThenSleep(FirmwareTest):
@@ -35,7 +36,10 @@ class firmware_FWupdateThenSleep(FirmwareTest):
 
             if self.servo.supports_built_in_pd_control():
                 self.have_power_control = True
-                self.setup_pdtester(False, True, False, min_batt_level=25)
+                PowerUtils.put_host_battery_in_range(self._client,
+                                                     min_level=25,
+                                                     max_level=100,
+                                                     timeout=600)
             elif ac_online:
                 raise error.TestNAError(
                     "For this version of the test, the DUT power supply must"

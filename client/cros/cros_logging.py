@@ -1,14 +1,21 @@
+# Lint as: python2, python3
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import abc, logging, os, re, time
+from six.moves import range
 import subprocess
 
 import common
+
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
-from constants import CLEANUP_LOGS_PAUSED_FILE
+from autotest_lib.client.cros.constants import CLEANUP_LOGS_PAUSED_FILE
 
 
 def strip_timestamp(msg):
@@ -156,7 +163,7 @@ class AbstractLogReader(object):
         if not type(patterns) in (list, tuple):
             patterns = [patterns]
 
-        for retry in xrange(retries + 1):
+        for retry in range(retries + 1):
             for pattern in patterns:
                 regexp_compiled = re.compile(pattern)
                 last_match = None
@@ -248,7 +255,7 @@ class LogReader(AbstractLogReader):
                     continue
                 peek = yield line
                 if peek:
-                  buf = [f.next() for _ in xrange(peek)]
+                  buf = [next(f) for _ in range(peek)]
                   yield buf[-1]
                   while buf:
                     yield buf.pop(0)

@@ -106,7 +106,7 @@ but the indication about which fields are mandatory still holds.
 
 ### Running tests in suites
 
-Make sure that the suite name is listed in `site_utils/attribute_whitelist.txt`,
+Make sure that the suite name is listed in `site_utils/attribute_allowlist.txt`,
 then add the appropriate attribute to the ATTRIBUTES field in tests that make
 up the test suite.  For instance:
 

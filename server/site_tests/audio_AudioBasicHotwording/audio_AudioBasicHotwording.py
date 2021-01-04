@@ -44,7 +44,7 @@ class audio_AudioBasicHotwording(audio_test.AudioTest):
                     'No hotwording device for the DUT.'
                     ' Confirm swarming bot dimension and control file'
                     ' dependency for hot-wording is matching.'
-                    ' For new boards, please update the BORADS_WITH_HOTWORDING.'
+                    ' For new boards, please update the BOARDS_WITH_HOTWORDING.'
             )
 
         hotword_file = audio_test_data.HOTWORD_TEST_FILE

@@ -11,6 +11,10 @@ values on a Chrome OS compatible device.
 See help(Gpio) for more information.
 '''
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import os, shutil, sys, tempfile
 
 
@@ -112,10 +116,10 @@ def main():
     gpio = Gpio()
     try:
         gpio.setup()
-        print ("developer switch current status: %s" %
-               gpio.read(gpio.DEVELOPER_SWITCH_CURRENT))
-    except Exception, e:
-        print "GPIO failed. %s" % e
+        print("developer switch current status: %s" %
+              gpio.read(gpio.DEVELOPER_SWITCH_CURRENT))
+    except Exception as e:
+        print("GPIO failed. %s" % e)
         sys.exit(1)
 
 if __name__ == '__main__':

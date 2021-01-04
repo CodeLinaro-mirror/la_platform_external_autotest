@@ -1,21 +1,26 @@
+# Lint as: python2, python3
 # Copyright 2020 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """A class provides most of the test logic for Bluetooth Better Together"""
 
+from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
 import logging
 import base64
 import json
 
-from autotest_lib.server.cros.bluetooth.bluetooth_adapter_quick_tests import \
-  BluetoothAdapterQuickTests
-from autotest_lib.server.cros.bluetooth.bluetooth_adapter_pairing_tests import \
-  BluetoothAdapterPairingTests
-from autotest_lib.server.cros.bluetooth.bluetooth_adapter_tests import \
-  test_retry_and_log
+import common
+from autotest_lib.server.cros.bluetooth.bluetooth_adapter_quick_tests import (
+        BluetoothAdapterQuickTests)
+from autotest_lib.server.cros.bluetooth.bluetooth_adapter_pairing_tests import (
+        BluetoothAdapterPairingTests)
+from autotest_lib.server.cros.bluetooth.bluetooth_adapter_tests import (
+        test_retry_and_log)
+from six.moves import range
 
 class BluetoothAdapterBetterTogether(BluetoothAdapterQuickTests,
                                         BluetoothAdapterPairingTests):
@@ -199,6 +204,9 @@ class BluetoothAdapterBetterTogether(BluetoothAdapterQuickTests,
        messages exchange for authorizing the peer device before unlocking
        the Chromebook.
     """
+    if rx_object_path is None or tx_object_path is None:
+        logging.error('Invalid object path')
+        return False
 
     self.test_message_exchange(
         rx_object_path,

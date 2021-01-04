@@ -1,19 +1,11 @@
 import datetime
 import os
 import re
-import sys
+import logging
 
 
-_debug_logger = sys.stderr
 def dprint(msg):
-    #pylint: disable-msg=C0111
-    print >> _debug_logger, 'tko parser: %s' % msg
-
-
-def redirect_parser_debugging(ostream):
-    #pylint: disable-msg=C0111
-    global _debug_logger
-    _debug_logger = ostream
+    logging.debug('%s', msg)
 
 
 def get_timestamp(mapping, field):

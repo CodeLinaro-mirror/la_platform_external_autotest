@@ -18,7 +18,6 @@ class power_VideoCall(power_test.power_Test):
 
     video_url = 'http://crospower.page.link/power_VideoCall'
     doc_url = 'http://doc.new'
-    extra_browser_args = ['--use-fake-ui-for-media-stream']
 
     def initialize(self, seconds_period=20., pdash_note='',
                    force_discharge=False):
@@ -44,12 +43,13 @@ class power_VideoCall(power_test.power_Test):
         if not preset:
             preset = self._get_camera_preset()
 
+        extra_browser_args = self.get_extra_browser_args_for_camera_test()
         with keyboard.Keyboard() as keys,\
              chrome.Chrome(init_network_controller=True,
                            gaia_login=True,
                            username=self._username,
                            password=self._password,
-                           extra_browser_args=self.extra_browser_args,
+                           extra_browser_args=extra_browser_args,
                            autotest_ext=True) as cr:
 
             # Move existing window to left half and open video page
@@ -116,7 +116,7 @@ class power_VideoCall(power_test.power_Test):
         HIGH_IF_HAS_FAN_REGEX = r'''
             Intel[ ]Core[ ]i[357]-[6-9][0-9]{3}U|     # Intel Core i7-8650U
             Intel[ ]Core[ ]i[357]-1[0-9]{4}U|         # Intel Core i7-10510U
-            AMD[ ]Ryzen[ ][357]-[3-9][0-9]{3}C|       # AMD Ryzen 7 3700C
+            AMD[ ]Ryzen[ ][357][ ][3-9][0-9]{3}C|     # AMD Ryzen 7 3700C
             Genuine[ ]Intel[ ]0000                    # Unrelease CPU
         '''
         MEDIUM_REGEX = r'''

@@ -9,6 +9,9 @@ import common
 from autotest_lib.client.common_lib import hosts
 from autotest_lib.server import utils
 from autotest_lib.server.hosts import servo_constants
+from autotest_lib.server.hosts import cros_constants
+
+from chromite.lib import timeout_util
 
 
 def require_servo(host, ignore_state=False):
@@ -42,6 +45,7 @@ class SshVerifier(hosts.Verifier):
       * The host answers to ping, but not to ssh.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         if host.is_up():
             return
@@ -55,7 +59,6 @@ class SshVerifier(hosts.Verifier):
             if utils.ping(host.hostname, tries=1, deadline=1) != 0:
                 msg = 'No answer to ping from %s'
         raise hosts.AutoservVerifyError(msg % host.hostname)
-
 
     @property
     def description(self):
@@ -71,10 +74,10 @@ class LegacyHostVerifier(hosts.Verifier):
     repair and verify framework.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         host.verify_software()
         host.verify_hardware()
-
 
     @property
     def description(self):
@@ -84,9 +87,9 @@ class LegacyHostVerifier(hosts.Verifier):
 class RebootRepair(hosts.RepairAction):
     """Repair a target device by rebooting it."""
 
+    # Timeout of this action should defined in child class.
     def repair(self, host):
         host.reboot()
-
 
     @property
     def description(self):
@@ -105,6 +108,7 @@ class RPMCycleRepair(hosts.RepairAction):
         repair procedures.
     """
 
+    @timeout_util.TimeoutDecorator(cros_constants.REPAIR_TIMEOUT_SEC)
     def repair(self, host):
         if not host.has_power():
             raise hosts.AutoservRepairError(

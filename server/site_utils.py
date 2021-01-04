@@ -1,12 +1,17 @@
+# Lint as: python2, python3
 # Copyright (c) 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import collections
 import contextlib
 import grp
-import httplib
+import six.moves.http_client
 import json
 import logging
 import os
@@ -14,7 +19,9 @@ import random
 import re
 import time
 import traceback
-import urllib2
+from six.moves import filter
+from six.moves import range
+from six.moves import urllib
 
 import common
 from autotest_lib.client.bin.result_tools import utils as result_utils
@@ -224,7 +231,7 @@ def get_sheriffs(lab_only=False):
         except (ValueError, IOError) as e:
             logging.warning('could not parse sheriff from url %s%s: %s',
                              _CHROMIUM_BUILD_URL, sheriff_js, str(e))
-        except (urllib2.URLError, httplib.HTTPException) as e:
+        except (urllib.error.URLError, six.moves.http_client.HTTPException) as e:
             logging.warning('unexpected error reading from url "%s%s": %s',
                              _CHROMIUM_BUILD_URL, sheriff_js, str(e))
         else:
@@ -261,7 +268,7 @@ def _get_lab_status(status_url):
     retry_waittime = 1
     for _ in range(_MAX_LAB_STATUS_ATTEMPTS):
         try:
-            response = urllib2.urlopen(status_url)
+            response = urllib.request.urlopen(status_url)
         except IOError as e:
             logging.debug('Error occurred when grabbing the lab status: %s.',
                           e)
@@ -400,7 +407,7 @@ def get_test_views_from_tko(suite_job_id, tko):
 
     """
     views = tko.run('get_detailed_test_views', afe_job_id=suite_job_id)
-    relevant_views = filter(job_status.view_is_relevant, views)
+    relevant_views = list(filter(job_status.view_is_relevant, views))
     if not relevant_views:
         raise Exception('Failed to retrieve job results.')
 
