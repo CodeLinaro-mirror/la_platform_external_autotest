@@ -9,8 +9,7 @@ TIME = "Short"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "platform"
 TEST_TYPE = "server"
-# Disable this test until it is passing at least 90% of the time: https://crbug.com/1048226
-# ATTRIBUTES = "suite:rlz"
+ATTRIBUTES = "suite:rlz"
 DOC = """
 This tests the RLZ client install (CAI) and first-use event (CAF) pings are
 sent on first use of the device in guest mode, as long as the device has been

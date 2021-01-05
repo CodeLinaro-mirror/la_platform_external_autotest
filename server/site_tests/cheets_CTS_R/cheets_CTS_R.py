@@ -33,8 +33,8 @@ _CTS_MEDIA_LOCALPATH = '/tmp/android-cts-media'
 # Internal uprev for all CTS modules.
 _INTERNAL_CTS = 'gs://chromeos-arc-images/cts/bundle/R/'
 _CTS_LATEST_URI = {
-        'arm': _INTERNAL_CTS + 'android-cts-7006001-linux_x86-arm.zip',
-        'x86': _INTERNAL_CTS + 'android-cts-7006001-linux_x86-x86.zip',
+        'arm': _INTERNAL_CTS + 'android-cts-7050651-linux_x86-arm.zip',
+        'x86': _INTERNAL_CTS + 'android-cts-7050651-linux_x86-x86.zip',
 }
 
 

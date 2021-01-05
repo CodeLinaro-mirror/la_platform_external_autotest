@@ -745,7 +745,7 @@ class server_job(base_job.base_job):
                              "skipping crashinfo collection")
                 return
             else:
-                log_file = open(self._uncollected_log_file, "w")
+                log_file = open(self._uncollected_log_file, "wb")
                 pickle.dump([], log_file)
                 log_file.close()
                 created_uncollected_logs = True
@@ -1270,7 +1270,7 @@ class server_job(base_job.base_job):
                 os.path.exists(self._uncollected_log_file)):
             return
         if self._uncollected_log_file:
-            log_file = open(self._uncollected_log_file, "r+")
+            log_file = open(self._uncollected_log_file, "rb+")
             fcntl.flock(log_file, fcntl.LOCK_EX)
         try:
             uncollected_logs = pickle.load(log_file)

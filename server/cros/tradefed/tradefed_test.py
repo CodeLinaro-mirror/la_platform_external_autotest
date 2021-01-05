@@ -66,6 +66,7 @@ class TradefedTest(test.test):
     _board_name = None
     _release_branch_number = None  # The 'y' of OS version Rxx-xxxxx.y.z
     _android_version = None
+    _first_api_level = None
     _num_media_bundles = 0
     _abilist = []
 
@@ -809,13 +810,15 @@ class TradefedTest(test.test):
         test_board = self._get_board_name()
         test_arch = self._get_board_arch()
         sdk_ver = self._get_android_version()
+        first_api_level = self._get_first_api_level()
         expected_fail_dir = os.path.join(self.bindir, directory)
         if os.path.exists(expected_fail_dir):
             expected_fail_files += glob.glob(expected_fail_dir + '/*.yaml')
 
         waivers = cts_expected_failure_parser.ParseKnownCTSFailures(
             expected_fail_files)
-        return waivers.find_waivers(test_arch, test_board, bundle_abi, sdk_ver)
+        return waivers.find_waivers(test_arch, test_board, bundle_abi, sdk_ver,
+                                    first_api_level)
 
     def _get_abilist(self):
         """Return the abilist supported by calling adb command.
@@ -865,6 +868,12 @@ class TradefedTest(test.test):
                 'grep ANDROID_SDK /etc/lsb-release',
                 ignore_status=True).stdout.rstrip().split('=')[1]
         return int(self._android_version)
+
+    def _get_first_api_level(self):
+        """Return target DUT Android first API level."""
+        if not self._first_api_level:
+            self._first_api_level = self._hosts[0].get_arc_first_api_level()
+        return int(self._first_api_level)
 
     def _get_max_retry(self, max_retry):
         """Return the maximum number of retries.
@@ -1261,23 +1270,21 @@ class TradefedTest(test.test):
                     command = self._tradefed_retry_command(retry_template,
                                                            session_id)
 
-                # TODO(pwang): Evaluate if it is worth it to get the number of
-                #              not-excecuted, for instance, by collecting all
-                #              tests on startup (very expensive, may take 30
-                #              minutes).
                 if media_asset and media_asset.uri:
                     # Clean-up crash logs from previous sessions to ensure
                     # enough disk space for 16GB storage devices: b/156075084.
                     if not keep_media:
                         self._clean_crash_logs()
-                    # TODO(b/137917339): Only prevent screen from turning off for
-                    # media tests. Remove this check once the GPU issue is fixed.
+                # TODO(b/137917339): Only prevent screen from turning off for
+                # media tests. Remove this check once the GPU issue is fixed.
+                keep_screen_on = (media_asset and media_asset.uri) or (
+                        target_module and "Media" in target_module)
+                if keep_screen_on:
                     self._override_powerd_prefs()
                 try:
                     waived_tests, acc = self._run_and_parse_tradefed(command)
                 finally:
-                    # TODO(b/137917339): ditto
-                    if media_asset and media_asset.uri:
+                    if keep_screen_on:
                         self._restore_powerd_prefs()
                 if media_asset:
                     self._fail_on_unexpected_media_download(media_asset)

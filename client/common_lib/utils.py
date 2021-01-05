@@ -293,15 +293,31 @@ class BgJob(object):
             # read in all the data we can from pipe and then stop
             data = []
             while select.select([pipe], [], [], 0)[0]:
-                data.append(os.read(pipe.fileno(), 1024))
+                data.append(self._read_data(pipe))
                 if len(data[-1]) == 0:
                     break
             data = "".join(data)
         else:
             # perform a single read
-            data = os.read(pipe.fileno(), 1024)
+            data = self._read_data(pipe)
         buf.write(data)
         tee.write(data)
+
+    def _read_data(self, pipe):
+        """Read & return the data from the provided pipe.
+
+        Handles the changes to pipe reading & iostring writing in python 2/3.
+        In python2 the buffer (iostring) can take bytes, where in python3 it
+        must be a string. Formatting bytes to string in python 2 vs 3 seems
+        to be a bit different. In 3, .decode() is needed, however in 2 that
+        results in unicode (not str), breaking downstream users.
+
+        """
+
+        data = os.read(pipe.fileno(), 1024)
+        if isinstance(data, bytes) and six.PY3:
+            return data.decode()
+        return data
 
     def cleanup(self):
         """Clean up after BgJob.
@@ -625,7 +641,11 @@ def hash(hashtype, input=None):
             computed_hash = sha.new()
 
     if input:
-        computed_hash.update(input)
+        try:
+            computed_hash.update(input.encode())
+        except UnicodeError:
+            computed_hash.update(input)
+
 
     return computed_hash
 

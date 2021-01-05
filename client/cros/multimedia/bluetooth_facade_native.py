@@ -363,6 +363,10 @@ class BluetoothFacadeNative(object):
     BLUETOOTH_LIBDIR = '/var/lib/bluetooth'
     BTMON_STOP_DELAY_SECS = 3
 
+    # Due to problems transferring a date object, we convert to stringtime first
+    # This is the standard format that we will use.
+    OUT_DATE_FORMAT = '%Y-%m-%d %H:%M:%S.%f'
+
     # Timeout for how long we'll wait for BlueZ and the Adapter to show up
     # after reset.
     ADAPTER_TIMEOUT = 30
@@ -1559,68 +1563,6 @@ class BluetoothFacadeNative(object):
         self._adapter.StopDiscovery(dbus_interface=self.BLUEZ_ADAPTER_IFACE)
         return (True, None)
 
-    @dbus_print_error()
-    def pause_discovery(self, system_suspend_resume):
-        """Pause discovery of remote devices.
-
-        @return (True, None) on success, (False,<error>) otherwise.
-
-        """
-        self._adapter.PauseDiscovery(dbus.Boolean(system_suspend_resume,
-                                                  variant_level=1),
-                                     dbus_interface=self.BLUEZ_ADAPTER_IFACE)
-        return (True, None)
-
-    @dbus_print_error()
-    def unpause_discovery(self, system_suspend_resume):
-        """Unpause discovery of remote devices.
-
-        @return (True, None) on success, (False,<error>) otherwise.
-
-        """
-        self._adapter.UnpauseDiscovery(dbus.Boolean(system_suspend_resume,
-                                                    variant_level=1),
-                                       dbus_interface=self.BLUEZ_ADAPTER_IFACE)
-        return (True, None)
-
-    @xmlrpc_server.dbus_safe(False)
-    @dbus_print_error()
-    def pause_discovery(self, system_suspend_resume=False):
-        """Pause discovery of remote devices.
-
-        This pauses all device discovery sessions.
-
-        @param system_suspend_resume: whether the
-               request is related to system suspend/resume.
-
-        @return True on success, False otherwise.
-
-        """
-        if not self._adapter:
-            return (False, "Adapter Not Found")
-        self._adapter.PauseDiscovery(system_suspend_resume,
-                                     dbus_interface=self.BLUEZ_ADAPTER_IFACE)
-        return (True, None)
-
-    @xmlrpc_server.dbus_safe(False)
-    @dbus_print_error()
-    def unpause_discovery(self, system_suspend_resume=False):
-        """Unpause discovery of remote devices.
-
-        This unpauses all device discovery sessions.
-
-        @param system_suspend_resume: whether the
-               request is related to system suspend/resume.
-
-        @return True on success, False otherwise.
-
-        """
-        if not self._adapter:
-            return (False, "Adapter Not Found")
-        self._adapter.UnpauseDiscovery(system_suspend_resume,
-                                       dbus_interface=self.BLUEZ_ADAPTER_IFACE)
-        return (True, None)
-
     def get_dev_info(self):
         """Read raw HCI device information.
 
@@ -2219,6 +2161,22 @@ class BluetoothFacadeNative(object):
         self._dbus_mainloop.run()
 
         return self.dbus_cb_msg
+
+
+    def advmon_check_manager_interface_exist(self):
+        """Check if AdvertisementMonitorManager1 interface is available.
+
+        @returns: True if Manager interface is available, False otherwise.
+
+        """
+        objects = self._bluez.GetManagedObjects(
+                dbus_interface=self.BLUEZ_MANAGER_IFACE)
+        for _, ifaces in six.iteritems(objects):
+            if self.BLUEZ_ADV_MONITOR_MANAGER_IFACE in ifaces:
+                return True
+
+        return False
+
 
     def advmon_read_supported_types(self):
         """Read the Advertisement Monitor supported monitor types.
@@ -3460,7 +3418,6 @@ class BluetoothFacadeNative(object):
 
         # Date format for strptime and strftime
         date_format = '%m%d/%H%M%S.%f'
-        out_date_format = '%Y-%m-%d %H:%M:%S.%f'
         date_group_re = '(?P<date>[0-9]+/[0-9]+[.][0-9]+)'
 
         finish_suspend_re = re.compile(
@@ -3500,8 +3457,8 @@ class BluetoothFacadeNative(object):
                 if all([x is not None for x in [start_time, end_time, ret]]):
                     # Return dates in string format due to inconsistency between
                     # python2/3 usage on host and dut
-                    return (start_time.strftime(out_date_format),
-                            end_time.strftime(out_date_format), ret)
+                    return (start_time.strftime(self.OUT_DATE_FORMAT),
+                            end_time.strftime(self.OUT_DATE_FORMAT), ret)
                 else:
                     logging.error(
                             'Failed to parse details from last suspend. %s %s %s',
@@ -3607,6 +3564,9 @@ class BluetoothFacadeNative(object):
             logging.debug("Chipset not known. Returning %s", chipset_string)
             return chipset_string
 
+    def get_device_time(self):
+        """ Get the current device time. """
+        return datetime.now().strftime(self.OUT_DATE_FORMAT)
 
     def cleanup(self):
         """Cleanup before exiting the client xmlrpc process."""

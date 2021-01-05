@@ -249,10 +249,10 @@ class RemoteHost(base_classes.Host):
         self.log_op(self.OP_REBOOT, op_func)
 
 
-    def cleanup(self, reboot_cmd=None):
+    def cleanup(self):
         # pylint: disable=missing-docstring
         super(RemoteHost, self).cleanup()
-        self.reboot(reboot_cmd=reboot_cmd)
+        self.reboot()
 
 
     def get_tmp_dir(self, parent='/tmp'):

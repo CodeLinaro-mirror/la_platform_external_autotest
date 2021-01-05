@@ -50,6 +50,8 @@ suite:bvt-tast-android-pfq
 suite:bvt-tast-chrome-pfq
 suite:bvt-tast-cq
 suite:bvt-tast-informational
+suite:bvt-tast-parallels-cq
+suite:bvt-tast-parallels-informational
 suite:camera-libcamera
 suite:camera-postsubmit
 suite:camerabox_facing-back
@@ -73,6 +75,9 @@ suite:check_setup_storage_qual
 suite:chrome-informational
 suite:cros-av-analysis
 suite:crosbolt_perf_nightly
+suite:crosbolt_perf_parallels_nightly
+suite:crosbolt_perf_parallels_perbuild
+suite:crosbolt_perf_parallels_weekly
 suite:crosbolt_perf_perbuild
 suite:crosbolt_perf_weekly
 suite:cts_P
@@ -110,6 +115,7 @@ suite:faft_ec3po
 suite:faft_ec_fw_qual
 suite:faft_ec_tot
 suite:faft_ec_wp
+suite:faft_experimental
 suite:faft_flashrom
 suite:faft_lab
 suite:faft_lv1
@@ -125,6 +131,7 @@ suite:faft_stress
 suite:faft_wilco
 suite:files
 suite:fingerprint
+suite:fingerprint-mcu
 suite:graphics
 suite:graphics_browser
 suite:graphics_per-build
@@ -153,6 +160,7 @@ suite:mmc_qual
 suite:moblab
 suite:moblab_quick
 suite:moblab_storage_qual
+suite:nearby-share
 suite:network_nightly
 suite:network_ui
 suite:offloads

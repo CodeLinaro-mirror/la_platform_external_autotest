@@ -15,7 +15,6 @@ from __future__ import print_function
 
 import base64
 import collections
-import commands
 import errno
 import glob
 import json
@@ -28,6 +27,7 @@ import re
 import shutil
 import signal
 import string
+import subprocess
 import tempfile
 import time
 import uuid
@@ -630,7 +630,13 @@ def check_for_kernel_feature(feature):
 
 
 def check_glibc_ver(ver):
-    glibc_ver = commands.getoutput('ldd --version').splitlines()[0]
+    try:
+        glibc_ver = subprocess.check_output("ldd --version", shell=True)
+    except subprocess.CalledProcessError:
+        # To mimic previous behavior, if the command errors set the result to
+        # an empty str
+        glibc_ver = ''
+    glibc_ver = glibc_ver.splitlines()[0].decode()
     glibc_ver = re.search(r'(\d+\.\d+(\.\d+)?)', glibc_ver).group()
     if utils.compare_versions(glibc_ver, ver) == -1:
         raise error.TestError("Glibc too old (%s). Glibc >= %s is needed." %

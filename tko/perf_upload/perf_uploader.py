@@ -394,7 +394,7 @@ def upload_test(job, test, jobname):
                                             presentation_info, jobname)
         _send_to_dashboard(formatted_data)
     except PerfUploadingError as e:
-        tko_utils.dprint('Error when uploading perf data to the perf '
+        tko_utils.dprint('Warning: unable to upload perf data to the perf '
                          'dashboard for test %s: %s' % (test_name, e))
     else:
         tko_utils.dprint('Successfully uploaded perf data to the perf '

@@ -1504,25 +1504,6 @@ def make_servo_hostname(dut_hostname):
     return '.'.join(host_parts)
 
 
-def servo_host_is_up(servo_hostname):
-    """Given a servo host name, return if it's up or not.
-
-    @param servo_hostname: hostname of the servo host.
-
-    @return True if it's up, False otherwise
-    """
-    # Technically, this duplicates the SSH ping done early in the servo
-    # proxy initialization code.  However, this ping ends in a couple
-    # seconds when if fails, rather than the 60 seconds it takes to decide
-    # that an SSH ping has timed out.  Specifically, that timeout happens
-    # when our servo DNS name resolves, but there is no host at that IP.
-    logging.info('Pinging servo host at %s', servo_hostname)
-    ping_config = ping_runner.PingConfig(
-            servo_hostname, count=3,
-            ignore_result=True, ignore_status=True)
-    return ping_runner.PingRunner().ping(ping_config).received > 0
-
-
 def _map_afe_board_to_servo_board(afe_board):
     """Map a board we get from the AFE to a servo appropriate value.
 
@@ -1680,15 +1661,12 @@ def create_servo_host(dut,
             'Servo connection info is incorrect hostname: %s , port: %s',
             servo_hostname, servo_port)
         return None, servo_constants.SERVO_STATE_WRONG_CONFIG
-    if (not servo_dependency and not try_servo_repair and
-            not servo_host_is_up(servo_hostname)):
-        logging.debug('ServoHost is not up.')
-        return None, servo_constants.SERVO_STATE_NO_SSH
 
     newhost = ServoHost(**servo_args)
-    if not newhost.is_up_fast():
-        # We do not have any option to recover servo_host.
-        # If servo_host is not pingable then we can stop here.
+    if not newhost.is_up_fast(count=3):
+        # ServoHost has internal check to wait if servo-host is in reboot
+        # process. If servo-host still is not available this check will stop
+        # further attempts as we do not have any option to recover servo_host.
         return None, servo_constants.SERVO_STATE_NO_SSH
 
     # Reset or reboot servo device only during AdminRepair tasks.

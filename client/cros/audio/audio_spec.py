@@ -64,7 +64,7 @@ def strip_kernelnext_suffix(board_name):
 
     """
     if board_name.endswith("-kernelnext"):
-      return board_name[:-len("-kernelnext")]
+        return board_name[:-len("-kernelnext")]
 
     return board_name
 
@@ -202,6 +202,7 @@ def get_plugged_internal_mics(board_type, board, model, sku):
 
 HEADPHONE_NODE = {
         ('sarien'): 'LINEOUT',
+        ('drallion'): 'LINEOUT',
 }
 
 

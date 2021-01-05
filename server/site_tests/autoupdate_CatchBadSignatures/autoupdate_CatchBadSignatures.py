@@ -42,9 +42,10 @@ class autoupdate_CatchBadSignatures(update_engine_test.UpdateEngineTest):
         """Checks that update_engine rejects updates where the payload
         and Omaha response do not agree on the metadata signature."""
         expected_log_messages = [
-                'Mandating payload hash checks since Omaha Response for '
+                'Mandating payload signature checks since Omaha Response for '
                 'unofficial build includes public RSA key',
-                'Mandatory metadata signature validation failed']
+                'Mandatory metadata signature validation failed'
+        ]
 
         self._check_signature(expected_log_messages,
                               'Check for bad metadata signature failed.',
@@ -56,10 +57,11 @@ class autoupdate_CatchBadSignatures(update_engine_test.UpdateEngineTest):
         """Checks that update_engine rejects updates where the payload
         signature does not match what is expected."""
         expected_log_messages = [
-                'Mandating payload hash checks since Omaha Response for '
+                'Mandating payload signature checks since Omaha Response for '
                 'unofficial build includes public RSA key',
                 'Metadata hash signature matches value in Omaha response.',
-                'Public key verification failed, thus update failed']
+                'Public key verification failed, thus update failed'
+        ]
 
         self._check_signature(expected_log_messages,
                               'Check for payload signature failed.',

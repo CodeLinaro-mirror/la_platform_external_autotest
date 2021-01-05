@@ -44,7 +44,11 @@ class firmware_ECWakeSource(FirmwareTest):
         """Shutdown to G3/S5, hibernate EC, and then wake by power button."""
         is_ac = host.is_ac_connected()
         self.run_shutdown_cmd()
-        self.ec.send_command('hibernate 1000')
+        if not self.wait_power_state(self.POWER_STATE_G3,
+                                     self.POWER_STATE_RETRY_COUNT):
+            raise error.TestFail('Platform failed to reach G3 state.')
+
+        self.ec.send_command('hibernate')
         time.sleep(self.WAKE_DELAY)
 
         # If AC is plugged during the test, the DUT would wake up right after

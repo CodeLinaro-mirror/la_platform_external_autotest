@@ -29,7 +29,7 @@ logging.info(
 # Define the variables that we are going to use and set sensible defaults.
 gts_module = ''
 gts_retry = 5
-gts_revision = '8-R2-R-6955212'  # TODO(ihf): Set this default value from generator.
+gts_revision = None
 gts_test = ''
 gts_timeout = 600
 
@@ -53,11 +53,12 @@ gts_retry = int(args_dict.get('max_retry', gts_retry))
 # Basic checks for option validity.
 logging.error('Running module %s with test %s on revision %s',
               gts_module, gts_test, gts_revision)
-if not gts_module or not gts_revision or not gts_test:
+if not gts_module or not gts_test:
     usage_error()
 
 # And we are getting ready for tradefed.
-uri = ('gs://chromeos-arc-images/cts/bundle/android-gts-' + gts_revision + '.zip')
+uri = ('gs://chromeos-arc-images/cts/bundle/android-gts-' + gts_revision +
+       '.zip') if gts_revision else 'LATEST'
 run_template = ['run', 'commandAndExit', 'gts',
                 '--include-filter', gts_module + ' ' + gts_test,
                 '--ignore-business-logic-failure']

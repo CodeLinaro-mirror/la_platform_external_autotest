@@ -111,6 +111,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
 
                 # Start the suspend process
                 suspend = self.suspend_async(suspend_time=SUSPEND_SEC)
+                start_time = self.bluetooth_facade.get_device_time()
 
                 # Trigger suspend, wait for regular resume, verify we can reconnect
                 # and run device specific test
@@ -118,7 +119,8 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
                                                      sleep_timeout=SUSPEND_SEC)
                 self.test_wait_for_resume(boot_id,
                                           suspend,
-                                          resume_timeout=SUSPEND_SEC)
+                                          resume_timeout=SUSPEND_SEC,
+                                          test_start_time=start_time)
 
                 for device_type, device, device_test in devtuples:
                     # Only reconnect if we don't expect automatic reconnect
@@ -292,6 +294,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
                 # Start a new suspend instance
                 suspend = self.suspend_async(suspend_time=sleep_time,
                                              expect_bt_wake=should_wake)
+                start_time = self.bluetooth_facade.get_device_time()
 
                 if should_wake:
                     self.test_device_wake_allowed(device.address)
@@ -318,6 +321,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
                 self.test_wait_for_resume(boot_id,
                                           suspend,
                                           resume_timeout=resume_time,
+                                          test_start_time=start_time,
                                           resume_slack=resume_slack,
                                           fail_on_timeout=should_wake,
                                           fail_early_wake=not should_wake)
@@ -420,26 +424,51 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
         """ Suspend while discovering. """
         device = self.devices['BLE_MOUSE'][0]
         boot_id = self.host.get_boot_id()
+
+        self.test_device_set_discoverable(device, True)
+
+        # Test discovery without setting discovery filter
+        # ----------------------------------------------------------------------
         suspend = self.suspend_async(suspend_time=EXPECT_NO_WAKE_SUSPEND_SEC)
+        start_time = self.bluetooth_facade.get_device_time()
 
         # We don't pair to the peer device because we don't want it in the
         # allowlist. However, we want an advertising peer in this test
         # responding to the discovery requests.
-        self.test_device_set_discoverable(device, True)
-
         self.test_start_discovery()
-        self.test_suspend_and_wait_for_sleep(
-                suspend, sleep_timeout=EXPECT_NO_WAKE_SUSPEND_SEC)
+        self.test_suspend_and_wait_for_sleep(suspend,
+                                             sleep_timeout=SUSPEND_SEC)
 
         # If discovery events wake us early, we will raise and suspend.exitcode
         # will be non-zero
         self.test_wait_for_resume(boot_id,
                                   suspend,
-                                  resume_timeout=EXPECT_NO_WAKE_SUSPEND_SEC)
+                                  resume_timeout=EXPECT_NO_WAKE_SUSPEND_SEC,
+                                  test_start_time=start_time)
 
         # Discovering should restore after suspend
         self.test_is_discovering()
+        self.test_stop_discovery()
 
+        # Test discovery with discovery filter set
+        # ----------------------------------------------------------------------
+        suspend = self.suspend_async(suspend_time=EXPECT_NO_WAKE_SUSPEND_SEC)
+        start_time = self.bluetooth_facade.get_device_time()
+
+        self.test_set_discovery_filter({'Transport': 'auto'})
+        self.test_start_discovery()
+        self.test_suspend_and_wait_for_sleep(suspend,
+                                             sleep_timeout=SUSPEND_SEC)
+
+        # If discovery events wake us early, we will raise and suspend.exitcode
+        # will be non-zero
+        self.test_wait_for_resume(boot_id,
+                                  suspend,
+                                  resume_timeout=EXPECT_NO_WAKE_SUSPEND_SEC,
+                                  test_start_time=start_time)
+
+        # Discovering should restore after suspend
+        self.test_is_discovering()
         self.test_stop_discovery()
 
     # TODO(b/150897528) - Scarlet Dru loses firmware around suspend
@@ -452,6 +481,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
         device = self.devices['MOUSE'][0]
         boot_id = self.host.get_boot_id()
         suspend = self.suspend_async(suspend_time=EXPECT_NO_WAKE_SUSPEND_SEC)
+        start_time = self.bluetooth_facade.get_device_time()
 
         self.test_discoverable()
         self.test_suspend_and_wait_for_sleep(suspend,
@@ -462,7 +492,8 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
 
         self.test_wait_for_resume(boot_id,
                                   suspend,
-                                  resume_timeout=EXPECT_NO_WAKE_SUSPEND_SEC)
+                                  resume_timeout=EXPECT_NO_WAKE_SUSPEND_SEC,
+                                  test_start_time=start_time)
 
         # Test that we are properly discoverable again
         self.test_is_discoverable()
@@ -480,6 +511,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
         device = self.devices['MOUSE'][0]
         boot_id = self.host.get_boot_id()
         suspend = self.suspend_async(suspend_time=SUSPEND_SEC)
+        start_time = self.bluetooth_facade.get_device_time()
 
         # Pair device so we have something to do in suspend
         self.assert_discover_and_pair(device)
@@ -489,7 +521,10 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
         self.test_suspend_and_wait_for_sleep(suspend,
                                              sleep_timeout=SUSPEND_SEC)
         # Suspend and resume should succeed
-        self.test_wait_for_resume(boot_id, suspend, resume_timeout=SUSPEND_SEC)
+        self.test_wait_for_resume(boot_id,
+                                  suspend,
+                                  resume_timeout=SUSPEND_SEC,
+                                  test_start_time=start_time)
 
         # We should be able to power it back on
         self.test_power_on_adapter()

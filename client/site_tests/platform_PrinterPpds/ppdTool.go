@@ -515,8 +515,8 @@ func createDirectoryWithPPDs(pathSrc string, filenames []string, pathTrg string)
 func commandCompare(args []string) {
 	const filenameLargeClusters = "large_clusters.txt"
 	const filenameSmallClusters = "small_clusters.txt"
-	const dirnameCorePPDs = "core_ppds"
-	const dirnameExtPPDs = "ext_ppds"
+	const dirnameCorePPDs = "ppds_core"
+	const dirnameExtPPDs = "ppds_ext"
 
 	flags := flag.NewFlagSet("compare", flag.ExitOnError)
 	flagInput := flags.String("input", "ppds_all", "Directory with PPD files.")
@@ -652,11 +652,11 @@ The first parameter must be one of the following commands:
       In the output directory, the following files and directories are created:
        * large_clusters.txt - a file with PPD names grouped in large clusters
        * small_clusters.txt - a file with PPD names grouped in small clusters
-       * core_ppds - a directory with hard links to PPD files representing
+       * ppds_core - a directory with hard links to PPD files representing
            large clusters, each cluster is represented by exactly one PPD file.
            For the full PPD dataset given on the input, this directory is
            supposed to have around ~100 PPD files;
-       * ext_ppds - a directory with hard links to PPD files representing
+       * ppds_ext - a directory with hard links to PPD files representing
            small clusters, each cluster is represented by exactly one PPD file.
            IF A PPD FILE IS ALREADY PRESENT IN core_ppds IT IS OMITTED. For the
            full PPD dataset given on the input, this directory is supposed to

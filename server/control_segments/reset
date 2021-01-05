@@ -17,15 +17,6 @@ job_labels = locals().get('job_labels') or ','.join(args)
 labels_list = [l.strip() for l in job_labels.split(',') if l]
 
 
-# try to reboot using ectool. If ectool fails, fall back to reboot and
-# reboot -f.
-REBOOT_CMD = '''
-sync& sleep 5;
-ectool reboot_ec cold;
-reboot& sleep 10;
-reboot -f
-'''
-
 def reset(machine):
     print('Starting to reset host %s' % machine)
     try:
@@ -35,7 +26,7 @@ def reset(machine):
         with metrics.SecondsTimer(DURATION_METRIC,
                                   fields={'dut_host_name': hostname}):
             # Assume cleanup always runs first.
-            target.cleanup(reboot_cmd=REBOOT_CMD)
+            target.cleanup()
             provision.Cleanup.run_task_actions(job, target, labels_list)
 
             target.verify()

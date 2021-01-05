@@ -17,6 +17,7 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils as client_utils
 from autotest_lib.server.cros.storage import storage_validate as storage
 from autotest_lib.server.cros import servo_keyboard_utils
+from autotest_lib.site_utils.admin_audit import rpm_validator
 
 try:
     from chromite.lib import metrics
@@ -161,10 +162,28 @@ class VerifyServoUsb(base._BaseServoVerifier):
             cmd = ('. /usr/share/misc/chromeos-common.sh; get_device_type %s' %
                    path)
             check_run = self._dut_host.run(cmd, timeout=30, ignore_status=True)
-            if check_run.stdout.strip() == 'USB':
+            if check_run.stdout.strip() != 'USB':
+                continue
+            if self._quick_check_if_device_responsive(self._dut_host, path):
                 logging.info('USB drive detected on DUT side as %s', path)
                 return path
         return None
+
+    def _quick_check_if_device_responsive(self, host, usb_path):
+        """Verify that device """
+        validate_cmd = 'fdisk -l %s' % usb_path
+        try:
+            resp = host.run(validate_cmd, ignore_status=True, timeout=30)
+            if resp.exit_status == 0:
+                return True
+            logging.error('USB %s is not detected by fdisk!', usb_path)
+        except error.AutoservRunError as e:
+            if 'Timeout encountered' in str(e):
+                logging.warning('Timeout encountered during fdisk run.')
+            else:
+                logging.error('(Not critical) fdisk check fail for %s; %s',
+                              usb_path, str(e))
+        return False
 
     def _run_check_on_host(self, host, usb):
         """Run badblocks on the provided host.
@@ -219,6 +238,19 @@ class VerifyServoFw(base._BaseServoVerifier):
         servo_updater.update_servo_firmware(
             self.get_host(),
             force_update=True)
+
+
+class VerifyRPMConfig(base._BaseDUTVerifier):
+    """Check RPM config of the setup.
+
+    This check run against RPM configs settings.
+    """
+
+    def _verify(self):
+        if not self.host_is_up():
+            logging.info('Host is down; Skipping the verification')
+            return
+        rpm_validator.verify_unsafe(self.get_host())
 
 
 class FlashServoKeyboardMapVerifier(base._BaseDUTVerifier):

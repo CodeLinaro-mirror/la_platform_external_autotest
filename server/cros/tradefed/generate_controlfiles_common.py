@@ -197,6 +197,8 @@ def get_bundle_abi(filename):
     In this case we chose to guess by filename, but we could also parse the
     xml files in the module. (Maybe this needs to be done in the future.)
     """
+    if CONFIG.get('DYNAMIC_TEST_FETCH'):
+        return None
     if filename.endswith('arm.zip'):
         return 'arm'
     if filename.endswith('arm64.zip'):
@@ -227,9 +229,9 @@ def get_extension(module, abi, revision, is_public=False, led_provision=None, ca
                     abi part is omitted.
     """
     ext_parts = []
-    if not is_public:
+    if not CONFIG.get('DYNAMIC_TEST_FETCH') and not is_public:
         ext_parts = [revision]
-    if abi:
+    if not CONFIG.get('DYNAMIC_TEST_FETCH') and abi:
         ext_parts += [abi]
     ext_parts += [module]
     if led_provision:
@@ -1252,8 +1254,9 @@ def run(uris, is_public, is_latest, cache_dir):
                     write_extra_camera_controlfiles(abi, revision, build, uri,
                                                     is_public)
 
-            write_collect_controlfiles(modules, abi, revision, build, uri,
-                                       is_public, is_latest)
+            if CONFIG.get('CONTROLFILE_WRITE_COLLECT', True):
+                write_collect_controlfiles(modules, abi, revision, build, uri,
+                                           is_public, is_latest)
 
             if CONFIG['CONTROLFILE_WRITE_EXTRA']:
                 write_extra_controlfiles(None, abi, revision, build, uri,

@@ -315,12 +315,12 @@ def _ensure_host_idle(afe, afe_host):
     @return A true value if the host is idle at return, or a false value
         if the host wasn't idle after some reasonable time.
     """
-    # We need to talk to the shard, not the master, for at least two
+    # We need to talk to the shard, not the main, for at least two
     # reasons:
-    #   * The `abort_special_tasks` RPC doesn't forward from the master
+    #   * The `abort_special_tasks` RPC doesn't forward from the main
     #     to the shard, and only the shard has access to the special
     #     tasks.
-    #   * Host status on the master can lag actual status on the shard
+    #   * Host status on the main can lag actual status on the shard
     #     by several minutes.  Only the shard can provide status
     #     guaranteed to post-date the call to lock the DUT.
     if afe_host.shard:

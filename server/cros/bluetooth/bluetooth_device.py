@@ -40,6 +40,10 @@ class BluetoothDevice(object):
     XMLRPC_LOG_PATH = '/var/log/bluetooth_xmlrpc_device.log'
     XMLRPC_REQUEST_TIMEOUT_SECONDS = 180
 
+    # We currently get dates back in string format due to some inconsistencies
+    # between python2 and python3. This is the standard date format we use.
+    NATIVE_DATE_FORMAT = '%Y-%m-%d %H:%M:%S.%f'
+
     def __init__(self, device_host, remote_facade_proxy=None):
         """Construct a BluetoothDevice.
 
@@ -642,60 +646,6 @@ class BluetoothDevice(object):
         return self._proxy.stop_discovery()
 
 
-    @proxy_thread_safe
-    def pause_discovery(self, system_suspend_resume=False):
-        """ Pause discovery of remote devices
-
-        @params: boolean system_suspend_resume Is this request related to
-                 system suspend resume.
-
-        @return (True, None) on success (False, <error>) otherwise
-        """
-        return self._proxy.pause_discovery(system_suspend_resume)
-
-
-    @proxy_thread_safe
-    def unpause_discovery(self, system_suspend_resume=False):
-        """ Unpause discovery of remote devices
-
-        @params: boolean system_suspend_resume Is this request related to
-                 system suspend resume.
-
-        @return (True, None) on success (False, <error>) otherwise
-        """
-        return self._proxy.unpause_discovery(system_suspend_resume)
-
-
-    @proxy_thread_safe
-    def pause_discovery(self, system_suspend_resume=False):
-        """Pause discovery of remote devices.
-
-        This pauses all device discovery sessions.
-
-        @param system_suspend_resume: whether the
-               request is related to system suspend/resume.
-
-        @return True on success, False otherwise.
-
-        """
-        return self._proxy.pause_discovery(system_suspend_resume)
-
-
-    @proxy_thread_safe
-    def unpause_discovery(self, system_suspend_resume=False):
-        """Unpause discovery of remote devices.
-
-        This unpauses all device discovery sessions.
-
-        @param system_suspend_resume: whether the
-               request is related to system suspend/resume.
-
-        @return True on success, False otherwise.
-
-        """
-        return self._proxy.unpause_discovery(system_suspend_resume)
-
-
     def is_discovering(self):
         """Is it discovering?
 
@@ -910,6 +860,16 @@ class BluetoothDevice(object):
 
 
     @proxy_thread_safe
+    def advmon_check_manager_interface_exist(self):
+        """Check if AdvertisementMonitorManager1 interface is available.
+
+        @returns: True if Manager interface is available, False otherwise.
+
+        """
+        return self._proxy.advmon_check_manager_interface_exist()
+
+
+    @proxy_thread_safe
     def advmon_read_supported_types(self):
         """Read the Advertisement Monitor supported monitor types.
 
@@ -1087,8 +1047,12 @@ class BluetoothDevice(object):
 
     @proxy_thread_safe
     def messages_stop(self):
-        """Stop messages monitoring."""
-        self._proxy.messages_stop()
+        """Stop messages monitoring.
+
+        @returns: True if logs were successfully gathered since logging started,
+                else False
+        """
+        return self._proxy.messages_stop()
 
     @proxy_thread_safe
     def messages_find(self, pattern_str):
@@ -1701,9 +1665,8 @@ class BluetoothDevice(object):
         # python3 (hopefully)
         # TODO - Revisit converting date to string and back in this method
         if info:
-            date_format = '%Y-%m-%d %H:%M:%S.%f'
-            start_date = datetime.strptime(info[0], date_format)
-            end_date = datetime.strptime(info[1], date_format)
+            start_date = datetime.strptime(info[0], self.NATIVE_DATE_FORMAT)
+            end_date = datetime.strptime(info[1], self.NATIVE_DATE_FORMAT)
             ret = info[2]
 
             return (start_date, end_date, ret)
@@ -1731,7 +1694,6 @@ class BluetoothDevice(object):
         """
         return self._proxy.get_wlan_vid_pid()
 
-
     @proxy_thread_safe
     def get_bt_module_name(self):
         """ Return bluetooth module name for non-USB devices
@@ -1741,6 +1703,11 @@ class BluetoothDevice(object):
         """
         return self._proxy.get_bt_module_name()
 
+    @proxy_thread_safe
+    def get_device_time(self):
+        """ Get the current device time. """
+        return datetime.strptime(self._proxy.get_device_time(),
+                                 self.NATIVE_DATE_FORMAT)
 
     @proxy_thread_safe
     def close(self, close_host=True):
