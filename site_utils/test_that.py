@@ -3,6 +3,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import argparse
 import os
 import signal
@@ -253,7 +257,7 @@ def _main_for_local_run(argv, arguments):
     @param arguments: Parsed command line arguments.
     """
     if not os.path.exists('/etc/cros_chroot_version'):
-        print >> sys.stderr, 'For local runs, script must be run inside chroot.'
+        print('For local runs, script must be run inside chroot.', file=sys.stderr)
         return 1
 
     results_directory = test_runner_utils.create_results_directory(
@@ -281,8 +285,8 @@ def _main_for_local_run(argv, arguments):
         sysroot_path = os.path.join('/build', arguments.board, '')
 
         if not os.path.exists(sysroot_path):
-            print >> sys.stderr, ('%s does not exist. Have you run '
-                                  'setup_board?' % sysroot_path)
+            print(('%s does not exist. Have you run '
+                   'setup_board?' % sysroot_path), file=sys.stderr)
             return 1
 
         path_ending = 'usr/local/build/autotest'
@@ -291,10 +295,10 @@ def _main_for_local_run(argv, arguments):
     site_utils_path = os.path.join(autotest_path, 'site_utils')
 
     if not os.path.exists(autotest_path):
-        print >> sys.stderr, ('%s does not exist. Have you run '
-                              'build_packages? Or if you are using '
-                              '--autotest_dir, make sure it points to '
-                              'a valid autotest directory.' % autotest_path)
+        print(('%s does not exist. Have you run '
+               'build_packages? Or if you are using '
+               '--autotest_dir, make sure it points to '
+               'a valid autotest directory.' % autotest_path), file=sys.stderr)
         return 1
 
     realpath = os.path.realpath(__file__)
@@ -378,7 +382,7 @@ def main(argv):
     try:
         validate_arguments(arguments)
     except ValueError as err:
-        print >> sys.stderr, ('Invalid arguments. %s' % err.message)
+        print(('Invalid arguments. %s' % str(err)), file=sys.stderr)
         return 1
 
     if arguments.remote == ':lab:':

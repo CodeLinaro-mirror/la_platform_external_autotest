@@ -675,9 +675,11 @@ class UpdateEngineTest(test.test, update_engine_util.UpdateEngineUtil):
         update_url = self._autotest_devserver.get_update_url(build)
         statefuldev_url = update_url.replace('update', 'static')
         statefuldev_url += '/stateful.tgz'
-        cmd = ['curl', '--silent', '--max-time', '300',
-               statefuldev_url, '|', 'tar', '--ignore-command-error',
-               '--overwrite','--directory', '/mnt/stateful_partition', '-xz']
+        cmd = [
+                'curl', '--silent', '--show-error', '--max-time', '600',
+                statefuldev_url, '|', 'tar', '--ignore-command-error',
+                '--overwrite', '--directory', '/mnt/stateful_partition', '-xz'
+        ]
         try:
             self._run(cmd)
         except error.AutoservRunError as e:

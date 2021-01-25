@@ -135,6 +135,29 @@ class bluetooth_AdapterCLHealth(BluetoothAdapterQuickTests,
         self.connect_disconnect_loop(device=device, loops=3)
 
 
+    @test_wrapper('Page scan during Inquiry', devices={"MOUSE": 1})
+    def cl_page_scan_during_inquiry(self):
+        """Checks page scan is working during inquiry.
+
+        Scan and pair peer device.
+        Start inquiry.
+        Disconnect peer device from DUT.
+        Reconnect peer device by initiating connection from peer.
+        """
+        device = self.devices['MOUSE'][0]
+
+        # Setup
+        self.assert_discover_and_pair(device)
+        self.test_start_discovery()
+
+        # Disconnection should set up page scan so a reconnect immediately
+        # afterwards should always succeed
+        self.test_disconnection_by_adapter(device.address)
+        self.test_connection_by_device(device)
+
+        # Cleanup
+        self.test_stop_discovery()
+
     @test_wrapper('SDP Service Browse Test', devices={"BLUETOOTH_TESTER":1})
     def cl_sdp_service_browse_test(self):
         """Performs sdp browse with tester peripheral"""

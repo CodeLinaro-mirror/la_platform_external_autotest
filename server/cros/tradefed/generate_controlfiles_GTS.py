@@ -49,6 +49,7 @@ CONFIG['CTS_MAX_RETRIES'] = {}
 # Modules that run very long are encoded here.
 CONFIG['CTS_TIMEOUT_DEFAULT'] = 0.2
 CONFIG['CTS_TIMEOUT'] = {
+        'GtsAssistantMicHostTestCases': 0.5,
         'GtsExoPlayerTestCases': 1.5,
         'GtsGmscoreHostTestCases': 1.0,
         'GtsMediaTestCases': 4,

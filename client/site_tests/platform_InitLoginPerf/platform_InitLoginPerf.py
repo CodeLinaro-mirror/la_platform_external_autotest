@@ -23,7 +23,9 @@ def is_attestation_prepared():
     @return: Attestation readiness status - True/False.
 
     """
-    return cryptohome.get_tpm_more_status().get('attestation_prepared', False)
+    return cryptohome.get_tpm_attestation_status().get(
+            'prepared_for_enrollment', False)
+
 
 def get_bootstat_timestamp(name, occurrence):
     """Gets the timestamp in ms of the given timestamp name and occurrence
@@ -177,7 +179,7 @@ class platform_InitLoginPerf(test.test):
                                     expected_value=True,
                                     timeout_sec=timeout):
             logging.debug('tpm_more_status: %r',
-                          cryptohome.get_tpm_more_status())
+                          cryptohome.get_tpm_attestation_status())
             raise error.TestFail('Timeout waiting for attestation_prepared')
 
     def get_init_durations(self):

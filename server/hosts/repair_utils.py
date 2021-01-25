@@ -65,6 +65,39 @@ class SshVerifier(hosts.Verifier):
         return 'host is available via ssh'
 
 
+class PingVerifier(hosts.Verifier):
+    """
+    Verifier to test a host's accessibility via `ping`.
+
+    This verifier checks whether a given host is reachable over `ping`.
+    The device is pingable as soon as booted to level when network driver
+    can respond.
+    In the event of failure, it distinguishes one of distinct conditions:
+      * The host can't be found with a DNS lookup.
+      * The host doesn't booted with network drivers.
+    """
+
+    @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
+    def verify(self, host):
+        if host.is_up_fast(count=10):
+            return
+        msg = 'No answer to ping to %s'
+        ip_address = None
+        try:
+            ip_address = socket.gethostbyname(host.hostname)
+        except Exception as e:
+            logging.exception('DNS lookup failure')
+            msg = 'Unable to look up %s in DNS: %s' % (host.hostname, str(e))
+            raise hosts.AutoservVerifyError(msg)
+        if not ip_address:
+            msg = 'Hostname: %s not present in DNS' % host.hostname
+            raise hosts.AutoservVerifyError(msg)
+
+    @property
+    def description(self):
+        return 'host is available via ping'
+
+
 class LegacyHostVerifier(hosts.Verifier):
     """
     Ask a Host instance to perform its own verification.

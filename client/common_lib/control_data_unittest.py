@@ -6,13 +6,15 @@ from __future__ import division
 from __future__ import print_function
 
 import json
-import os, unittest
+import os
 import six
 from six.moves import range
+import unittest
 
 import common
 
 from autotest_lib.client.common_lib import control_data, autotemp
+
 
 ControlData = control_data.ControlData
 
@@ -86,7 +88,7 @@ class ParseControlTest(unittest.TestCase):
     def setUp(self):
         self.control_tmp = autotemp.tempfile(unique_id='control_unit',
                                              text=True)
-        os.write(self.control_tmp.fd, CONTROL)
+        os.write(self.control_tmp.fd, str.encode(CONTROL))
 
 
     def tearDown(self):
@@ -95,21 +97,20 @@ class ParseControlTest(unittest.TestCase):
 
     def test_parse_control(self):
         cd = control_data.parse_control(self.control_tmp.name, True)
-        self.assertEquals(cd.author, "Author")
-        self.assertEquals(cd.dependencies, set(['console', 'power']))
-        self.assertEquals(cd.doc, "doc stuff")
-        self.assertEquals(cd.experimental, False)
-        self.assertEquals(cd.name, "nAmE")
-        self.assertEquals(cd.run_verify, False)
-        self.assertEquals(cd.sync_count, 2)
-        self.assertEquals(cd.time, "short")
-        self.assertEquals(cd.test_class, "kernel")
-        self.assertEquals(cd.test_category, "stress")
-        self.assertEquals(cd.test_type, "client")
-        self.assertEquals(cd.require_ssp, False)
-        self.assertEquals(cd.attributes, set(["suite:smoke","suite:bvt"]))
-        self.assertEquals(cd.suite,
-                          "bvt,smoke,suite-listed-only-in-suite-line")
+        self.assertEqual(cd.author, "Author")
+        self.assertEqual(cd.dependencies, set(['console', 'power']))
+        self.assertEqual(cd.doc, "doc stuff")
+        self.assertEqual(cd.experimental, False)
+        self.assertEqual(cd.name, "nAmE")
+        self.assertEqual(cd.run_verify, False)
+        self.assertEqual(cd.sync_count, 2)
+        self.assertEqual(cd.time, "short")
+        self.assertEqual(cd.test_class, "kernel")
+        self.assertEqual(cd.test_category, "stress")
+        self.assertEqual(cd.test_type, "client")
+        self.assertEqual(cd.require_ssp, False)
+        self.assertEqual(cd.attributes, set(["suite:smoke", "suite:bvt"]))
+        self.assertEqual(cd.suite, "bvt,smoke,suite-listed-only-in-suite-line")
 
 
 class ParseWrappedControlTest(unittest.TestCase):
@@ -117,7 +118,7 @@ class ParseWrappedControlTest(unittest.TestCase):
     def setUp(self):
         self.control_tmp = autotemp.tempfile(unique_id='wrapped_control_unit',
                                              text=True)
-        os.write(self.control_tmp.fd, WRAPPED_CONTROL)
+        os.write(self.control_tmp.fd, str.encode(WRAPPED_CONTROL))
 
 
     def tearDown(self):
@@ -126,22 +127,21 @@ class ParseWrappedControlTest(unittest.TestCase):
 
     def test_parse_control(self):
         cd = control_data.parse_control(self.control_tmp.name, True)
-        self.assertEquals(cd.author, "Author")
-        self.assertEquals(cd.dependencies, set(['console', 'power']))
-        self.assertEquals(cd.doc, "doc stuff")
-        self.assertEquals(cd.experimental, False)
-        self.assertEquals(cd.name, "nAmE")
-        self.assertEquals(cd.run_verify, False)
-        self.assertEquals(cd.sync_count, 2)
-        self.assertEquals(cd.time, "short")
-        self.assertEquals(cd.test_class, "kernel")
-        self.assertEquals(cd.test_category, "stress")
-        self.assertEquals(cd.test_type, "client")
-        self.assertEquals(cd.require_ssp, False)
-        self.assertEquals(cd.attributes, set(["suite:smoke","suite:bvt"]))
-        self.assertEquals(cd.suite,
-                          "bvt,smoke,suite-listed-only-in-suite-line")
-        self.assertEquals(cd.max_result_size_KB, 20000)
+        self.assertEqual(cd.author, "Author")
+        self.assertEqual(cd.dependencies, set(['console', 'power']))
+        self.assertEqual(cd.doc, "doc stuff")
+        self.assertEqual(cd.experimental, False)
+        self.assertEqual(cd.name, "nAmE")
+        self.assertEqual(cd.run_verify, False)
+        self.assertEqual(cd.sync_count, 2)
+        self.assertEqual(cd.time, "short")
+        self.assertEqual(cd.test_class, "kernel")
+        self.assertEqual(cd.test_category, "stress")
+        self.assertEqual(cd.test_type, "client")
+        self.assertEqual(cd.require_ssp, False)
+        self.assertEqual(cd.attributes, set(["suite:smoke", "suite:bvt"]))
+        self.assertEqual(cd.suite, "bvt,smoke,suite-listed-only-in-suite-line")
+        self.assertEqual(cd.max_result_size_KB, 20000)
 
 
 class ParseControlFileBugTemplate(unittest.TestCase):
@@ -190,7 +190,8 @@ class ParseControlFileBugTemplate(unittest.TestCase):
 
     def test_bug_template_parsing(self):
         """Basic parsing test for a bug templates in a test control file."""
-        os.write(self.control_tmp.fd, self.insert_bug_template(CONTROL))
+        os.write(self.control_tmp.fd,
+                 str.encode(self.insert_bug_template(CONTROL)))
         cd = control_data.parse_control(self.control_tmp.name, True)
         self.verify_bug_template(cd.bug_template)
 
@@ -198,7 +199,8 @@ class ParseControlFileBugTemplate(unittest.TestCase):
     def test_bug_template_list(self):
         """Test that lists in the bug template can handle other datatypes."""
         self.bug_template['labels'].append({'foo': 'bar'})
-        os.write(self.control_tmp.fd, self.insert_bug_template(CONTROL))
+        os.write(self.control_tmp.fd,
+                 str.encode(self.insert_bug_template(CONTROL)))
         cd = control_data.parse_control(self.control_tmp.name, True)
         self.verify_bug_template(cd.bug_template)
 
@@ -206,7 +208,8 @@ class ParseControlFileBugTemplate(unittest.TestCase):
     def test_bad_template(self):
         """Test that a bad bug template doesn't result in a bad control data."""
         self.bug_template = 'foobarbug_template'
-        os.write(self.control_tmp.fd, self.insert_bug_template(CONTROL))
+        os.write(self.control_tmp.fd,
+                 str.encode(self.insert_bug_template(CONTROL)))
         cd = control_data.parse_control(self.control_tmp.name, True)
         self.assertFalse(hasattr(cd, 'bug_template'))
 
@@ -224,13 +227,13 @@ class SetMethodTests(unittest.TestCase):
     def test_bool(self):
         cd = ControlData({}, 'filename')
         cd._set_bool('foo', 'False')
-        self.assertEquals(cd.foo, False)
+        self.assertEqual(cd.foo, False)
         cd._set_bool('foo', True)
-        self.assertEquals(cd.foo, True)
+        self.assertEqual(cd.foo, True)
         cd._set_bool('foo', 'FALSE')
-        self.assertEquals(cd.foo, False)
+        self.assertEqual(cd.foo, False)
         cd._set_bool('foo', 'true')
-        self.assertEquals(cd.foo, True)
+        self.assertEqual(cd.foo, True)
         self.assertRaises(ValueError, cd._set_bool, 'foo', '')
         self.assertRaises(ValueError, cd._set_bool, 'foo', 1)
         self.assertRaises(ValueError, cd._set_bool, 'foo', [])
@@ -240,11 +243,11 @@ class SetMethodTests(unittest.TestCase):
     def test_int(self):
         cd = ControlData({}, 'filename')
         cd._set_int('foo', 0)
-        self.assertEquals(cd.foo, 0)
+        self.assertEqual(cd.foo, 0)
         cd._set_int('foo', '0')
-        self.assertEquals(cd.foo, 0)
+        self.assertEqual(cd.foo, 0)
         cd._set_int('foo', '-1', min=-2, max=10)
-        self.assertEquals(cd.foo, -1)
+        self.assertEqual(cd.foo, -1)
         self.assertRaises(ValueError, cd._set_int, 'foo', 0, min=1)
         self.assertRaises(ValueError, cd._set_int, 'foo', 1, max=0)
         self.assertRaises(ValueError, cd._set_int, 'foo', 'x')
@@ -255,40 +258,40 @@ class SetMethodTests(unittest.TestCase):
     def test_set(self):
         cd = ControlData({}, 'filename')
         cd._set_set('foo', 'a')
-        self.assertEquals(cd.foo, set(['a']))
+        self.assertEqual(cd.foo, set(['a']))
         cd._set_set('foo', 'a,b,c')
-        self.assertEquals(cd.foo, set(['a', 'b', 'c']))
+        self.assertEqual(cd.foo, set(['a', 'b', 'c']))
         cd._set_set('foo', ' a , b , c     ')
-        self.assertEquals(cd.foo, set(['a', 'b', 'c']))
+        self.assertEqual(cd.foo, set(['a', 'b', 'c']))
         cd._set_set('foo', None)
-        self.assertEquals(cd.foo, set(['None']))
+        self.assertEqual(cd.foo, set(['None']))
 
 
     def test_string(self):
         cd = ControlData({}, 'filename')
         cd._set_string('foo', 'a')
-        self.assertEquals(cd.foo, 'a')
+        self.assertEqual(cd.foo, 'a')
         cd._set_string('foo', 'b')
-        self.assertEquals(cd.foo, 'b')
+        self.assertEqual(cd.foo, 'b')
         cd._set_string('foo', 'B')
-        self.assertEquals(cd.foo, 'B')
+        self.assertEqual(cd.foo, 'B')
         cd._set_string('foo', 1)
-        self.assertEquals(cd.foo, '1')
+        self.assertEqual(cd.foo, '1')
         cd._set_string('foo', None)
-        self.assertEquals(cd.foo, 'None')
+        self.assertEqual(cd.foo, 'None')
         cd._set_string('foo', [])
-        self.assertEquals(cd.foo, '[]')
+        self.assertEqual(cd.foo, '[]')
 
 
     def test_option(self):
         options = ['a', 'b']
         cd = ControlData({}, 'filename')
         cd._set_option('foo', 'a', options)
-        self.assertEquals(cd.foo, 'a')
+        self.assertEqual(cd.foo, 'a')
         cd._set_option('foo', 'b', options)
-        self.assertEquals(cd.foo, 'b')
+        self.assertEqual(cd.foo, 'b')
         cd._set_option('foo', 'B', options)
-        self.assertEquals(cd.foo, 'B')
+        self.assertEqual(cd.foo, 'B')
         self.assertRaises(ValueError, cd._set_option,
                           'foo', 'x', options)
         self.assertRaises(ValueError, cd._set_option,
@@ -302,7 +305,7 @@ class SetMethodTests(unittest.TestCase):
     def test_set_attributes(self):
         cd = ControlData({}, 'filename')
         cd.set_attributes('suite:bvt')
-        self.assertEquals(cd.attributes, set(['suite:bvt']))
+        self.assertEqual(cd.attributes, set(['suite:bvt']))
 
 
     def test_get_test_time_index(self):

@@ -329,16 +329,37 @@ def parse_cf_text_many(control_file_texts,
         # path, text, forgiving_error configuration, and test arguments.
         paths, texts = list(zip(*control_file_texts_all))
         worker_data = list(zip(paths, texts, [forgiving_error] * len(paths),
-                          [test_args] * len(paths)))
+                           [test_args] * len(paths)))
         pool = multiprocessing.Pool(processes=get_process_limit())
-        result_list = pool.map(parse_cf_text_process, worker_data)
+        raw_result_list = pool.map(parse_cf_text_process, worker_data)
         pool.close()
         pool.join()
 
-        # Convert [(path, test), ...] to {path: test, ...}
+        result_list = _current_py_compatible_files(raw_result_list)
         tests = dict(result_list)
 
     return tests
+
+
+def _current_py_compatible_files(control_files):
+    """Given a list of control_files, return a list of compatible files.
+
+    Remove blanks/ctrl files with errors (aka not python3 when running
+    python3 compatible) items so the dict conversion doesn't fail.
+
+    @return: List of control files filtered down to those who are compatible
+             with the current running version of python
+    """
+    result_list = []
+    for item in control_files:
+        if item:
+            result_list.append(item)
+        elif six.PY2:
+            # Only raise the error in python 2 environments, for now. See
+            # crbug.com/990593
+            raise error.ControlFileMalformed(
+                "Blank or invalid control file. See log for details.")
+    return result_list
 
 
 def retrieve_control_data_for_test(cf_getter, test_name):

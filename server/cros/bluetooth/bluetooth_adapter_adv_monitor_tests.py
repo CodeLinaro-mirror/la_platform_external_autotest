@@ -10,6 +10,7 @@ import array
 
 from autotest_lib.client.bin import utils
 from autotest_lib.server.cros.bluetooth import bluetooth_adapter_tests
+from autotest_lib.client.common_lib import error
 
 
 class TestMonitor():
@@ -149,6 +150,15 @@ class BluetoothAdapterAdvMonitorTests(
 
     test_case_log = bluetooth_adapter_tests.test_case_log
     test_retry_and_log = bluetooth_adapter_tests.test_retry_and_log
+
+
+    def advmon_check_manager_interface_exist(self):
+        """Check if AdvertisementMonitorManager1 interface is available.
+
+        @returns: True if Manager interface is available, False otherwise.
+
+        """
+        return self.bluetooth_facade.advmon_check_manager_interface_exist()
 
 
     def read_supported_types(self):
@@ -350,6 +360,45 @@ class BluetoothAdapterAdvMonitorTests(
         return True
 
 
+    def test_is_controller_offloading_supported(self):
+        """Check if controller based RSSI filtering is supported.
+
+            By default the LE_SCAN_FILTER_DUP flag is enabled on all platforms.
+            Due to this, the host does not receive as many advertisements during
+            passive scanning, which causes SW based RSSI filtering not to work
+            as intended. So, if the controller offloading is not supported, skip
+            the tests that involves RSSI filtering and raise TEST_NA.
+
+            @raises: TestNA if controller based RSSI filtering is not supported.
+
+        """
+        supported_features = self.read_supported_features()
+        if not supported_features:
+            logging.info('Controller offloading not supported')
+            raise error.TestNAError('Controller offloading not supported')
+
+
+    def test_is_adv_monitoring_supported(self, require_rssi_filtering = False):
+        """Check if Adv Monitor API is supported.
+
+            If AdvMonitor API is not supported by the platform,
+            AdvertisementMonitorManager1 interface won't be exposed by
+            bluetoothd. In such case, skip the test and raise TestNA.
+
+            @param require_rssi_filtering: True if test requires RSSI filtering.
+
+            @raises: TestNA if Adv Monitor API is not supported or if controller
+                     based RSSI filtering is not supported.
+
+        """
+        if not self.advmon_check_manager_interface_exist():
+            logging.info('Advertisement Monitor API not supported')
+            raise error.TestNAError('Advertisement Monitor API not supported')
+
+        if require_rssi_filtering:
+            self.test_is_controller_offloading_supported()
+
+
     @test_retry_and_log(False)
     def test_exit_app(self, app_id):
         """Test exit application.
@@ -472,7 +521,7 @@ class BluetoothAdapterAdvMonitorTests(
         return expected == released
 
 
-    @test_retry_and_log(False)
+    @test_retry_and_log(True)
     def test_device_found(self, monitor, count, delay=0):
         """Test if the DeviceFound method on a monitor has been invoked or not.
 
@@ -494,7 +543,7 @@ class BluetoothAdapterAdvMonitorTests(
         checked_count = self.get_event_count(app_id, monitor_id, 'DeviceFound')
 
         if count == self.MULTIPLE_EVENTS:
-            return checked_count > 1
+            return checked_count > 0
 
         return checked_count == count
 
@@ -902,6 +951,8 @@ class BluetoothAdapterAdvMonitorTests(
         Validate register/unregister app and create/remove monitor.
 
         """
+        self.test_is_adv_monitoring_supported()
+
         # Create a test app instance.
         app1 = self.create_app()
 
@@ -966,6 +1017,8 @@ class BluetoothAdapterAdvMonitorTests(
         values.
 
         """
+        self.test_is_adv_monitoring_supported()
+
         # Create a test app instance.
         app1 = self.create_app()
 
@@ -1069,6 +1122,110 @@ class BluetoothAdapterAdvMonitorTests(
         self.test_exit_app(app1)
 
 
+    def advmon_test_pattern_filter_only(self):
+        """Test case: PATTERN_FILTER_ONLY
+
+        Verify matching of advertisements w.r.t. various pattern values and
+        different AD Data Types - Local Name Service UUID and Device Type.
+        Test working of patterns filter matching with multiple clients,
+        multiple monitors and suspend/resume, without RSSI filtering.
+
+        """
+        self.test_is_adv_monitoring_supported()
+        self.test_setup_peer_devices()
+
+        # Create two test app instances.
+        app1 = self.create_app()
+        app2 = self.create_app()
+
+        # Register both apps, should not fail.
+        self.test_register_app(app1)
+        self.test_register_app(app2)
+
+        # Add monitors in both apps.
+        monitor1 = TestMonitor(app1)
+        monitor1.update_type('or_patterns')
+        monitor1.update_patterns([
+                [5, 0x09, '_REF'],
+        ])
+        monitor1.update_rssi([127, 0, 127, 0])
+
+        monitor2 = TestMonitor(app1)
+        monitor2.update_type('or_patterns')
+        monitor2.update_patterns([
+                [0, 0x03, [0x12, 0x18]],
+        ])
+        monitor2.update_rssi([127, 0, 127, 0])
+
+        monitor3 = TestMonitor(app2)
+        monitor3.update_type('or_patterns')
+        monitor3.update_patterns([
+                [0, 0x19, [0xc1, 0x03]],
+                [0, 0x09, 'MOUSE'],
+        ])
+        monitor3.update_rssi([127, 0, 127, 0])
+
+        monitor4 = TestMonitor(app2)
+        monitor4.update_type('or_patterns')
+        monitor4.update_patterns([
+                [0, 0x19, [0xc1, 0x03]],
+                [0, 0x19, [0xc3, 0x03]],
+        ])
+        monitor4.update_rssi([127, 0, 127, 0])
+
+        # Activate should get invoked.
+        self.test_add_monitor(monitor1, expected_activate=True)
+        self.test_add_monitor(monitor2, expected_activate=True)
+        self.test_add_monitor(monitor3, expected_activate=True)
+        self.test_add_monitor(monitor4, expected_activate=True)
+
+        # DeviceFound for mouse should get triggered only for monitors
+        # matching the adv pattern filter.
+        self.test_start_peer_device_adv(self.peer_mouse, duration=5)
+        self.test_device_found(monitor1, count=self.MULTIPLE_EVENTS)
+        self.test_device_found(monitor2, count=self.MULTIPLE_EVENTS)
+        self.test_device_found(monitor3, count=self.MULTIPLE_EVENTS)
+        # Device type 0xc203 should not match.
+        self.test_device_found(monitor4, count=0)
+        self.test_stop_peer_device_adv(self.peer_mouse)
+
+        # Initiate suspend/resume.
+        self.suspend_resume()
+
+        # Remove a monitor from one app, shouldn't affect working of other
+        # monitors or apps.
+        self.test_remove_monitor(monitor1)
+
+        # Reset event counts before next test.
+        self.test_reset_event_count(monitor2)
+        self.test_reset_event_count(monitor3)
+
+        # DeviceFound for mouse should get triggered again for monitors
+        # matching the adv pattern filter.
+        self.test_start_peer_device_adv(self.peer_mouse, duration=5)
+        self.test_device_found(monitor2, count=self.MULTIPLE_EVENTS)
+        self.test_device_found(monitor3, count=self.MULTIPLE_EVENTS)
+        self.test_stop_peer_device_adv(self.peer_mouse)
+
+        # Terminate an app, shouldn't affect working of monitors in other apps.
+        self.test_exit_app(app1)
+
+        # Reset event counts before next test.
+        self.test_reset_event_count(monitor3)
+
+        # DeviceFound should get triggered for keyboard.
+        self.test_start_peer_device_adv(self.peer_keybd, duration=5)
+        self.test_device_found(monitor3, count=self.MULTIPLE_EVENTS)
+        self.test_device_found(monitor4, count=self.MULTIPLE_EVENTS)
+        self.test_stop_peer_device_adv(self.peer_keybd)
+
+        # Unregister the running app, should not fail.
+        self.test_unregister_app(app2)
+
+        # Terminate the running test app instance.
+        self.test_exit_app(app2)
+
+
     def advmon_test_pattern_filter_1(self):
         """Test case: PATTERN_FILTER_1
 
@@ -1076,6 +1233,7 @@ class BluetoothAdapterAdvMonitorTests(
         different AD Data Types - Local Name Service UUID and Device Type.
 
         """
+        self.test_is_adv_monitoring_supported(require_rssi_filtering = True)
         self.test_setup_peer_devices()
 
         # Create a test app instance.
@@ -1171,6 +1329,7 @@ class BluetoothAdapterAdvMonitorTests(
         Verify unset RSSI filter and filter with no matching RSSI values.
 
         """
+        self.test_is_adv_monitoring_supported(require_rssi_filtering = True)
         self.test_setup_peer_devices()
 
         # Create a test app instance.
@@ -1224,6 +1383,7 @@ class BluetoothAdapterAdvMonitorTests(
         Verify RSSI filter matching with multiple peer devices.
 
         """
+        self.test_is_adv_monitoring_supported(require_rssi_filtering = True)
         self.test_setup_peer_devices()
 
         # Create a test app instance.
@@ -1288,6 +1448,7 @@ class BluetoothAdapterAdvMonitorTests(
         Verify reset of RSSI timers based on advertisements.
 
         """
+        self.test_is_adv_monitoring_supported(require_rssi_filtering = True)
         self.test_setup_peer_devices()
 
         # Create a test app instance.
@@ -1355,6 +1516,7 @@ class BluetoothAdapterAdvMonitorTests(
         clients and multiple monitors.
 
         """
+        self.test_is_adv_monitoring_supported(require_rssi_filtering = True)
         self.test_setup_peer_devices()
 
         # Create two test app instances.
@@ -1441,6 +1603,7 @@ class BluetoothAdapterAdvMonitorTests(
         working of each other.
 
         """
+        self.test_is_adv_monitoring_supported()
         self.test_setup_peer_devices()
 
         # Create a test app instance.
@@ -1492,7 +1655,7 @@ class BluetoothAdapterAdvMonitorTests(
 
         # DeviceFound should get triggered for keyboard.
         self.test_reset_event_count(monitor1)
-        self.test_start_peer_device_adv(self.peer_keybd, duration=5)
+        self.test_start_peer_device_adv(self.peer_keybd, duration=10)
         self.test_device_found(monitor1, count=self.MULTIPLE_EVENTS)
         self.test_stop_peer_device_adv(self.peer_keybd)
 
@@ -1527,6 +1690,7 @@ class BluetoothAdapterAdvMonitorTests(
         Verify working of background scanning with suspend/resume.
 
         """
+        self.test_is_adv_monitoring_supported(require_rssi_filtering = True)
         self.test_setup_peer_devices()
 
         # Create two test app instances.
@@ -1601,6 +1765,8 @@ class BluetoothAdapterAdvMonitorTests(
 
     def advmon_test_interleaved_scan(self):
         """ Test cases for verifying interleave scan """
+
+        self.test_is_adv_monitoring_supported()
 
         # cycles to collect logs for tests expect no interleave scan
         EXPECT_FALSE_TEST_CYCLE = 3

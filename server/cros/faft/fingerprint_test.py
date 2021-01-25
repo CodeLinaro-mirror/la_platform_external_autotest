@@ -431,7 +431,8 @@ class FingerprintTest(test.test):
         See go/cros-fingerprint-firmware-branching-and-signing.
         """
         # Use cros_config to get fingerprint board.
-        result = self._run_cros_config_cmd('board')
+        # Due to b/160271883, we will try running the cmd via cat instead.
+        result = self._run_cros_config_cmd_cat('fingerprint/board')
         if result.exit_status != 0:
             raise error.TestFail(
                 'Unable to get fingerprint board with cros_config')
@@ -895,6 +896,11 @@ class FingerprintTest(test.test):
               + command
         result = self.run_cmd(cmd)
         return result
+
+    def _run_cros_config_cmd_cat(self, command):
+        """Runs cat /run/chromeos-config/v1 on DUT; return result."""
+        cmd = "cat /run/chromeos-config/v1/{}".format(command)
+        return self.run_cmd(cmd)
 
     def _run_dump_fmap_cmd(self, fw_file, section):
         """

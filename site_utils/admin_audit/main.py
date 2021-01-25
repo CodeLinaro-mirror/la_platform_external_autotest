@@ -38,16 +38,19 @@ ACTION_VERIFY_SERVO_USB = 'verify-servo-usb-drive'
 ACTION_VERIFY_SERVO_FW = 'verify-servo-fw'
 ACTION_FLASH_SERVO_KEYBOARD_MAP = 'flash-servo-keyboard-map'
 ACTION_VERIFY_DUT_MACADDR = 'verify-dut-macaddr'
+ACTION_VERIFY_RPM_CONFIG = 'verify-rpm-config'
 
 _LOG_FILE = 'audit.log'
 _SERVO_UART_LOGS = 'servo_uart'
 
 VERIFIER_MAP = {
-    ACTION_VERIFY_DUT_STORAGE: verifiers.VerifyDutStorage,
-    ACTION_VERIFY_SERVO_USB: verifiers.VerifyServoUsb,
-    ACTION_VERIFY_SERVO_FW: verifiers.VerifyServoFw,
-    ACTION_FLASH_SERVO_KEYBOARD_MAP: verifiers.FlashServoKeyboardMapVerifier,
-    ACTION_VERIFY_DUT_MACADDR: verifiers.VerifyDUTMacAddress,
+        ACTION_VERIFY_DUT_STORAGE: verifiers.VerifyDutStorage,
+        ACTION_VERIFY_SERVO_USB: verifiers.VerifyServoUsb,
+        ACTION_VERIFY_SERVO_FW: verifiers.VerifyServoFw,
+        ACTION_FLASH_SERVO_KEYBOARD_MAP:
+        verifiers.FlashServoKeyboardMapVerifier,
+        ACTION_VERIFY_DUT_MACADDR: verifiers.VerifyDUTMacAddress,
+        ACTION_VERIFY_RPM_CONFIG: verifiers.VerifyRPMConfig,
 }
 
 # Actions required Servod service

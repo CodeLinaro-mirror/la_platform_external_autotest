@@ -30,6 +30,9 @@ def run_TS(machine):
         retry_manual_tests=True,
         use_jdk9=True,
         warn_on_test_retry=False,
+        # This module has a known waived abort bug (b/173331969). As long as the
+        # executed test count matches the known number, assume all tests ran.
+        executable_test_count=[0],
         timeout=720)
 
 parallel_simple(run_TS, machines)

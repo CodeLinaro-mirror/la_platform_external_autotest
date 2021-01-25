@@ -127,16 +127,14 @@ class BluetoothAdapterBetterTogether(BluetoothAdapterQuickTests,
        3. Stop the discovery after the device was found.
        4. Set the LE connection parameters to reduce the min and max
           connection intervals to 6.
-       5. Pause the discovery sessions from all the clients.
-       6. Connect the device.
-       7. Unpause the discovery sessions once the device was connected.
-       8. Set the Trusted property of the device to true.
-       9. Verify all the services were resolved.
-       10. Start notification on the RX characteristic of the
+       5. Connect the device.
+       6. Set the Trusted property of the device to true.
+       7. Verify all the services were resolved.
+       8. Start notification on the RX characteristic of the
            Proximity Service.
-       11. Exchange some messages with the peer device to authorize it.
-       12. Stop the notification.
-       13. Disconnect the device.
+       9. Exchange some messages with the peer device to authorize it.
+       10. Stop the notification.
+       11. Disconnect the device.
     """
 
     filter = {'Transport':'le'}
@@ -151,9 +149,7 @@ class BluetoothAdapterBetterTogether(BluetoothAdapterQuickTests,
       self.test_discover_device(address)
 
       self.test_set_le_connection_parameters(address, parameters)
-      self.test_pause_discovery()
       self.test_connection_by_adapter(address)
-      self.test_unpause_discovery()
 
       self.test_set_trusted(address)
       self.test_service_resolved(address)

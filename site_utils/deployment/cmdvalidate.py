@@ -177,6 +177,11 @@ def _validate_board(board):
     # an error message.
     if board is None:
         return False
+
+    # TODO b:169251326 terms below (and in the comment above) are set outside
+    # of this codebase and should be updated when possible.
+    # ("master" -> "main")
+
     # Check Google storage; report failures on stderr.
     if _build_path_exists(board, 'LATEST-master'):
         return True

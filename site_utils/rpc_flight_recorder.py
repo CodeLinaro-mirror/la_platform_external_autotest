@@ -10,7 +10,7 @@ import sys
 import time
 import logging
 import multiprocessing
-import urllib2
+from six.moves import urllib
 
 import common
 from autotest_lib.client.common_lib import global_config
@@ -224,7 +224,7 @@ class AfeMonitor(object):
                 if expected is not None and expected != result:
                     _failed(f, msg_str, 'IncorrectResponse')
 
-            except urllib2.HTTPError as e:
+            except urllib.error.HTTPError as e:
                 _failed(f, msg_str, 'HTTPError:%d' % e.code)
 
             except Exception as e:

@@ -17,7 +17,8 @@ from autotest_lib.server.hosts import repair_utils
 
 
 CROS_VERIFY_DAG = (
-        (repair_utils.SshVerifier, 'ssh', ()),
+        (repair_utils.PingVerifier, 'ping', ()),
+        (repair_utils.SshVerifier, 'ssh', ('ping', )),
         (cros_repair.ServoUSBDriveVerifier, 'usb_drive', ()),
         (cros_repair.DevDefaultBootVerifier, 'dev_default_boot', ('ssh', )),
         (cros_repair.DevModeVerifier, 'devmode', ('ssh', )),
@@ -40,10 +41,12 @@ CROS_VERIFY_DAG = (
 
 CROS_REPAIR_ACTIONS = (
         (repair_utils.RPMCycleRepair, 'rpm', (), (
+                'ping',
                 'ssh',
                 'power',
         )),
         (cros_repair.ServoResetRepair, 'servoreset', (), (
+                'ping',
                 'ssh',
                 'stop_start_ui',
                 'power',
@@ -52,13 +55,16 @@ CROS_REPAIR_ACTIONS = (
                 cros_repair.ServoCr50RebootRepair,
                 'cr50_reset',
                 (),
-                ('ssh', 'stop_start_ui', 'power'),
+                ('ping', 'ssh', 'stop_start_ui', 'power'),
         ),
-        (cros_repair.ServoSysRqRepair, 'sysrq', (), ('ssh', )),
+        (cros_repair.ServoSysRqRepair, 'sysrq', (), (
+                'ping',
+                'ssh',
+        )),
         (cros_repair.LabelCleanupRepair, 'label_cleanup', ('ssh', ),
          ('cros_version_label', )),
         (cros_firmware.FaftFirmwareRepair, 'faft_firmware_repair', (),
-         ('ssh', 'fwstatus', 'good_provision')),
+         ('ping', 'ssh', 'fwstatus', 'good_provision')),
         (cros_repair.DevDefaultBootRepair, 'set_default_boot', ('ssh', ),
          ('dev_default_boot', )),
         (cros_repair.CrosRebootRepair, 'reboot', ('ssh', ), (
@@ -68,18 +74,22 @@ CROS_REPAIR_ACTIONS = (
         (cros_repair.EnrollmentCleanupRepair, 'cleanup_enrollment', ('ssh', ),
          ('enrollment_state', )),
         (cros_repair.ProvisionRepair, 'provision',
-         ('ssh', 'writable', 'stop_start_ui', 'tpm', 'good_provision', 'ext4'),
-         ('power', 'rwfw', 'fwstatus', 'python', 'cros', 'dev_default_boot')),
-        (cros_repair.PowerWashRepair, 'powerwash', ('ssh', 'writable',
+         ('ping', 'ssh', 'writable', 'stop_start_ui', 'tpm', 'good_provision',
+          'ext4'), ('power', 'rwfw', 'fwstatus', 'python', 'hwid', 'cros',
+                    'dev_default_boot')),
+        (cros_repair.PowerWashRepair, 'powerwash', ('ping', 'ssh', 'writable',
                                                     'stop_start_ui'),
          ('tpm', 'good_provision', 'ext4', 'power', 'rwfw', 'fwstatus',
-          'python', 'cros', 'dev_default_boot')),
+          'python', 'hwid', 'cros', 'dev_default_boot')),
         (cros_repair.ServoInstallRepair, 'usb', ('usb_drive', ),
-         ('ssh', 'writable', 'stop_start_ui', 'tpm', 'good_provision', 'ext4',
-          'power', 'rwfw', 'fwstatus', 'python', 'cros', 'dev_default_boot',
-          'faft_tpm')),
+         ('ping', 'ssh', 'writable', 'stop_start_ui', 'tpm', 'good_provision',
+          'ext4', 'power', 'rwfw', 'fwstatus', 'python', 'hwid', 'cros',
+          'dev_default_boot', 'faft_tpm')),
         (cros_firmware.GeneralFirmwareRepair, 'general_firmware',
-         ('usb_drive', ), ('ssh', )),
+         ('usb_drive', ), (
+                 'ping',
+                 'ssh',
+         )),
 )
 
 MOBLAB_VERIFY_DAG = (
@@ -96,7 +106,8 @@ MOBLAB_REPAIR_ACTIONS = (
 )
 
 JETSTREAM_VERIFY_DAG = (
-        (repair_utils.SshVerifier, 'ssh', ()),
+        (repair_utils.PingVerifier, 'ping', ()),
+        (repair_utils.SshVerifier, 'ssh', ('ping', )),
         (cros_repair.ServoUSBDriveVerifier, 'usb_drive', ()),
         (cros_repair.DevDefaultBootVerifier, 'dev_default_boot', ('ssh', )),
         (cros_repair.DevModeVerifier, 'devmode', ('ssh', )),
@@ -122,16 +133,26 @@ JETSTREAM_VERIFY_DAG = (
 
 JETSTREAM_REPAIR_ACTIONS = (
         (repair_utils.RPMCycleRepair, 'rpm', (), (
+                'ping',
                 'ssh',
                 'power',
         )),
-        (cros_repair.ServoResetRepair, 'servoreset', (), ('ssh', )),
-        (cros_repair.ServoCr50RebootRepair, 'cr50_reset', (), ('ssh', )),
-        (cros_repair.ServoSysRqRepair, 'sysrq', (), ('ssh', )),
+        (cros_repair.ServoResetRepair, 'servoreset', (), (
+                'ping',
+                'ssh',
+        )),
+        (cros_repair.ServoCr50RebootRepair, 'cr50_reset', (), (
+                'ping',
+                'ssh',
+        )),
+        (cros_repair.ServoSysRqRepair, 'sysrq', (), (
+                'ping',
+                'ssh',
+        )),
         (cros_repair.LabelCleanupRepair, 'label_cleanup', ('ssh', ),
          ('cros_version_label', )),
         (cros_firmware.FaftFirmwareRepair, 'faft_firmware_repair', (),
-         ('ssh', 'fwstatus', 'good_provision')),
+         ('ping', 'ssh', 'fwstatus', 'good_provision')),
         (cros_repair.DevDefaultBootRepair, 'set_default_boot', ('ssh', ),
          ('dev_default_boot', )),
         (cros_repair.CrosRebootRepair, 'reboot', ('ssh', ), (
@@ -141,23 +162,26 @@ JETSTREAM_REPAIR_ACTIONS = (
         (cros_repair.EnrollmentCleanupRepair, 'cleanup_enrollment', ('ssh', ),
          ('enrollment_state', )),
         (cros_repair.JetstreamTpmRepair, 'jetstream_tpm_repair',
-         ('ssh', 'writable', 'tpm', 'good_provision', 'ext4'),
-         ('power', 'rwfw', 'fwstatus', 'python', 'cros', 'dev_default_boot',
-          'jetstream_tpm', 'jetstream_attestation')),
+         ('ping', 'ssh', 'writable', 'tpm', 'good_provision', 'ext4'),
+         ('power', 'rwfw', 'fwstatus', 'python', 'hwid', 'cros',
+          'dev_default_boot', 'jetstream_tpm', 'jetstream_attestation')),
         (cros_repair.JetstreamServiceRepair, 'jetstream_service_repair',
-         ('ssh', 'writable', 'tpm', 'good_provision', 'ext4', 'jetstream_tpm',
-          'jetstream_attestation'),
-         ('power', 'rwfw', 'fwstatus', 'python', 'cros', 'dev_default_boot',
-          'jetstream_tpm', 'jetstream_attestation', 'jetstream_services')),
-        (cros_repair.ProvisionRepair, 'provision', ('ssh', 'writable', 'tpm',
-                                                    'good_provision', 'ext4'),
-         ('power', 'rwfw', 'fwstatus', 'python', 'cros', 'dev_default_boot',
-          'jetstream_tpm', 'jetstream_attestation', 'jetstream_services')),
-        (cros_repair.PowerWashRepair, 'powerwash', ('ssh', 'writable'),
+         ('ping', 'ssh', 'writable', 'tpm', 'good_provision', 'ext4',
+          'jetstream_tpm', 'jetstream_attestation'),
+         ('power', 'rwfw', 'fwstatus', 'python', 'hwid', 'cros',
+          'dev_default_boot', 'jetstream_tpm', 'jetstream_attestation',
+          'jetstream_services')),
+        (cros_repair.ProvisionRepair, 'provision',
+         ('ping', 'ssh', 'writable', 'tpm', 'good_provision',
+          'ext4'), ('power', 'rwfw', 'fwstatus', 'python', 'hwid', 'cros',
+                    'dev_default_boot', 'jetstream_tpm',
+                    'jetstream_attestation', 'jetstream_services')),
+        (cros_repair.PowerWashRepair, 'powerwash', ('ping', 'ssh', 'writable'),
          ('tpm', 'good_provision', 'ext4', 'power', 'rwfw', 'fwstatus',
-          'python', 'cros', 'dev_default_boot', 'jetstream_tpm',
+          'python', 'hwid', 'cros', 'dev_default_boot', 'jetstream_tpm',
           'jetstream_attestation', 'jetstream_services')),
         (cros_repair.ServoInstallRepair, 'usb', ('usb_drive', ), (
+                'ping',
                 'ssh',
                 'writable',
                 'tpm',
@@ -167,6 +191,7 @@ JETSTREAM_REPAIR_ACTIONS = (
                 'rwfw',
                 'fwstatus',
                 'python',
+                'hwid',
                 'cros',
                 'dev_default_boot',
                 'jetstream_tpm',

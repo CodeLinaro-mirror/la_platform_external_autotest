@@ -317,8 +317,8 @@ class flashrom_util(object):
         @param region: Region to set (usually WP_RO)
         @param enabled: if True, run --wp-enable; if False, run --wp-disable.
         """
-        cmd = 'flashrom %s --verbose --image %s --wp-region %s' % (
-                self._target_command, image_file, region)
+        cmd = 'flashrom %s --verbose --image %s:%s --wp-region %s' % (
+                self._target_command, region, image_file, region)
         if enabled is not None:
             cmd += ' '
             cmd += '--wp-enable' if enabled else '--wp-disable'

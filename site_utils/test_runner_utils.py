@@ -1,6 +1,11 @@
+# Lint as: python2, python3
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import errno
 import os
@@ -31,6 +36,7 @@ from autotest_lib.server import autoserv_utils
 from autotest_lib.server import server_logging_config
 from autotest_lib.server import utils
 from autotest_lib.utils import labellib
+from six.moves import range
 
 
 _autoserv_proc = None
@@ -463,7 +469,7 @@ def add_ssh_identity(temp_directory, ssh_private_key=TEST_KEY_PATH):
     @param ssh_private_key: Path to the ssh private key to use for testing.
     """
     # Add the testing key to the current ssh agent.
-    if os.environ.has_key('SSH_AGENT_PID'):
+    if 'SSH_AGENT_PID' in os.environ:
         # Copy the testing key to the temp directory and make it NOT
         # world-readable. Otherwise, ssh-add complains.
         shutil.copy(ssh_private_key, temp_directory)

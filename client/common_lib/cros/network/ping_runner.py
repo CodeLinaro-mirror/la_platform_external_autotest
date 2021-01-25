@@ -56,6 +56,13 @@ def _regex_float_from_string(pattern, line):
     return None
 
 
+def _extract_ping_loss(output):
+    for line in output.splitlines():
+        if line.find('packets transmitted') > 0:
+            return line
+    return ''
+
+
 class MacPingDelegate(object):
     """Implement ping functionality for MacOS hosts."""
 
@@ -122,8 +129,7 @@ class MacPingDelegate(object):
         This function will look for both 'stdev' and 'std-dev' in test results
         to support both ping and ping6 commands.
         """
-        loss_line = ([x for x in ping_output.splitlines()
-                if x.find('packets transmitted') > 0] or [''])[0]
+        loss_line = _extract_ping_loss(ping_output)
         sent = _regex_int_from_string('([0-9]+) packets transmitted', loss_line)
         received = _regex_int_from_string('([0-9]+) packets received',
                                           loss_line)
@@ -218,8 +224,7 @@ class LinuxPingDelegate(object):
             time 90 ms
 
         """
-        loss_line = ([x for x in ping_output.splitlines()
-                if x.find('packets transmitted') > 0] or [''])[0]
+        loss_line = _extract_ping_loss(ping_output)
         sent = _regex_int_from_string('([0-9]+) packets transmitted', loss_line)
         received = _regex_int_from_string('([0-9]+) received', loss_line)
         loss = _regex_float_from_string('([0-9]+(\.[0-9]+)?)% packet loss',

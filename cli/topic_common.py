@@ -10,9 +10,9 @@ The atest class contains attributes & method generic to all the CLI
 operations.
 
 The class inheritance is shown here using the command
-'atest host create ...' as an example:
+'atest server list ...' as an example:
 
-atest <-- host <-- host_create <-- site_host_create
+atest <-- server <-- server_list
 
 Note: The site_<topic>.py and its classes are only needed if you need
 to override the common <topic>.py methods with your site specific ones.
@@ -274,7 +274,7 @@ class atest(object):
     Should only be instantiated by itself for usage
     references, otherwise, the <topic> objects should
     be used."""
-    msg_topic = '[acl|host|job|label|shard|test|user|server]'
+    msg_topic = '[acl|job|label|shard|test|user|server]'
     usage_action = '[action]'
     msg_items = ''
 

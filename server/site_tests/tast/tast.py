@@ -461,18 +461,6 @@ class tast(test.test):
         self._run_tast('run', args, self._max_run_sec + tast._RUN_EXIT_SEC,
                        log_stdout=True)
 
-        # Dump a list of the results directory files for log upload issue investigation.
-        # crbug.com/1140286
-        cmd = ['ls', '-Ral', self.resultsdir]
-        utils.run(cmd,
-                  ignore_status=False,
-                  timeout=5,
-                  stdout_tee=utils.TEE_TO_LOGS,
-                  stderr_tee=utils.TEE_TO_LOGS,
-                  stderr_is_expected=False,
-                  stdout_level=logging.INFO,
-                  stderr_level=logging.ERROR)
-
     def _read_run_error(self):
         """Reads a global run error message written by the tast command."""
         # The file is only written if a run error occurred.

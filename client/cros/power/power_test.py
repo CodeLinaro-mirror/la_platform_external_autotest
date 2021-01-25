@@ -95,10 +95,12 @@ class power_Test(test.test):
     def get_extra_browser_args_for_camera_test(self):
         """Return Chrome args for camera power test."""
         ret = [
-            # No pop up to ask permission to record video.
-            '--use-fake-ui-for-media-stream',
-            # Allow 2 windows side by side.
-            '--force-tablet-mode=clamshell',
+                # No pop up to ask permission to record video.
+                '--use-fake-ui-for-media-stream',
+                # Allow 2 windows side by side.
+                '--force-tablet-mode=clamshell',
+                # Prefer using constant frame rate for camera streaming.
+                '--enable-features=PreferConstantFrameRate',
         ]
 
         # Use fake camera for DUT without camera, e.g. chromebox.

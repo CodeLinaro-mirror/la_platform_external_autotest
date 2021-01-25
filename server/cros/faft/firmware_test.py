@@ -586,17 +586,14 @@ class FirmwareTest(test.test):
             """Repeatedly poll for the RootFS partition sysfs node."""
             self.servo.system('ls {}'.format(rootfs))
 
-        # Incremental rollout of a large scale test change.
-        # TODO(kmshelton): Rollout to all platforms.
-        if self.faft_config.platform.lower() in ['coral', 'nami']:
-            try:
-                confirm_rootfs_partition_device_node_readable()
-            except error.AutoservRunError as e:
-                usb_info = telemetry.collect_usb_state(self.servo)
-                raise error.TestError((
-                        'Could not ls the device node for the RootFS on the USB '
-                        'device. %s: %s\nMore telemetry: %s') %
-                                      (type(e).__name__, e, usb_info))
+        try:
+            confirm_rootfs_partition_device_node_readable()
+        except error.AutoservRunError as e:
+            usb_info = telemetry.collect_usb_state(self.servo)
+            raise error.TestError(
+                    ('Could not ls the device node for the RootFS on the USB '
+                     'device. %s: %s\nMore telemetry: %s') %
+                    (type(e).__name__, e, usb_info))
         try:
             self.servo.system('mount -o ro %s %s' % (rootfs, tmpd))
         except error.AutoservRunError as e:
@@ -1003,8 +1000,9 @@ class FirmwareTest(test.test):
         @param enable: True if asserting write protect. Otherwise, False.
         """
         self.set_hardware_write_protect(enable)
-        self.sync_and_ec_reboot()
-        self.switcher.wait_for_client()
+        if hasattr(self, 'ec'):
+            self.sync_and_ec_reboot()
+            self.switcher.wait_for_client()
 
     def run_chromeos_firmwareupdate(self, mode, append=None, options=(),
             ignore_status=False):
@@ -2163,17 +2161,17 @@ class FirmwareTest(test.test):
 
     def _tpm_is_owned(self):
         """Returns True if the tpm is owned"""
-        result = self.host.run('cryptohome --action=tpm_more_status',
+        result = self.host.run('tpm_manager_client status --nonsensitive',
                                ignore_status=True)
         logging.debug(result)
-        return result.exit_status == 0 and 'owned: true' in result.stdout
+        return result.exit_status == 0 and 'is_owned: true' in result.stdout
 
     def clear_fwmp(self):
         """Clear the FWMP"""
         if self.fwmp_is_cleared():
             return
         tpm_utils.ClearTPMOwnerRequest(self.host, wait_for_ready=True)
-        self.host.run('cryptohome --action=tpm_take_ownership')
+        self.host.run('tpm_manager_client take_ownership')
         if not utils.wait_for_value(self._tpm_is_owned, expected_value=True):
             raise error.TestError('Unable to own tpm while clearing fwmp.')
         self.host.run('cryptohome '

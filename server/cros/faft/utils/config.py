@@ -14,34 +14,12 @@ from autotest_lib.client.common_lib import error
 _CONFIG_DIR = os.path.abspath(os.path.join(
         os.path.dirname(os.path.realpath(__file__)), os.pardir,
         'fw-testing-configs'))
-
-def _get_config_dir():
-    """
-    Return the path to the directory containing platform config files.
-
-    We prefer to use _CONFIG_DIR itself, i.e. the Autotest checkout of
-    the fw-testing-configs repository. However, if that directory cannot
-    be found, then instead use the old configs/ directory.
-
-    """
-    assert os.path.isdir(_CONFIG_DIR)
-    return _CONFIG_DIR
-
-def _get_config_filepath(platform):
-    """Find the JSON file containing the platform's config"""
-    return os.path.join(_get_config_dir(), '%s.json' % platform)
+_CONSOLIDATED_JSON_BASENAME = 'CONSOLIDATED.json'
 
 
-def _has_config_file(platform):
-    """Determine whether the platform has a config file"""
-    return os.path.isfile(_get_config_filepath(platform))
-
-
-def _load_config(platform):
-    """Load the platform's JSON config into a dict"""
-    fp = _get_config_filepath(platform)
-    with open(fp) as config_file:
-        return json.load(config_file)
+def _consolidated_json_fp():
+    """Get the absolute path to CONSOLIDATED.json."""
+    return os.path.join(_CONFIG_DIR, _CONSOLIDATED_JSON_BASENAME)
 
 
 class Config(object):
@@ -70,22 +48,23 @@ class Config(object):
         """
         self._precedence_list = []
         self._precedence_names = []
-        # Loadthe most specific JSON config possible by splitting
-        # `platform` at its '_'/'-' and reversing ([::-1]).
-        # For example, veyron_minnie should load minnie.json.
-        # octopus_fleex should look for fleex.json. It doesn't exist, so
-        # instead it loads octopus.json.
+        with open(_consolidated_json_fp()) as f:
+            consolidated_json = json.load(f)
+        # Load the most specific JSON config possible by splitting `platform`
+        # at '_'/'-' and reversing ([::-1]). For example, veyron_minnie should
+        # load minnie.json. octopus_fleex should look for fleex.json. It
+        # doesn't exist, so instead it loads octopus.json.
         platform = platform.lower().replace('-', '_')
         for p in platform.rsplit('_')[::-1]:
             logging.debug('Looking for %s config', p)
-            if _has_config_file(p):
+            if p in consolidated_json:
                 logging.info('Found %s config', p)
                 self.platform = p
                 break
         else:
             self.platform = platform
-        if _has_config_file(self.platform):
-            platform_config = _load_config(self.platform)
+        if self.platform in consolidated_json:
+            platform_config = consolidated_json[self.platform]
             seen_platforms = [self.platform]
             self._add_cfg_to_precedence(self.platform, platform_config)
             model_configs = platform_config.get('models', {})
@@ -101,15 +80,14 @@ class Config(object):
                     raise error.TestError('fw-testing-configs for platform %s '
                                           'contains an inheritance loop: %s' % (
                                           self.platform, loop))
-                parent_config = _load_config(parent_platform)
+                parent_config = consolidated_json[parent_platform]
                 seen_platforms.append(parent_platform)
                 self._add_cfg_to_precedence(parent_platform, parent_config)
                 parent_platform = self._precedence_list[-1].get('parent', None)
         else:
-            logging.debug(
-                    'No platform config file found at %s. Using default.',
-                    _get_config_filepath(self.platform))
-        default_config = _load_config('DEFAULTS')
+            logging.debug('Platform %s not found in %s. Using DEFAULTS.',
+                          self.platform, consolidated_json)
+        default_config = consolidated_json['DEFAULTS']
         self._add_cfg_to_precedence('DEFAULTS', default_config)
 
         # Set attributes

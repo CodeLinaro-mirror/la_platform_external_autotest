@@ -16,7 +16,6 @@ from __future__ import print_function
 import dbus
 import dbus.mainloop.glib
 import dbus.service
-import gobject
 import logging
 
 

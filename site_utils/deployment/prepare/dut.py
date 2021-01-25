@@ -408,7 +408,11 @@ def install_test_image(host):
     host.run('chromeos-install --yes', timeout=host.INSTALL_TIMEOUT)
 
     logging.info("Rebooting DUT to boot from hard drive.")
-    power_cycle_via_servo(host)
+    try:
+        host.reboot()
+    except Exception as e:
+        logging.info('Failed to reboot DUT via ssh; %s', str(e))
+        try_reset_by_servo(host)
     logging.info("Install test image completed successfully.")
 
 

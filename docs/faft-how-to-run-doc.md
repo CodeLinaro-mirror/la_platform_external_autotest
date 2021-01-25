@@ -17,7 +17,7 @@ _[go/faft-running](https://goto.google.com/faft-running)_
 
 ## FAFT Overview {#faft-overview}
 
-FAFT (Fully Automated Firmware Tests) is a collection of tests and related
+[FAFT] (Fully Automated Firmware Tests) is a collection of tests and related
 infrastructure that exercise and verify capabilities of Chrome OS.
 The features tested by FAFT are implemented through low-level software
 (firmware/BIOS) and hardware. FAFT evolved from SAFT
@@ -32,11 +32,17 @@ The founding principles of FAFT are:
 - Easy to integrate with existing test infrastructure (e.g. test lab, continuous testing, etc).
 
 To access some of these low-level capabilities, the tests require a
+[servod] instance running and executing controls with the help of physical
 [servo] board ([servo v2], [servo v4] with [servo micro] or [servo v4 Type-C])
 
 The servo board is connected directly to the DUT (Device Under Test) to enable
 access to low-level hardware interfaces, as well as staging areas for backup
 software (on a USB drive).
+
+The [FAFT framework] runs the tests with a tool called [test that] and it is
+based on a client-server architecture, where the client runs on the DUT and
+the server runs on the host machine.
+
 The tests may corrupt various states in the EC, firmware, and kernel to verify
 recovery processes. In these cases you can almost always use FAFT to restore
 the system to its original state.
@@ -70,10 +76,6 @@ Figure 1 shows a diagram of how to connect the latest debug boards,
 servoV4 Type-A and servo micro, to the test controller, DUT, and network.
 It is important to ensure the DUT is powered off
 before plugging in cables and components to the servo.
-
-Note: Do not use a type C servo
-(but using a type A servo v4 with a converter to type C is fine.
-A pure type C setup will put the security chip into debug mode).
 
 ![Figure1](assets/faft_rc_typeA.png)
 
@@ -190,12 +192,12 @@ It is important to note that this syntax will work only if the correct packages
 for the DUT have been built. To build the packages, which usually takes
 a few hours, run the following from chroot:
 
-`$ ./build_packages --board=$BOARD` where `$BOARD` is the code name of the board under test
+(chroot) `$ ./build_packages --board=$BOARD` where `$BOARD` is the code name of the board under test
 
 If packages have not been built, the command won't work unless a path to the
 autotest directory is included in the command as follows:
 
-`$ test_that --autotest_dir ~/trunk/src/third_party/autotest/files/ --args="servo_host=localhost servo_port=9999" -b $BOARD $IP $TEST_NAME`
+(chroot) `$ test_that --autotest_dir ~/trunk/src/third_party/autotest/files/ --args="servo_host=localhost servo_port=9999" -b $BOARD $IP $TEST_NAME`
 
 ### Sample Commands {#sample-commands}
 
@@ -282,6 +284,10 @@ Q: What causes filesystem corruption?
   leave the DUT running from the USB disk, and only if the image's
   [stateful partition is too small].
 
+Q: Can I compare the results obtained with a Type-C servo to those obtained with a Type-A servo + micro?
+
+- A: When running tests with a Type-C servo, it is recommended to to rerun a failure using the Type-A setup to do a fast check prior to digging deeper, i.e. before connecting a USB analyzer or probing the signals.
+
 [FAFT suite]: https://chromium.googlesource.com/chromiumos/third_party/autotest/+/master/server/site_tests/
 [servo]: https://chromium.googlesource.com/chromiumos/third_party/hdctools/+/refs/heads/master/README.md#Power-Measurement
 [servo v2]: https://chromium.googlesource.com/chromiumos/third_party/hdctools/+/refs/heads/master/docs/servo_v2.md
@@ -289,3 +295,7 @@ Q: What causes filesystem corruption?
 [servo micro]: https://chromium.googlesource.com/chromiumos/third_party/hdctools/+/refs/heads/master/docs/servo_micro.md
 [servo v4 Type-C]: https://chromium.googlesource.com/chromiumos/third_party/hdctools/+/refs/heads/master/docs/servo_v4.md#Type_C-Version
 [stateful partition is too small]: https://crrev.com/c/1935408
+[FAFT]: https://chromium.googlesource.com/chromiumos/third_party/autotest/+/refs/heads/master/docs/faft-design-doc.md
+[FAFT framework]: https://chromium.googlesource.com/chromiumos/third_party/autotest/+/refs/heads/master/docs/faft-code.md
+[servod]: https://chromium.googlesource.com/chromiumos/third_party/hdctools/+/refs/heads/master/docs/servod.md
+[test that]: https://chromium.googlesource.com/chromiumos/third_party/autotest/+/refs/heads/master/docs/test-that.md
