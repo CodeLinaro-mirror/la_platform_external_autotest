@@ -90,8 +90,14 @@ _DEV_MODE_ALWAYS_ALLOWED = global_config.global_config.get_config_value(
 # the 'cros' verifier; it's listed as an provision trigger as a
 # simplification.  The ultimate fix is to split the 'cros' verifier
 # into smaller individual verifiers.
-_CROS_PROVISION_TRIGGERS = ('power', 'rwfw', 'python', 'cros',
-                            'dev_default_boot',)
+_CROS_PROVISION_TRIGGERS = (
+        'power',
+        'rwfw',
+        'fwstatus',
+        'python',
+        'cros',
+        'dev_default_boot',
+)
 _CROS_POWERWASH_TRIGGERS = ('tpm', 'good_provision', 'ext4',)
 _CROS_USB_TRIGGERS = ('ssh', 'writable', 'stop_start_ui',)
 _JETSTREAM_USB_TRIGGERS = ('ssh', 'writable',)
@@ -444,23 +450,49 @@ class HWIDVerifier(hosts.Verifier):
     @timeout_util.TimeoutDecorator(cros_constants.VERIFY_TIMEOUT_SEC)
     def verify(self, host):
         # pylint: disable=missing-docstring
-        try:
-            info = host.host_info_store.get()
+        info = host.host_info_store.get()
+        if not info.board or not info.model:
+            # if board or model missed in host_info file then it is empty
+            # skip verifier
+            return
+        info_hwid = info.attributes.get('HWID')
+        info_serial_number = info.attributes.get('serial_number')
 
-            hwid = host.run('crossystem hwid', ignore_status=True).stdout
-            if hwid:
-                info.attributes['HWID'] = hwid
+        if not info_hwid or not info_serial_number:
+            logging.info('Missing HWID or/and SerialNumber.'
+                         ' Probably device was not deployed properly.'
+                         ' Marking DUT for need re-deployment.')
+            host.set_device_repair_state(
+                    cros_constants.DEVICE_STATE_NEEDS_DEPLOY)
+            return
 
-            serial_number = host.run('vpd -g serial_number',
-                                     ignore_status=True).stdout
-            if serial_number:
-                info.attributes['serial_number'] = serial_number
+        host_hwid = host.run('crossystem hwid', ignore_status=True).stdout
+        host_serial_number = host.run('vpd -g serial_number',
+                                      ignore_status=True).stdout
+        if not host_hwid or not host_serial_number:
+            raise hosts.AutoservVerifyError(
+                    'Failed to get HWID & Serial Number for host %s' %
+                    host.hostname)
 
-            if info != host.host_info_store.get():
-                host.host_info_store.commit(info)
-        except Exception as e:
-            logging.exception('Failed to get HWID & Serial Number for host '
-                              '%s: %s', host.hostname, str(e))
+        if host_hwid != info_hwid:
+            # We not fail verifier as it not critical for majority tests.
+            metrics.Counter('chromeos/autotest/repair/hwid_change').increment(
+                    fields={
+                            'host': host.hostname,
+                            'board': info.board or ''
+                    })
+            logging.info(
+                    'HWID changed to: %s required manual work'
+                    ' to fix it.', host_hwid)
+
+        if host_serial_number and host_serial_number != info_serial_number:
+            logging.info(
+                    'The SerialNumber mismatch detected %s != %s.'
+                    ' Probably attempt to replace DUT without deployment.'
+                    ' Marking DUT for need re-deployment.', info_serial_number,
+                    host_serial_number)
+            host.set_device_repair_state(
+                    cros_constants.DEVICE_STATE_NEEDS_DEPLOY)
 
     @property
     def description(self):
@@ -1005,20 +1037,35 @@ class ServoInstallRepair(hosts.RepairAction):
     """
 
     # Timeout value for this repair action is specially configured as we need
-    # stage image to usb drive, install chromeos image and potentially run
-    # bad block check on usb drive.
+    # stage image to usb drive, install chromeos image.
     @timeout_util.TimeoutDecorator(60 * 60)
     def repair(self, host):
         # pylint: disable=missing-docstring
-        repair_utils.require_servo(host)
+        repair_utils.require_servo(host, ignore_state=True)
         image_name = host.get_cros_repair_image_name()
+        image_name_on_usb = host._servo_host.validate_image_usbkey()
+        if image_name_on_usb == image_name:
+            logging.info(
+                    'Required image %s is already on usbkey,'
+                    ' skipping download.', image_name)
+            need_update_image = False
+        else:
+            logging.info('Required image is not on usbkey.')
+            need_update_image = True
+
+        # Verify if we want to force re-image the USB.
+        if not need_update_image and host.health_profile:
+            repair_failed_count = host.health_profile.get_repair_fail_count()
+            # try to re-image USB when previous attempt failed
+            if repair_failed_count == 1:
+                logging.info('Required re-download image to usbkey as'
+                             ' a previous repair failed.')
+                need_update_image = True
+
         update_url = None
-        if host._servo_host.validate_image_usbkey() != image_name:
+        if need_update_image:
             logging.info('Staging image: %s on caching server.', image_name)
             _, update_url = host.stage_image_for_servo()
-        else:
-            logging.info('Required image %s is already on usbkey,'
-                         ' skipping download.', image_name)
         afe_utils.clean_provision_labels(host)
         host.servo_install(update_url, is_repair=True)
         afe_utils.add_provision_labels(host, host.VERSION_PREFIX, image_name)

@@ -22,9 +22,6 @@ def repair(machine):
         target = hosts.create_target_machine(machine,
                                              try_lab_servo=True,
                                              try_servo_repair=True)
-        # Initialize device health profile for repair.
-        if hasattr(target, 'setup_device_health_profile'):
-            target.setup_device_health_profile()
 
         try:
             # We don't need to collect logs or crash info if we're a

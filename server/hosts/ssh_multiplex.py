@@ -24,9 +24,9 @@ _MASTER_SSH_COMMAND_TEMPLATE = (
     '-o UserKnownHostsFile=/dev/null '
     '-o BatchMode=yes '
     '-o ConnectTimeout=30 '
-    '-o ServerAliveInterval=900 '
-    '-o ServerAliveCountMax=3 '
-    '-o ConnectionAttempts=4 '
+    '-o ServerAliveInterval=30 '
+    '-o ServerAliveCountMax=1 '
+    '-o ConnectionAttempts=1 '
     '-o Protocol=2 '
     '-l %(user)s -p %(port)d %(hostname)s')
 

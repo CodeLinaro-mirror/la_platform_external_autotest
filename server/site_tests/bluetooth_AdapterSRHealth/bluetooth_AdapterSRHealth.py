@@ -36,7 +36,7 @@ import time
 
 from autotest_lib.client.cros.bluetooth.bluetooth_audio_test_data import A2DP
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_tests import (
-        TABLET_MODELS)
+        TABLET_MODELS, SUSPEND_POWER_DOWN_CHIPSETS)
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_audio_tests import (
         BluetoothAdapterAudioTests)
 from autotest_lib.server.cros.bluetooth.bluetooth_adapter_quick_tests import (
@@ -219,7 +219,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
 
     @test_wrapper('Reconnect A2DP',
                   devices={'BLUETOOTH_AUDIO': 1},
-                  skip_chipsets=['Realtek-RTL8822C-USB'])
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def sr_reconnect_a2dp(self):
         """ Reconnects an A2DP device after suspend/resume. """
         device_type = 'BLUETOOTH_AUDIO'
@@ -344,7 +344,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
     @test_wrapper('Peer wakeup Classic HID',
                   devices={'MOUSE': 1},
                   skip_models=TABLET_MODELS + ['bob', 'dru'],
-                  skip_chipsets=['Realtek-RTL8822C-USB'])
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def sr_peer_wake_classic_hid(self):
         """ Use classic HID device to wake from suspend. """
         device = self.devices['MOUSE'][0]
@@ -357,7 +357,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
     @test_wrapper('Peer wakeup LE HID',
                   devices={'BLE_MOUSE': 1},
                   skip_models=TABLET_MODELS + ['bob', 'dru'],
-                  skip_chipsets=['Realtek-RTL8822C-USB'])
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def sr_peer_wake_le_hid(self):
         """ Use LE HID device to wake from suspend. """
         device = self.devices['BLE_MOUSE'][0]
@@ -370,7 +370,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
     @test_wrapper('Peer wakeup Classic HID',
                   devices={'MOUSE': 1},
                   skip_models=TABLET_MODELS + ['bob', 'dru'],
-                  skip_chipsets=['Realtek-RTL8822C-USB'])
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def sr_peer_wake_classic_hid_stress(self):
         """ Use classic HID device to wake from suspend. """
         device = self.devices['MOUSE'][0]
@@ -384,7 +384,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
     @test_wrapper('Peer wakeup LE HID',
                   devices={'BLE_MOUSE': 1},
                   skip_models=TABLET_MODELS + ['bob', 'dru'],
-                  skip_chipsets=['Realtek-RTL8822C-USB'])
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def sr_peer_wake_le_hid_stress(self):
         """ Use LE HID device to wake from suspend. """
         device = self.devices['BLE_MOUSE'][0]
@@ -395,7 +395,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
 
     @test_wrapper('Peer wakeup with A2DP should fail',
                   devices={'BLUETOOTH_AUDIO': 1},
-                  skip_chipsets=['Realtek-RTL8822C-USB'])
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def sr_peer_wake_a2dp_should_fail(self):
         """ Use A2DP device to wake from suspend and fail. """
         device_type = 'BLUETOOTH_AUDIO'
@@ -415,7 +415,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
     @test_wrapper('Suspend while discovering',
                   devices={'BLE_MOUSE': 1},
                   skip_models=['dru'],
-                  skip_chipsets=['Realtek-RTL8822C-USB'])
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def sr_while_discovering(self):
         """ Suspend while discovering. """
         device = self.devices['BLE_MOUSE'][0]
@@ -446,7 +446,7 @@ class bluetooth_AdapterSRHealth(BluetoothAdapterQuickTests,
     @test_wrapper('Suspend while advertising',
                   devices={'MOUSE': 1},
                   skip_models=['dru'],
-                  skip_chipsets=['Realtek-RTL8822C-USB'])
+                  skip_chipsets=SUSPEND_POWER_DOWN_CHIPSETS)
     def sr_while_advertising(self):
         """ Suspend while advertising. """
         device = self.devices['MOUSE'][0]

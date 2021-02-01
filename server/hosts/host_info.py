@@ -184,6 +184,16 @@ class HostInfo(object):
         values = self._get_stripped_labels_with_prefix(prefix)
         return values[0] if values else ''
 
+    def has_label(self, name):
+        """Check if label is present.
+
+        @param name: The name of the desired label.
+        @return: bool, True if present.
+        """
+        for label in self.labels:
+            if label == name or label.startswith(name + ':'):
+                return True
+        return False
 
     def clear_version_labels(self, version_prefix=None):
         """Clear all or a particular version label(s) for the host.

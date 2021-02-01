@@ -112,13 +112,14 @@ def main():
 
         if 'setup-labstation' in opts.actions:
             try:
-                preparedut.setup_labstation(host)
+                preparedut.setup_hwid_and_serialnumber(host)
             except Exception as err:
                 logging.error("fail to setup labstation: %s", err)
                 return RETURN_CODES.SETUP_LABSTATION_FAILURE
 
         if 'update-label' in opts.actions:
             try:
+                preparedut.setup_hwid_and_serialnumber(host)
                 host.labels.update_labels(host, task_name='deploy')
             except Exception as err:
                 logging.error("fail to update label: %s", err)

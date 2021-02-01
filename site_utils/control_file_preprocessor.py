@@ -19,6 +19,10 @@ consults at run time to determine which tests belong to a suite.
 """
 
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import collections, json, os, sys
 
 import common
@@ -89,7 +93,7 @@ def main():
         with open(options.output_file, 'w') as file_obj:
             json.dump(suite_control_files, file_obj)
     else:
-        print suite_control_files
+        print(suite_control_files)
 
 
 if __name__ == '__main__':

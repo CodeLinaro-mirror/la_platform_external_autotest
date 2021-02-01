@@ -10,7 +10,7 @@ logdir = sys.argv[1]
 stdout_start = int(sys.argv[2])  # number of bytes we can skip on stdout
 stderr_start = int(sys.argv[3])  # nubmer of bytes we can skip on stderr
 # TODO (crosbug.com/38224)- sbasi: Remove extra logging.
-stderr = open(os.path.join(logdir, 'stderr'), 'a', 0)
+stderr = open(os.path.join(logdir, 'stderr'), 'a', buffering=2)
 
 print('Entered autotestd_monitor.', file=stderr)
 # if any of our tail processes die, the monitor should die too

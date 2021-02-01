@@ -8,7 +8,9 @@ AUTHOR = 'chromeos-bluetooth'
 NAME = 'bluetooth_AdapterSAHealth.sa_adapter_reboot_test'
 PURPOSE = ('Reboot device and ensure Bluetooth adapter is up')
 CRITERIA = 'Pass all health test'
-ATTRIBUTES = 'suite:bluetooth, suite:bluetooth_flaky'
+# TODO(b/173146480) re-enable this test once BT state persists properly around
+# reboots
+ATTRIBUTES = ''
 TIME = 'MEDIUM'
 TEST_CATEGORY = 'Functional'
 TEST_CLASS = 'bluetooth'

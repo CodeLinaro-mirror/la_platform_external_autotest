@@ -135,7 +135,7 @@ def check_wakeup(estimated_alarm):
     """
     now = rtc.get_seconds()
     if now < estimated_alarm:
-        logging.error('Woke up early at %d', now)
+        logging.error('Woke up %d secs early', (estimated_alarm - now))
         raise SpuriousWakeupError('Woke from suspend early')
 
 

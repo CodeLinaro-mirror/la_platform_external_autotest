@@ -692,14 +692,16 @@ class LinuxSystem(object):
         """
         if self._bridge_interface is None:
             self._create_bridge_interface()
+        # TODO b:169251326 terms below are set outside of this codebase
+        # and should be updated when possible. ("master" -> "main")
         self.host.run('%s link set dev %s master %s' %
                       (self.cmd_ip, interface, self._bridge_interface))
 
 
-    def get_virtual_ethernet_master_interface(self):
-        """Return the master interface of the virtual ethernet pair.
+    def get_virtual_ethernet_main_interface(self):
+        """Return the main interface of the virtual ethernet pair.
 
-        @return string name of the master interface of the virtual ethernet
+        @return string name of the main interface of the virtual ethernet
                 pair.
         """
         if self._virtual_ethernet_pair is None:

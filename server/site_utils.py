@@ -478,7 +478,7 @@ def get_global_afe_hostname():
 def is_restricted_user(username):
     """Determines if a user is in a restricted group.
 
-    User in restricted group only have access to master.
+    User in restricted group only have access to main.
 
     @param username: A string, representing a username.
 
@@ -525,10 +525,10 @@ def get_special_task_exec_path(hostname, task_id, task_name, time_requested):
 
     This method returns different paths depending on where a
     the task ran:
-        * Master: hosts/hostname/task_id-task_type
-        * Shard: Master_path/time_created
+        * main: hosts/hostname/task_id-task_type
+        * Shard: main_path/time_created
     This is to work around the fact that a shard can fail independent
-    of the master, and be replaced by another shard that has the same
+    of the main, and be replaced by another shard that has the same
     hosts. Without the time_created stamp the logs of the tasks running
     on the second shard will clobber the logs from the first in google
     storage, because task ids are not globally unique.
@@ -542,7 +542,7 @@ def get_special_task_exec_path(hostname, task_id, task_name, time_requested):
     """
     results_path = 'hosts/%s/%s-%s' % (hostname, task_id, task_name.lower())
 
-    # If we do this on the master it will break backward compatibility,
+    # If we do this on the main it will break backward compatibility,
     # as there are tasks that currently don't have timestamps. If a host
     # or job has been sent to a shard, the rpc for that host/job will
     # be redirected to the shard, so this global_config check will happen
@@ -554,7 +554,7 @@ def get_special_task_exec_path(hostname, task_id, task_name, time_requested):
     # in case this shard fails. The simplest uid is the job_id, however
     # in rare cases tasks do not have jobs associated with them (eg:
     # frontend verify), so just use the creation timestamp. The clocks
-    # between a shard and master should always be in sync. Any discrepancies
+    # between a shard and main should always be in sync. Any discrepancies
     # will be brought to our attention in the form of job timeouts.
     uid = time_requested.strftime('%Y%d%m%H%M%S')
 

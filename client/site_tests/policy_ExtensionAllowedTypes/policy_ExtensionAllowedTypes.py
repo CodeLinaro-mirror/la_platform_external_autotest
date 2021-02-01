@@ -28,7 +28,7 @@ class policy_ExtensionAllowedTypes(
     download_url = ('https://chrome.google.com/webstore/detail/just-black/{}'
                     .format(EXTENSION_ID))
 
-    get_bg_rbg = "document.getElementsByTagName('body')[0].style.background"
+    get_bg_rbg = "document.getElementsByTagName('body')[0].style.backgroundColor"
 
     def _extension_check(self):
         """

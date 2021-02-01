@@ -5,8 +5,12 @@
 import os
 import re
 
-import throttler_lib
-import utils_lib
+try:
+    from autotest_lib.client.bin.result_tools import throttler_lib
+    from autotest_lib.client.bin.result_tools import utils_lib
+except ImportError:
+    import throttler_lib
+    import utils_lib
 
 
 # File extensions that can be safely shrunk.

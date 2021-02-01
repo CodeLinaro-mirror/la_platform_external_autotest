@@ -37,6 +37,8 @@ class firmware_WriteProtectFunc(FirmwareTest):
             self._original_sw_wps[target] = sw_wp_dict['enabled']
         self._original_hw_wp = 'on' in self.servo.get('fw_wp_state')
         self.backup_firmware()
+        self.work_path = self.faft_client.system.create_temp_dir(
+                'flashrom_', '/mnt/stateful_partition/')
 
     def cleanup(self):
         """Cleanup the test"""
@@ -53,16 +55,17 @@ class firmware_WriteProtectFunc(FirmwareTest):
                 # SW WP can be changed.
                 current_hw_wp = 'on' in self.servo.get('fw_wp_state')
                 if current_hw_wp:
-                    self.set_hardware_write_protect(False)
+                    self.set_ap_write_protect_and_reboot(False)
                 for target, original_sw_wp in self._original_sw_wps.items():
                     self._set_write_protect(target, original_sw_wp)
-                self.set_hardware_write_protect(current_hw_wp)
+                self.set_ap_write_protect_and_reboot(current_hw_wp)
             # Recover HW WP status.
             if hasattr(self, '_original_hw_wp'):
-                self.set_hardware_write_protect(self._original_hw_wp)
+                self.set_ap_write_protect_and_reboot(self._original_hw_wp)
         except Exception as e:
             logging.error('Caught exception: %s', str(e))
 
+        self.faft_client.system.remove_dir(self.work_path)
         super(firmware_WriteProtectFunc, self).cleanup()
 
     def _set_write_protect(self, target, enable):
@@ -78,10 +81,10 @@ class firmware_WriteProtectFunc(FirmwareTest):
         assert target in (BIOS, EC)
         if target == BIOS:
             # Unlock registers to alter the region/range
-            self.set_hardware_write_protect(False)
+            self.set_ap_write_protect_and_reboot(False)
             self.faft_client.bios.set_write_protect_region('WP_RO', enable)
             if enable:
-                self.set_hardware_write_protect(True)
+                self.set_ap_write_protect_and_reboot(True)
         elif target == EC:
             self.switcher.mode_aware_reboot('custom',
                     lambda:self.set_ec_write_protect_and_reboot(enable))
@@ -167,26 +170,49 @@ class firmware_WriteProtectFunc(FirmwareTest):
                                          'accross %s' %
                                          (target.upper(), reboot_name))
 
-        work_path = self.faft_client.updater.get_work_path()
-
+        work_path = self.work_path
         # Check if RO FW really can't be overwritten when WP is enabled.
         for target in self._targets:
+            # Current firmware image as read from flash
             ro_before = os.path.join(work_path, '%s_ro_before.bin' % target)
-            ro_after = os.path.join(work_path, '%s_ro_after.bin' % target)
+            # Current firmware image with modification to test writing
             ro_test = os.path.join(work_path, '%s_ro_test.bin' % target)
+            # Firmware as read after writing flash
+            ro_after = os.path.join(work_path, '%s_ro_after.bin' % target)
 
-            # Use the firmware blobs unpacked from the firmware updater for
-            # testing. To ensure there is difference in WP_RO section between
-            # the firmware on the DUT and the firmware unpacked from the
-            # firmware updater, we mess around FRID.
-            self.faft_client.updater.modify_image_fwids(target, ['ro'])
+            # Fetch firmware from flash. This serves as the base of ro_test
+            self.run_cmd(
+                    'flashrom -p %s -r -i WP_RO:%s ' %
+                    (self._flashrom_targets[target], ro_before), 'SUCCESS')
 
-            test = os.path.join(work_path, self._get_relative_path(target))
-            self.get_wp_ro_firmware_section(test, ro_test)
+            lines = self.run_cmd('dump_fmap -p %s' % ro_before)
+            FMAP_AREA_NAMES = ['name', 'offset', 'size']
 
-            self.run_cmd('flashrom -p %s -r -i WP_RO:%s' %
-                    (self._flashrom_targets[target], ro_before),
-                    'SUCCESS')
+            modified = False
+            wpro_offset = -1
+            for line in lines:
+                region = dict(zip(FMAP_AREA_NAMES, line.split()))
+                if region['name'] == 'WP_RO':
+                    wpro_offset = int(region['offset'])
+            if wpro_offset == -1:
+                raise error.TestFail('WP_RO not found in fmap')
+            for line in lines:
+                region = dict(zip(FMAP_AREA_NAMES, line.split()))
+                if region['name'] == 'RO_FRID':
+                    modified = True
+                    self.run_cmd('cp %s %s' % (ro_before, ro_test))
+                    self.run_cmd(
+                            'dd if=%s bs=1 count=%d skip=%d '
+                            '| tr "[a-zA-Z]" "[A-Za-z]" '
+                            '| dd of=%s bs=1 count=%d seek=%d conv=notrunc' %
+                            (ro_test, int(region['size']),
+                             int(region['offset']) - wpro_offset, ro_test,
+                             int(region['size']),
+                             int(region['offset']) - wpro_offset))
+
+            if not modified:
+                raise error.TestFail('Could not find RO_FRID in %s' %
+                                     target.upper())
 
             # Writing WP_RO section is expected to fail.
             self.run_cmd('flashrom -p %s -w -i WP_RO:%s' %

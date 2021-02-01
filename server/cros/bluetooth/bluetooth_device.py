@@ -422,6 +422,19 @@ class BluetoothDevice(object):
         properties = self.get_adapter_properties()
         return properties.get('Pairable') == 1
 
+    @proxy_thread_safe
+    def set_adapter_alias(self, alias):
+        """Set the adapter alias.
+
+        A note on Alias property - providing an empty string ('') will reset the
+        Alias property to the system default
+
+        @param alias: adapter alias to set with type String
+
+        @return True on success, False otherwise.
+        """
+
+        return self._proxy.set_adapter_alias(alias)
 
     @proxy_thread_safe
     def get_adapter_properties(self):
@@ -592,6 +605,19 @@ class BluetoothDevice(object):
         # Decode and return property value
         return self._decode_json_base64(prop_val)
 
+
+    @proxy_thread_safe
+    def get_battery_property(self, address, prop_name):
+        """Read a property of battery by directly querying the dbus object
+
+        @param address: Address of the device to query
+        @param prop_name: Property to be queried
+
+        @return The property if battery is found and has property,
+          None otherwise
+        """
+
+        return self._proxy.get_battery_property(address, prop_name)
 
     @proxy_thread_safe
     def start_discovery(self):
@@ -1038,7 +1064,7 @@ class BluetoothDevice(object):
         @returns: a list of records, where each item is a record of
                   interleave |state| and the |time| the state starts.
                   |state| could be {'no filter', 'allowlist'}
-                  |time| is kernel time in sec
+                  |time| is system time in sec
 
         """
         return self._proxy.advmon_interleave_scan_logger_get_records()
@@ -1049,7 +1075,7 @@ class BluetoothDevice(object):
 
         @returns: a list of cancel |time| when a interleave cancel event log
                   was found.
-                  |time| is kernel time in sec
+                  |time| is system time in sec
 
         """
         return self._proxy.advmon_interleave_scan_logger_get_cancel_events()

@@ -113,9 +113,6 @@ class GraphicsPowerThread(threading.Thread):
             GraphicsPowerThread.InitTimeoutError: A timeout occurred while
                 waiting for subtest to report itself as running.
         """
-        if not self._test_thread:
-            raise self.ThreadNotInitializedError
-
         if timeout:
             time_start = time.time()
             time_end = time_start + timeout
@@ -130,6 +127,9 @@ class GraphicsPowerThread(threading.Thread):
             if self.is_running():
                 break
             time.sleep(1)
+
+        if not self._test_thread:
+            raise self.ThreadNotInitializedError
 
     def stop(self, timeout=None):
         """Gracefully stop the subtest on the test host.

@@ -565,34 +565,30 @@ def _prepare_servo(servohost):
         raise Exception('No USB stick detected on Servo host')
 
 
-def setup_labstation(host):
-    """Do initial setup for labstation host.
+def setup_hwid_and_serialnumber(host):
+    """Do initial setup for ChromeOS host.
 
-    @param host    A LabstationHost object.
-
+    @param host    servers.host.Host object.
     """
-    try:
-        if not host.is_labstation():
-            raise Exception('Current OS on host %s is not a labstation image.'
-                            % host.hostname)
-    except AttributeError:
-        raise Exception('Unable to verify host has a labstation image, this can'
-                        ' be caused by host is unsshable.')
+    if not hasattr(host, 'host_info_store'):
+        raise Exception('%s does not have host_info_store' % host.hostname)
 
-    try:
-        # TODO: we should setup hwid and serial number for DUT in deploy script
-        #  as well, which is currently obtained from repair job.
-        info = host.host_info_store.get()
-        hwid = host.run('crossystem hwid', ignore_status=True).stdout
-        if hwid:
-            info.attributes['HWID'] = hwid
+    info = host.host_info_store.get()
+    hwid = host.run('crossystem hwid', ignore_status=True).stdout
+    serial_number = host.run('vpd -g serial_number', ignore_status=True).stdout
 
-        serial_number = host.run('vpd -g serial_number',
-                                 ignore_status=True).stdout
-        if serial_number:
-            info.attributes['serial_number'] = serial_number
-        if info != host.host_info_store.get():
-            host.host_info_store.commit(info)
-    except Exception as e:
-        raise Exception('Failed to get HWID & Serial Number for host %s: %s'
-                        % (host.hostname, str(e)))
+    if not hwid and not serial_number:
+        raise Exception(
+                'Failed to retrieve HWID and SerialNumber from host %s' %
+                host.hostname)
+    if not serial_number:
+        raise Exception('Failed to retrieve SerialNumber from host %s' %
+                        host.hostname)
+    if not hwid:
+        raise Exception('Failed to retrieve HWID from host %s' % host.hostname)
+
+    info.attributes['HWID'] = hwid
+    info.attributes['serial_number'] = serial_number
+    if info != host.host_info_store.get():
+        host.host_info_store.commit(info)
+    logging.info("Reading HWID and SerialNumber completed successfully.")

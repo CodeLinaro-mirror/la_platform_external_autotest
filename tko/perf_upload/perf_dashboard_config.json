@@ -155,10 +155,6 @@
     "master_name": "ChromeOS_Graphics"
   },
   {
-    "autotest_name": "graphics_Gralloc",
-    "master_name": "ChromeOS_Graphics"
-  },
-  {
     "autotest_name": "graphics_KernelMemory",
     "master_name": "ChromeOS_Graphics"
   },

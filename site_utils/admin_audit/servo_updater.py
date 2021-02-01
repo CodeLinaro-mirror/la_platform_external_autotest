@@ -253,13 +253,18 @@ SERVO_UPDATERS = (
 )
 
 
-def update_servo_firmware(host, force_update=False, ignore_version=False):
+def update_servo_firmware(host,
+                          boards=None,
+                          force_update=False,
+                          ignore_version=False):
     """Update firmware on servo devices.
 
     @params host: ServoHost instance to run all required commands.
     @params force_update: run updater with force option.
     @params ignore_version: do not check the version on the device.
     """
+    if boards is None:
+        boards = []
     if ignore_version:
         logging.debug('Running servo_updater with ignore_version=True')
 
@@ -269,12 +274,15 @@ def update_servo_firmware(host, force_update=False, ignore_version=False):
     updaters = [updater(host) for updater in SERVO_UPDATERS]
 
     for updater in updaters:
-        logging.info('Try to update board: %s', updater.get_board())
+        board = updater.get_board()
+        if len(boards) > 0 and board not in boards:
+            logging.info('The %s is not requested for update', board)
+            continue
+        logging.info('Try to update board: %s', board)
         try:
             updater.update(force_update=force_update,
                            ignore_version=ignore_version)
         except Exception as e:
-            board = updater.get_board()
             data = {'host': host.get_dut_hostname() or '',
                     'board': board}
             metrics.Counter(

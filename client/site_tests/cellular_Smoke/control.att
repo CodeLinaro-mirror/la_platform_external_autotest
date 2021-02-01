@@ -10,7 +10,7 @@ This test will fail if one of the following conditions occur:
   - 3G modem fails to connect to network
   - the modem is not left in a working state
 """
-ATTRIBUTES = "suite:cellular_ota_att"
+ATTRIBUTES = "suite:cellular_ota"
 TIME = "SHORT"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "network"
@@ -34,4 +34,4 @@ DOC = """
 from autotest_lib.client.cros.cellular import test_environment
 
 test_env = test_environment.CellularOTATestEnvironment()
-job.run_test('cellular_Smoke', tag='fibocom-l850gl', test_env=test_env)
+job.run_test('cellular_Smoke', test_env=test_env)

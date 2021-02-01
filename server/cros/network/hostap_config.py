@@ -241,7 +241,7 @@ class HostapConfig(object):
                 ('logger_syslog', '-1'),
                 ('logger_syslog_level', '0'),
                 # default RTS and frag threshold to ``off''
-                ('rts_threshold', '2347'),
+                ('rts_threshold', '-1'),
                 ('fragm_threshold', '2346'),
                 ('driver', self.DRIVER_NAME)])
 

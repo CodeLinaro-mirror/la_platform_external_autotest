@@ -9,7 +9,8 @@ TIME = "MEDIUM"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "platform"
 TEST_TYPE = "server"
-ATTRIBUTES = "suite:au-perbuild"
+ATTRIBUTES = "suite:bvt-inline, suite:infra_qual"
+JOB_RETRIES = 2
 DOC = """
 This tests that DLC can be installed, and auto-updated together with the OS.
 

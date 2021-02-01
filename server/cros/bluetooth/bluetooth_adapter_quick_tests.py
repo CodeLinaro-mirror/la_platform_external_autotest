@@ -383,9 +383,11 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
             result_msg = 'PASSED | ' + result_msg
             self.bat_pass_count += 1
             self.pkg_pass_count += 1
-        # Mark testNA if all failures are "skips" or any failures should testNA
-        # the whole test
-        elif model in model_testNA or all(['SKIPPED' in x for x in self.fails]):
+        # The test should be marked as TESTNA if any of the test expressions
+        # were SKIPPED (they threw their own TESTNA error) or the model is in
+        # the list of NA models (so any failure is considered NA instead)
+        elif model in model_testNA or any(['SKIPPED' in x
+                                           for x in self.fails]):
             result_msg = 'TESTNA | ' + result_msg
             self.bat_testna_count += 1
             self.pkg_testna_count += 1
@@ -608,6 +610,7 @@ class BluetoothAdapterQuickTests(bluetooth_adapter_tests.BluetoothAdapterTests):
             for device in device_list:
                 if device is not None:
                     self.clear_raspi_device(device)
+                    self.device_set_powered(device, False)
 
         # Reset the adapter
         self.test_reset_on_adapter()

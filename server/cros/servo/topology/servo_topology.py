@@ -138,7 +138,11 @@ class ServoTopology(object):
             t = self._topology
             old_main = t.get(stc.ST_DEVICE_MAIN)
             old_children = t.get(stc.ST_DEVICE_CHILDREN)
-            if not old_main or not old_main.get(stc.ST_DEVICE_HUB_PORT):
+            if not all([
+                    old_children,
+                    old_main,
+                    old_main.get(stc.ST_DEVICE_HUB_PORT),
+            ]):
                 # Old data is invalid for comparasing
                 return True
             if not self._equal_item(old_main, main_device):

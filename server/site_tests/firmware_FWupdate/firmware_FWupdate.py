@@ -93,9 +93,9 @@ class firmware_FWupdate(FirmwareTest):
 
         self._original_hw_wp = 'on' in self.servo.get('fw_wp_state')
 
-        self.set_hardware_write_protect(False)
+        self.set_ap_write_protect_and_reboot(False)
         self.faft_client.bios.set_write_protect_region(self.WP_REGION, True)
-        self.set_hardware_write_protect(True)
+        self.set_ap_write_protect_and_reboot(True)
 
     def cleanup(self):
         """Restore write protection, unless "restore" was false."""
@@ -103,7 +103,7 @@ class firmware_FWupdate(FirmwareTest):
             # Exited very early during initialize, so no cleanup needed
             return
 
-        self.set_hardware_write_protect(False)
+        self.set_ap_write_protect_and_reboot(False)
         try:
             if self.flashed and self._want_restore and self.is_firmware_saved():
                 self.restore_firmware()
@@ -124,9 +124,8 @@ class firmware_FWupdate(FirmwareTest):
                           exc_info=True)
 
         if self._orig_hw_wp is not None:
-            self.set_hardware_write_protect(self._orig_hw_wp)
-
-        if hasattr(self, 'ec'):
+            self.set_ap_write_protect_and_reboot(self._orig_hw_wp)
+        elif hasattr(self, 'ec'):
             self.sync_and_ec_reboot()
 
         super(firmware_FWupdate, self).cleanup()
@@ -220,12 +219,12 @@ class firmware_FWupdate(FirmwareTest):
         image_fwids = self.identify_shellball(include_ec=have_ec)
 
         # Unlock the protection of the wp-enable and wp-range registers
-        self.set_hardware_write_protect(False)
+        self.set_ap_write_protect_and_reboot(False)
 
         if wp:
             self.faft_client.bios.set_write_protect_region(
                     self.WP_REGION, True)
-            self.set_hardware_write_protect(True)
+            self.set_ap_write_protect_and_reboot(True)
         else:
             self.faft_client.bios.set_write_protect_region(
                     self.WP_REGION, False)

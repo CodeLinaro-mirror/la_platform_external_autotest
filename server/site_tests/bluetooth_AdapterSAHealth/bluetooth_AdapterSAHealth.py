@@ -219,6 +219,13 @@ class bluetooth_AdapterSAHealth(BluetoothAdapterQuickTests,
         self.test_dbus_get_supported_capabilities_success()
         self.test_dbus_get_supported_capabilities_success_power_off()
 
+    @test_wrapper('EIR Max Alias Size test')
+    def sa_eir_max_name_size_test(self):
+        """ Verify that the non-default max eir name size is used """
+        EIR_80_char_name = ('1234567890123456789012345678901234567890'
+                            '1234567890123456789012345678901234567890')
+
+        self.test_set_adapter_alias(EIR_80_char_name)
 
 
     @batch_wrapper('Stand Alone Health')

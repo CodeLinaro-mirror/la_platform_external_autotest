@@ -79,8 +79,12 @@ class firmware_IntegratedU2F(FirmwareTest):
 
     def chaps_init_complete(self):
         """Return True if chaps token initialization has completed"""
-        return 'available with 2 token' in self.host.run(
-            'chaps_client --ping').stderr
+        try:
+            return 'available with 2 token' in self.host.run(
+                    'chaps_client --ping').stderr
+        except error.AutoservRunError:
+            logging.info('Chaps no response')
+            return False
 
     def wait_for_cr50(self):
         """Wait for cr50 to complete any OOBE initialization"""

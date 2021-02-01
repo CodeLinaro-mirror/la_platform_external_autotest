@@ -10,7 +10,8 @@ TIME = "MEDIUM"
 TEST_CATEGORY = "Functional"
 TEST_CLASS = "platform"
 TEST_TYPE = "server"
-ATTRIBUTES = "suite:au-perbuild"
+ATTRIBUTES = "suite:bvt-inline"
+JOB_RETRIES = 2
 
 DOC = """
 This is a test to verify that update_engine correctly checks signatures in the

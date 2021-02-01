@@ -77,8 +77,7 @@ class harness_autoserv(harness.harness):
         """A test within this job is completing"""
         for line in status.split('\n'):
             # sent status messages with AUTOTEST_STATUS:tag:message
-            msg = 'AUTOTEST_STATUS:%s:%s\n'
-            msg %= (tag, line)
+            msg = ('AUTOTEST_STATUS:%s:%s\n' % (tag, line))
             self.status.write(msg)
 
 

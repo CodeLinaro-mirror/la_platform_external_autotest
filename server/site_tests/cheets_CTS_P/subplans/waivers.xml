@@ -6,15 +6,7 @@
     is incremented. Otherwise the computation for the canonical list
     of test cases is confused. See b/151779432.
   -->
-  <Entry include="CtsAppSecurityHostTestCases android.appsecurity.cts.AppSecurityTests#testPermissionDiffCert" />
-  <Entry include="CtsDeqpTestCases dEQP-EGL.functional.robustness.reset_context.shaders.out_of_bounds.reset_status.writes.uniform_block#vertex" />
-  <Entry include="CtsDeqpTestCases dEQP-EGL.functional.robustness.reset_context.shaders.out_of_bounds.reset_status.writes.shader_storage_block#vertex" />
-  <Entry include="CtsDeqpTestCases dEQP-EGL.functional.robustness.reset_context.shaders.out_of_bounds.reset_status.writes.local_array#vertex" />
-  <Entry include="CtsKeystoreTestCases android.keystore.cts.CipherTest#testEmptyPlaintextEncryptsAndDecryptsWhenUnlockedRequired" />
-  <Entry include="CtsPermission2TestCases android.permission2.cts.PermissionPolicyTest#testPlatformPermissionPolicyUnaltered" />
-  <Entry include="CtsIncidentHostTestCases com.android.server.cts.GraphicsStatsValidationTest#testBasicDrawFrame" />
-  <Entry include="CtsMediaTestCases android.media.cts.AudioTrackTest" />
-  <Entry include="CtsMediaTestCases android.media.cts.MediaCodecListTest#testRequiredMediaCodecList" />
-  <Entry include="CtsSkQPTestCases" />
-  <Entry include="CtsHarmfulAppWarningHostTestCases android.harmfulappwarning.cts.HarmfulAppWarningTest#testLaunchAnyway" />
+  <Entry include="CtsCameraTestCases android.hardware.camera2.cts.CaptureRequestTest#testFlashControl" />
+  <Entry include="CtsGraphicsTestCases android.graphics.cts.BitmapTest#testHardwareBitmapNotLeaking" />
+  <Entry include="CtsGraphicsTestCases android.graphics.cts.BitmapTest#testDrawingHardwareBitmapNotLeaking" />
 </SubPlan>

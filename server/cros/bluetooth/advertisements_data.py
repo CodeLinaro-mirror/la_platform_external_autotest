@@ -66,13 +66,18 @@ ADVERTISEMENT6 = {
 
 
 NEARBY_BROADCAST_ADV = {
-    'Path': '/org/bluez/test/advertisement7',
-    'Type': 'broadcast',
-    'ManufacturerData': {'0xFE2C': [0x6a, 0x6b, 0x6c, 0x6d, 0x6e]},
-    'ServiceUUIDs': ['FE2C'],
-    'SolicitUUIDs': [],
-    'ServiceData': {'9997': [0x61, 0x62, 0x63, 0x64, 0x65]},
-    'IncludeTxPower': True}
+        'Path': '/org/bluez/test/advertisement7',
+        'Type': 'broadcast',
+        'ManufacturerData': {
+                '0xFE2C': [0x6a, 0x6b, 0x6c, 0x6d, 0x6e]
+        },
+        'ServiceUUIDs': ['FE2C'],
+        'SolicitUUIDs': [],
+        'ServiceData': {
+                'FE2C': [0x61, 0x62, 0x63, 0x64, 0x65]
+        },
+        'IncludeTxPower': True
+}
 
 
 #
