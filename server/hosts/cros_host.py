@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import sys
+import six
 import time
 
 import common
@@ -357,7 +358,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
                 result_dir=self.get_result_dir())
 
         # TODO(otabek@): remove when b/171414073 closed
-        pingable_before_servo = self.is_up_fast()
+        pingable_before_servo = self.is_up_fast(count=3)
         if pingable_before_servo:
             logging.info('DUT is pingable before init Servo.')
         _servo_host, servo_state = servo_host.create_servo_host(
@@ -377,20 +378,19 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
         # TODO(otabek@): remove when b/171414073 closed
         # Introduced to collect cases when servo made DUT not sshable
-        pingable_after_servo = self.is_up_fast()
+        pingable_after_servo = self.is_up_fast(count=3)
         if pingable_after_servo:
             logging.info('DUT is pingable after init Servo.')
         elif pingable_before_servo:
             logging.info('DUT was pingable before init Servo but not now')
-            board = ''
-            info = self.host_info_store.get()
-            if info:
-                board = info.board
-            metrics.Counter('chromeos/autotest/dut_ping_servo_init').increment(
-                    fields={
-                            'host': self.hostname,
-                            'board': board,
-                    })
+            if servo_args and self._servo_host and self._servo_host.hostname:
+                # collect stats only for tests.
+                dut_ping_servo_init_data = {
+                        'host': self.hostname,
+                        'servo_host': self._servo_host.hostname,
+                }
+                metrics.Counter('chromeos/autotest/dut_ping_servo_init2'
+                                ).increment(fields=dut_ping_servo_init_data)
 
         # TODO(waihong): Do the simplication on Chameleon too.
         self._chameleon_host = chameleon_host.create_chameleon_host(
@@ -1057,8 +1057,21 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
         with metrics.SecondsTimer(
                 'chromeos/autotest/provision/servo_install/boot_duration'):
+            self.servo._power_state.power_off()
+            try:
+                self.servo.image_to_servo_usb(image_path=image_url,
+                                              power_off_dut=False)
+            except error.AutotestError as e:
+                metrics.Counter('chromeos/autotest/repair/image_to_usb_error'
+                                ).increment(
+                                        fields={'host': self.hostname or ''})
+                six.reraise(error.AutotestError, str(e), sys.exc_info()[2])
+            # Give the DUT some time to power_off if we skip
+            # download image to usb. (crbug.com/982993)
+            if not image_url:
+                time.sleep(10)
             need_snk = self.require_snk_mode_in_recovery()
-            self.servo.install_recovery_image(image_url, snk_mode=need_snk)
+            self.servo.boot_in_recovery_mode(snk_mode=need_snk)
             if not self.wait_up(timeout=usb_boot_timeout):
                 if need_snk:
                     # Attempt to restore servo_v4 role to 'src' mode.
@@ -1309,6 +1322,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         try:
             self._repair_strategy.repair(self)
         except hosts.AutoservVerifyDependencyError as e:
+            # TODO(otabek): remove when finish b/174191325
+            self._stat_if_pingable_but_not_sshable()
             # We don't want flag a DUT as failed if only non-critical
             # verifier(s) failed during the repair.
             if e.is_critical():
@@ -1520,6 +1535,40 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         """Start powerd if it isn't already running."""
         self.run('start powerd', ignore_status=True)
 
+    def _read_arc_prop_file(self, filename):
+        for path in [
+                '/usr/share/arcvm/properties/', '/usr/share/arc/properties/'
+        ]:
+            if self.path_exists(path + filename):
+                return utils.parse_cmd_output('cat ' + path + filename,
+                                              run_method=self.run)
+        return None
+
+    def _get_arc_build_info(self):
+        """Returns a dictionary mapping build properties to their values."""
+        build_info = None
+        for filename in ['build.prop', 'vendor_build.prop']:
+            properties = self._read_arc_prop_file(filename)
+            if properties:
+                if build_info:
+                    build_info.update(properties)
+                else:
+                    build_info = properties
+            else:
+                logging.error('Failed to find %s in device.', filename)
+        return build_info
+
+    def _get_arc_primary_abi(self):
+        """Returns the primary abi of the host."""
+        return self._get_arc_build_info().get('ro.product.cpu.abi')
+
+    def _get_arc_security_patch(self):
+        """Returns the security patch of the host."""
+        return self._get_arc_build_info().get('ro.build.version.security_patch')
+
+    def get_arc_first_api_level(self):
+        """Returns the security patch of the host."""
+        return self._get_arc_build_info().get('ro.product.first_api_level')
 
     def _get_lsb_release_content(self):
         """Return the content of lsb-release file of host."""
@@ -1602,12 +1651,8 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         self._start_powerd_if_needed()
 
 
-    def cleanup(self, reboot_cmd=None):
-        """Cleanup state on device.
-
-        @param  reboot_cmd: command to use to reboot device
-        @return nothing
-        """
+    def cleanup(self):
+        """Cleanup state on device."""
         self.run('rm -f %s' % client_constants.CLEANUP_LOGS_PAUSED_FILE)
         try:
             self.cleanup_services()
@@ -1616,11 +1661,12 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             logging.warning('Unable to restart ui.')
 
         # cleanup routines, i.e. reboot the machine.
-        super(CrosHost, self).cleanup(reboot_cmd=reboot_cmd)
+        super(CrosHost, self).cleanup()
 
         # Check if the rpm outlet was manipulated.
         if self.has_power():
             self._cleanup_poweron()
+
 
     def reboot(self, **dargs):
         """
@@ -1630,7 +1676,7 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         sync should be finished in a short time during the reboot
         command.
         """
-        if dargs.get('reboot_cmd') is None:
+        if 'reboot_cmd' not in dargs:
             reboot_timeout = dargs.get('reboot_timeout', 10)
             dargs['reboot_cmd'] = ('sleep 1; '
                                    'reboot & sleep %d; '
@@ -1653,7 +1699,6 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
 
         t0 = time.time()
         try:
-            logging.info("reboot cmd: %s", dargs.get('reboot_cmd'))
             super(CrosHost, self).reboot(**dargs)
         except Exception as e:
             metric_fields['success'] = False
@@ -2686,14 +2731,11 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
         main_storage = self.run(main_storage_cmd,
                                 ignore_status=True,
                                 timeout=60).stdout.strip()
-        if not main_storage:
-            logging.debug('Main storage not detected on the host.')
-            return False
-        if boot_device == main_storage:
-            logging.debug('Device booted from main storage.')
-            return False
-        logging.debug('Device booted from external storage storage.')
-        return True
+        if not main_storage or boot_device != main_storage:
+            logging.debug('Device booted from external storage storage.')
+            return True
+        logging.debug('Device booted from main storage.')
+        return False
 
     def read_from_meminfo(self, key):
         """Return the memory info from /proc/meminfo
@@ -2898,6 +2940,17 @@ class CrosHost(abstract_ssh.AbstractSSHHost):
             return False
         dut_ssh_verifier = self._repair_strategy.verifier_is_good('ssh')
         return dut_ssh_verifier == hosts.VERIFY_FAILED
+
+    def _stat_if_pingable_but_not_sshable(self):
+        """Check if DUT pingable but failed SSH verifier."""
+        if not self._repair_strategy:
+            return
+        dut_ssh = self._repair_strategy.verifier_is_good('ssh')
+        dut_ping = self._repair_strategy.verifier_is_good('ping')
+        if (dut_ping == hosts.VERIFY_FAILED
+                    and dut_ssh == hosts.VERIFY_FAILED):
+            metrics.Counter('chromeos/autotest/dut_pingable_no_ssh').increment(
+                    fields={'host': self.hostname})
 
     def try_set_device_needs_manual_repair(self):
         """Check if device require manual attention to be fixed.

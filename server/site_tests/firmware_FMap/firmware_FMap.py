@@ -39,6 +39,14 @@ EXPECTED_FMAP_TREE_BIOS = {
   'RW_VPD': {},
 }
 
+INTEL_CSE_RW_A = {
+   'ME_RW_A': {},
+}
+
+INTEL_CSE_RW_B = {
+   'ME_RW_B': {},
+}
+
 EXPECTED_FMAP_TREE_EC = {
   'WP_RO': {
     'EC_RO': {
@@ -109,6 +117,15 @@ class firmware_FMap(FirmwareTest):
             self.run_cmd(
                 'flashrom -p %s -r -i FMAP:%s' % (target, fmap))
             lines = self.run_cmd('dump_fmap -p %s' % fmap)
+            # Change the expected FMAP Tree if separate CBFS is used for CSE RW
+            command = "dump_fmap -F %s | grep ME_RW_A" % fmap
+            if (target in TARGET_BIOS) and  self.run_cmd(command):
+                self._EXPECTED_FMAP_TREE[target]['RW_SECTION_A'].update(
+                                                          INTEL_CSE_RW_A)
+                self._EXPECTED_FMAP_TREE[target]['RW_SECTION_B'].update(
+                                                          INTEL_CSE_RW_B)
+                logging.info("DUT uses INTEL CSE LITE FMAP Scheme")
+
             self.faft_client.system.remove_dir(tmpdir)
 
             # The above output is formatted as:

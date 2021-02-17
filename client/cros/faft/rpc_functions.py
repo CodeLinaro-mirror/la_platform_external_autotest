@@ -1225,6 +1225,31 @@ class UpdaterServicer(object):
         """
         return self._updater.cbfs_sign_and_flash()
 
+    def cbfs_extract(self,
+                     filename,
+                     extension,
+                     regions,
+                     local_filename=None,
+                     arch=None,
+                     bios=None):
+        """Extracts an arbitrary file from cbfs.
+
+        Note that extracting from
+        @param filename: Filename in cbfs, including extension
+        @param extension: Extension of the file, including '.'
+        @param regions: Tuple of regions (the default is just 'a')
+        @param arch: Specific machine architecture to extract (default unset)
+        @param local_filename: Path to use on the DUT, overriding the default in
+                           the cbfs work dir.
+        @param bios: Image from which the cbfs file to be extracted
+        @return: The full path of the extracted file, or None
+        """
+        return self._updater.cbfs_extract(filename,
+                                      extension, regions,
+                                      local_filename,
+                                      arch,
+                                      bios)
+
     def get_temp_path(self):
         """Get updater's temp directory path."""
         return self._updater.get_temp_path()

@@ -66,6 +66,7 @@ CONFIG['CTS_TIMEOUT'] = {
         'CtsLibcoreOjTestCases': 2.0,
         'CtsMediaStressTestCases': 5.0,
         'CtsMediaTestCases': 10.0,
+        'CtsMediaTestCases.video': 10.0,
         'CtsNNAPIBenchmarkTestCases': 2.0,
         'CtsPrintTestCases': 1.5,
         'CtsSecurityTestCases': 20.0,
@@ -112,6 +113,7 @@ CONFIG['MEDIA_MODULES'] = [
 
 CONFIG['NEEDS_PUSH_MEDIA'] = CONFIG['MEDIA_MODULES'] + [
         'CtsMediaTestCases.audio',
+        'CtsMediaTestCases.video',
 ]
 
 # Modules that are known to need the default apps of Chrome (eg. Files.app).
@@ -206,6 +208,7 @@ CONFIG['EXTRA_MODULES'] = {
         'CtsMediaTestCases': {
                 'SUBMODULES': set([
                         'CtsMediaTestCases.audio',
+                        'CtsMediaTestCases.video',
                 ]),
                 'SUITES': ['suite:arc-cts-r'],
         },
@@ -501,6 +504,22 @@ CONFIG['EXTRA_COMMANDLINE'] = {
                 'CtsMediaTestCases android.media.cts.SoundPoolOggTest',
                 '--include-filter',
                 'CtsMediaTestCases android.media.cts.VolumeShaperTest',
+        ],
+        'CtsMediaTestCases.video': [
+               '--include-filter',
+               'CtsMediaTestCases android.media.cts.AdaptivePlaybackTest',
+               '--include-filter',
+               'CtsMediaTestCases android.media.cts.DecodeAccuracyTest',
+               '--include-filter',
+               'CtsMediaTestCases android.media.cts.DecodeEditEncodeTest',
+               '--include-filter',
+               'CtsMediaTestCases android.media.cts.DecoderConformanceTest',
+               '--include-filter',
+               'CtsMediaTestCases android.media.cts.EncodeDecodeTest',
+               '--include-filter',
+               'CtsMediaTestCases android.media.cts.ExtractDecodeEditEncodeMuxTest',
+               '--include-filter',
+               'CtsMediaTestCases android.media.cts.MediaCodecPlayerTest',
         ],
         'CtsWindowManager.A': [
                '--include-filter',

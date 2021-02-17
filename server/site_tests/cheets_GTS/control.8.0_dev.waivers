@@ -28,7 +28,7 @@ def run_TS(machine):
         target_module='gts-dev',
         target_plan='waivers',
         load_waivers=False,
-        uri='gs://chromeos-arc-images/cts/bundle/android-gts-8-R2-P-Preview10-6924226.zip',
+        uri='gs://chromeos-arc-images/cts/bundle/android-gts-8-R3-P-Preview3-7012566.zip',
         use_jdk9=True,
         timeout=3600)
 

@@ -31,7 +31,7 @@ logging.info(
 cts_abi = 'arm'
 cts_module = ''
 cts_retry = 5
-cts_revision = '6896666'  # TODO(kinaba): Set this default value from generator.
+cts_revision = None
 cts_test = ''
 cts_timeout = 600
 
@@ -61,7 +61,7 @@ if not cts_abi or not cts_module or not cts_test:
 
 # And we are getting ready for tradefed.
 uri = ('gs://chromeos-arc-images/cts/bundle/R/android-cts-' + cts_revision +
-       '-linux_x86-' + cts_abi + '.zip') if cts_revision else None
+       '-linux_x86-' + cts_abi + '.zip') if cts_revision else 'LATEST'
 run_template = ['run', 'commandAndExit', 'cts',
                 '--include-filter', cts_module + ' ' + cts_test,
                 '--logcat-on-failure']

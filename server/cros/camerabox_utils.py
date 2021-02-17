@@ -43,7 +43,7 @@ class ChartFixture:
 
         logging.info(
                 'Poll for "is ready" message for ensuring chart is ready.')
-        timeout = 30
+        timeout = 60
         poll_time_step = 0.1
         while timeout > 0:
             if self.host.run(

@@ -6,22 +6,5 @@
     is incremented. Otherwise the computation for the canonical list
     of test cases is confused. See b/151779432.
   -->
-  <Entry include="GtsExoPlayerTestCases com.google.android.exoplayer.gts.DashTest#testH265Adaptive" />
-  <Entry include="GtsExoPlayerTestCases com.google.android.exoplayer.gts.DashTest#testH265AdaptiveWithRendererDisabling" />
-  <Entry include="GtsExoPlayerTestCases com.google.android.exoplayer.gts.DashTest#testH265AdaptiveWithSeeking" />
-  <Entry include="GtsExoPlayerTestCases com.google.android.exoplayer.gts.DashTest#testH265Fixed" />
-  <Entry include="GtsExoPlayerTestCases com.google.android.exoplayer.gts.DashTest#testWidevineH265Adaptive" />
-  <Entry include="GtsExoPlayerTestCases com.google.android.exoplayer.gts.DashTest#testWidevineH265AdaptiveWithRendererDisabling" />
-  <Entry include="GtsExoPlayerTestCases com.google.android.exoplayer.gts.DashTest#testWidevineH265AdaptiveWithSeeking" />
-  <Entry include="GtsExoPlayerTestCases com.google.android.exoplayer.gts.DashTest#testWidevineH265Fixed" />
-  <Entry include="GtsLocationHostTestCases com.google.android.gts.location.LocationHostTest#testSetting" />
-  <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testClearWith240P30" />
-  <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testClearWith360P30" />
-  <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testClearWith480P30" />
-  <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testClearWith480P30ProfileMainLevel30" />
-  <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testL3With240P30" />
-  <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testL3With360P30" />
-  <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testL3With480P30" />
-  <Entry include="GtsMediaTestCases com.google.android.media.gts.WidevineHEVCPlaybackTests#testL3With480P30ProfileMainLevel30" />
-  <Entry include="GtsNetworkWatchlistTestCases com.google.android.watchlist.gts.NetworkWatchlistTest#testNetworkWatchlistReports_visitWikipedia" />
+  <Entry include="GtsAssistantWorkProfileHostTestCases" />
 </SubPlan>

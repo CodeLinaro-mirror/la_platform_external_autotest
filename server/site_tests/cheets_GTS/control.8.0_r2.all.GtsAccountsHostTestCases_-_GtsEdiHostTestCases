@@ -30,6 +30,9 @@ def run_TS(machine):
         target_plan=None,
         uri='gs://chromeos-arc-images/cts/bundle/android-gts-8-R2-P-6955212.zip',
         use_jdk9=True,
+        # This module has a known waived abort bug (b/173331969). As long as the
+        # executed test count matches the known number, assume all tests ran.
+        executable_test_count=[161, 322, 483, 644],
         timeout=86400)
 
 parallel_simple(run_TS, machines)

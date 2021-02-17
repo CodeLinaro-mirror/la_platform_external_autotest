@@ -442,8 +442,9 @@ class site_sysinfo(base_sysinfo.base_sysinfo):
         from autotest_lib.client.cros import cryptohome
         # Get the dictionary attack counter.
         keyval["TPM_DICTIONARY_ATTACK_COUNTER"] = (
-                cryptohome.get_tpm_more_status().get(
-                    'dictionary_attack_counter', 'Failed to query cryptohome'))
+                cryptohome.get_tpm_da_info().get(
+                        'dictionary_attack_counter',
+                        'Failed to query tpm_manager'))
 
         # Return the updated keyvals.
         return keyval

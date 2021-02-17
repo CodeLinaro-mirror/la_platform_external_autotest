@@ -1,3 +1,4 @@
+# Lint as: python2, python3
 # Copyright 2018 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,8 +9,12 @@ autotest: site_utils/test_push.py
 skylab: venv/skylab_staging/test_push.py
 """
 
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import collections
 import re
+import six
 
 # Dictionary of test results keyed by test name regular expression.
 EXPECTED_TEST_RESULTS = {'^SERVER_JOB$':                 ['GOOD'],
@@ -74,7 +79,7 @@ def _match_test_results(test_views, expected_results, ignored_tests):
     mismatch_errors = []
     unknown_tests = []
     found_keys = set()
-    for test_name, test_status_list in test_views.iteritems():
+    for test_name, test_status_list in six.iteritems(test_views):
         test_found = False
         for test_name_pattern, expected_result in expected_results.items():
             if re.search(test_name_pattern, test_name):

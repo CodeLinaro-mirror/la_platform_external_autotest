@@ -27,6 +27,7 @@ def repair(machine):
             # We don't need to collect logs or crash info if we're a
             # testbed since they're not applicable (yet).
             if (isinstance(target, hosts.CrosHost)
+                and target.is_up_fast()
                 and target.is_up()
                 and target.is_file_system_writable()):
                 # Collect logs before the repair, as it might destroy all

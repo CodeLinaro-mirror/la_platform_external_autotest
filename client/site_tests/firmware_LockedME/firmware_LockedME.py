@@ -98,16 +98,6 @@ class firmware_LockedME(test.test):
     def check_region_inaccessible(self, sectname):
         """Test and ensure a region is not accessible by host CPU."""
 
-        # flashrom should have read the section as all 0xff's. If not,
-        # the ME is not locked.
-        logging.info('%s should be all 0xff...', sectname)
-        with open(sectname, 'rb') as f:
-            for c in f.read():
-                if c != chr(0xff):
-                    err_string = "%s was readable by flashrom" % sectname
-                    raise error.TestFail(err_string)
-
-        # See if it is writable.
         self.try_to_rewrite(sectname)
 
     def run_once(self, expect_me_present=True):
@@ -171,7 +161,7 @@ class firmware_LockedME(test.test):
         # So far, so good, but we need to be certain. Rather than parse what
         # flashrom tells us about the ME-related registers, we'll just try to
         # change the ME components. We shouldn't be able to.
-        self.try_to_rewrite('SI_DESC')
+        inaccessible_sections.append('SI_DESC')
         for sectname in inaccessible_sections:
             self.check_region_inaccessible(sectname)
 

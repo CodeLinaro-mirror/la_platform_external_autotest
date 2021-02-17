@@ -39,6 +39,7 @@ except ImportError:
 from chromite.lib import timeout_util
 
 DEFAULT_SERVO_RESET_TRIGGER = (
+        'ping',
         'ssh',
         'stop_start_ui',
         'power',
@@ -95,13 +96,26 @@ _CROS_PROVISION_TRIGGERS = (
         'rwfw',
         'fwstatus',
         'python',
+        'hwid',
         'cros',
         'dev_default_boot',
 )
 _CROS_POWERWASH_TRIGGERS = ('tpm', 'good_provision', 'ext4',)
-_CROS_USB_TRIGGERS = ('ssh', 'writable', 'stop_start_ui',)
-_JETSTREAM_USB_TRIGGERS = ('ssh', 'writable',)
-_CROS_FIRMWARE_TRIGGERS = ('ssh', )
+_CROS_USB_TRIGGERS = (
+        'ping',
+        'ssh',
+        'writable',
+        'stop_start_ui',
+)
+_JETSTREAM_USB_TRIGGERS = (
+        'ping',
+        'ssh',
+        'writable',
+)
+_CROS_FIRMWARE_TRIGGERS = (
+        'ping',
+        'ssh',
+)
 _CROS_USB_DEPENDENCIES = ('usb_drive', )
 
 
@@ -467,8 +481,7 @@ class HWIDVerifier(hosts.Verifier):
             return
 
         host_hwid = host.run('crossystem hwid', ignore_status=True).stdout
-        host_serial_number = host.run('vpd -g serial_number',
-                                      ignore_status=True).stdout
+        host_serial_number = self._get_serial_number(host, info_serial_number)
         if not host_hwid or not host_serial_number:
             raise hosts.AutoservVerifyError(
                     'Failed to get HWID & Serial Number for host %s' %
@@ -493,6 +506,34 @@ class HWIDVerifier(hosts.Verifier):
                     host_serial_number)
             host.set_device_repair_state(
                     cros_constants.DEVICE_STATE_NEEDS_DEPLOY)
+
+    def _get_serial_number(self, host, serial_number):
+        """Read serial_number from VPD.
+
+        If VPD does not have any value for serial_number then it will
+        try to restore from host_info.
+
+        @param host             CrosHost
+        @param serial_number    Serial-number from host-info
+        """
+        req = host.run('vpd -g serial_number', ignore_status=True)
+        # serial_number not found in the VPD info
+        if not req.stdout and req.exit_status == 3 and serial_number:
+            logging.debug('Cannot find serial_number from VPD.')
+            # check if vpd working fine without error
+            l1 = host.run('vpd -l', ignore_status=True)
+            l2 = host.run('vpd -l |grep "\"serial_number\"="',
+                          ignore_status=True)
+            if l1.exit_status == 0 and l2.exit_status == 1:
+                logging.info('Start restoring serial_number:%s for VPD.',
+                             serial_number)
+                # update serial_number for VPD
+                cmd = 'vpd -s serial_number=%s'
+                host.run(cmd % serial_number, ignore_status=True)
+                host.run('dump_vpd_log --force', ignore_status=True)
+                # reading from VPD to see what we updated
+                req = host.run('vpd -g serial_number', ignore_status=True)
+        return req.stdout
 
     @property
     def description(self):
@@ -1057,9 +1098,12 @@ class ServoInstallRepair(hosts.RepairAction):
         if not need_update_image and host.health_profile:
             repair_failed_count = host.health_profile.get_repair_fail_count()
             # try to re-image USB when previous attempt failed
-            if repair_failed_count == 1:
-                logging.info('Required re-download image to usbkey as'
-                             ' a previous repair failed.')
+            if (repair_failed_count > 0 and
+                (repair_failed_count == 1 or repair_failed_count % 10 == 0)):
+                logging.info(
+                        'Required re-download image to usbkey as'
+                        ' a previous repair failed. Fail count: %s',
+                        repair_failed_count)
                 need_update_image = True
 
         update_url = None
@@ -1119,7 +1163,8 @@ def _cros_verify_base_dag():
     FirmwareStatusVerifier = cros_firmware.FirmwareStatusVerifier
     FirmwareVersionVerifier = cros_firmware.FirmwareVersionVerifier
     verify_dag = (
-            (repair_utils.SshVerifier, 'ssh', ()),
+            (repair_utils.PingVerifier, 'ping', ()),
+            (repair_utils.SshVerifier, 'ssh', ('ping', )),
             (ServoUSBDriveVerifier, 'usb_drive', ()),
             (DevDefaultBootVerifier, 'dev_default_boot', ('ssh', )),
             (DevModeVerifier, 'devmode', ('ssh', )),
@@ -1160,12 +1205,16 @@ def _cros_basic_repair_actions(
             # RPM cycling must precede Servo reset:  if the DUT has a dead
             # battery, we need to reattach AC power before we reset via servo.
             (repair_utils.RPMCycleRepair, 'rpm', (), (
+                    'ping',
                     'ssh',
                     'power',
             )),
             (ServoResetRepair, 'servoreset', (), servo_reset_trigger),
             (ServoCr50RebootRepair, 'cr50_reset', (), servo_reset_trigger),
-            (ServoSysRqRepair, 'sysrq', (), ('ssh', )),
+            (ServoSysRqRepair, 'sysrq', (), (
+                    'ping',
+                    'ssh',
+            )),
             (LabelCleanupRepair, 'label_cleanup', ('ssh', ),
              ('cros_version_label', )),
 
@@ -1176,6 +1225,7 @@ def _cros_basic_repair_actions(
             # and we want the repair steps below to be able to trust the
             # firmware.
             (cros_firmware.FaftFirmwareRepair, 'faft_firmware_repair', (), (
+                    'ping',
                     'ssh',
                     'fwstatus',
                     'good_provision',
@@ -1301,22 +1351,23 @@ def _jetstream_repair_actions():
     jetstream_tpm_triggers = ('jetstream_tpm', 'jetstream_attestation')
     jetstream_service_triggers = (jetstream_tpm_triggers +
                                   ('jetstream_services',))
-    repair_actions = (
-        _cros_basic_repair_actions(servo_reset_trigger=('ssh',)) +
-        (
+    base_actions = _cros_basic_repair_actions(servo_reset_trigger=(
+            'ping',
+            'ssh',
+    ))
+    custom_actions = (
             (JetstreamTpmRepair, 'jetstream_tpm_repair',
              _JETSTREAM_USB_TRIGGERS + _CROS_POWERWASH_TRIGGERS,
              provision_triggers + jetstream_tpm_triggers),
-
             (JetstreamServiceRepair, 'jetstream_service_repair',
-             _JETSTREAM_USB_TRIGGERS + _CROS_POWERWASH_TRIGGERS + (
-                 'jetstream_tpm', 'jetstream_attestation'),
+             _JETSTREAM_USB_TRIGGERS + _CROS_POWERWASH_TRIGGERS +
+             ('jetstream_tpm', 'jetstream_attestation'),
              provision_triggers + jetstream_service_triggers),
-        ) +
-        _cros_extended_repair_actions(
+    )
+    extend_actions = _cros_extended_repair_actions(
             provision_triggers=provision_triggers + jetstream_service_triggers,
-            usb_triggers=_JETSTREAM_USB_TRIGGERS))
-    return repair_actions
+            usb_triggers=_JETSTREAM_USB_TRIGGERS)
+    return base_actions + custom_actions + extend_actions
 
 
 def _jetstream_verify_dag():

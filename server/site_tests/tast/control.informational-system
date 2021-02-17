@@ -46,6 +46,7 @@ def run(machine):
                              '"group:mainline" && '
                              'informational && '
                              '!"name:crostini.*" && '
+                             '!"dep:plugin_vm" && '
                              '!"dep:chrome" && '
                              '!"dep:android*"'
                              ')'],

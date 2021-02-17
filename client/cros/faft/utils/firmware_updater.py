@@ -602,7 +602,8 @@ class FirmwareUpdater(object):
                      extension,
                      regions=('a', ),
                      local_filename=None,
-                     arch=None):
+                     arch=None,
+                     bios=None):
         """Extracts an arbitrary file from cbfs.
 
         Note that extracting from
@@ -612,10 +613,12 @@ class FirmwareUpdater(object):
         @param arch: Specific machine architecture to extract (default unset)
         @param local_filename: Path to use on the DUT, overriding the default in
                            the cbfs work dir.
+        @param bios: Image from which the cbfs file to be extracted
         @return: The full path of the extracted file, or None
         """
         regions = self._cbfs_regions(regions)
-        bios = os.path.join(self._cbfs_work_path, self._bios_path)
+        if bios is None:
+            bios = os.path.join(self._cbfs_work_path, self._bios_path)
 
         cbfs_filename = filename + extension
         if local_filename is None:
@@ -877,3 +880,4 @@ class FirmwareUpdater(object):
             handler = self._get_handler('bios')
         handler.set_gbb_flags(flags)
         handler.dump_whole(filename)
+

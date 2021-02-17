@@ -88,8 +88,8 @@ class desktopui_CheckRlzPingSent(test.test):
     def _wait_for_rlz_lock(self):
         """Waits for the DUT to get into locked state after login."""
         def get_install_lockbox_finalized_status():
-            status = cryptohome.get_tpm_more_status()
-            return status.get('install_lockbox_finalized')
+            status = cryptohome.get_install_attribute_status()
+            return status == 'VALID'
 
         try:
             utils.poll_for_condition(
@@ -162,9 +162,17 @@ class desktopui_CheckRlzPingSent(test.test):
                     self._wait_for_rlz_lock()
 
         logging.debug("Starting RLZ check with username flag: %s", username)
-        with chrome.Chrome(logged_in=pre_login is not 'lock',
-                           extra_browser_args=browser_args, username=username,
-                           dont_override_profile=True) as cr:
+        # Pass clear_enterprise_policy=False in guest mode to avoid deleting
+        # /home/chronos/'Local State' between logins. Deleting it will cause
+        # the guest mode test to fail on boards that do not have rlz_brand_code
+        # in the VPD (mainly unibuild models). This file is normally not
+        # deleted between logins anyways.
+        with chrome.Chrome(
+                logged_in=pre_login is not 'lock',
+                clear_enterprise_policy=pre_login is not 'lock',
+                extra_browser_args=browser_args,
+                username=username,
+                dont_override_profile=True) as cr:
             self._check_url_for_rlz(cr)
             self._verify_rlz_data(expect_caf_ping=expect_caf_ping,
                                   guest=pre_login is 'lock')

@@ -33,7 +33,8 @@ def run(machine):
                  test_exprs=['('
                              '"group:mainline" && '
                              'informational && '
-                             '"name:crostini.*"'
+                             '"name:crostini.*" && '
+                             '!"dep:plugin_vm"'
                              ')'],
                  ignore_test_failures=True,
                  max_run_sec=3*60*60,

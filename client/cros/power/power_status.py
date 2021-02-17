@@ -717,7 +717,7 @@ class AbstractStats(object):
         self.name = name
         self.incremental = incremental
         self._stats = self._read_stats()
-
+        self._first_stats = self._stats.copy()
 
     def refresh(self):
         """
@@ -735,12 +735,15 @@ class AbstractStats(object):
         Turns a dict with absolute times (or percentages) into a weighted
         average value.
         """
-        total = sum(self._stats.itervalues())
+        stats = self._stats
+        if self.incremental:
+            stats = self.do_diff(stats, self._first_stats)
+
+        total = sum(stats.itervalues())
         if total == 0:
             return None
 
-        return sum((float(k)*v) / total for (k, v) in self._stats.iteritems())
-
+        return sum(float(k) * v / total for k, v in stats.iteritems())
 
     def _supports_automatic_weighted_average(self):
         """
@@ -1604,6 +1607,22 @@ class SystemPower(PowerMeasurement):
         return float(keyvals['Battery']['energy rate'])
 
 
+class BatteryStateOfCharge(PowerMeasurement):
+    """Class for logging battery state of charge."""
+
+    def __init__(self):
+        """Constructor."""
+        super(BatteryStateOfCharge, self).__init__('battery_soc')
+
+    def refresh(self):
+        """refresh method.
+
+        See superclass PowerMeasurement for details.
+        """
+        keyvals = parse_power_supply_info()
+        return float(keyvals['Battery']['percentage'])
+
+
 class CheckpointLogger(object):
     """Class to log checkpoint data.
 
@@ -2106,6 +2125,8 @@ class PowerLogger(MeasurementLogger):
 
         measurements = []
         status = get_status()
+        if status.battery:
+            measurements.append(BatteryStateOfCharge())
         if status.battery_discharging():
             measurements.append(SystemPower(status.battery_path))
         if power_utils.has_powercap_support():

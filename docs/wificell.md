@@ -54,6 +54,16 @@ test_that --args="router_addr=my-other-router pcap_addr=my-other-pcap" \
         my-host suite:wifi_matfunc
 ```
 
+If the test is using
+[Tast](https://chromium.googlesource.com/chromiumos/platform/tast/) instead of
+autotest, you can pass the `router` and `pcap` arguments to `tast run` instead:
+
+```bash
+# DUT at 'my-host', AP at 'my-other-router', and PCAP at 'my-other-pcap'
+tast run -var="router=my-other-router" -var="pcap=my-other-pcap" my-host \
+        wifi.ChannelHop
+```
+
 Also, note that if a pcap device isn't found at `${HOST}-pcap`, then we often
 can utilize the test AP to capture packets as well. The test framework does
 this by creating one or more monitor-mode interfaces in addition to the AP-mode

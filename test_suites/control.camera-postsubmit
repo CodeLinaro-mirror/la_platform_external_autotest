@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 
 AUTHOR = "Chrome OS Team"
-NAME = "camera-postsbumit"
+NAME = "camera-postsubmit"
 PURPOSE = "Suite to run camera tests in postsubmit"
 TIME = "MEDIUM"
 TEST_CATEGORY = "General"

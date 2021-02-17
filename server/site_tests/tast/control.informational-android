@@ -35,6 +35,7 @@ def run(machine):
                              '"group:mainline" && '
                              'informational && '
                              '!"name:crostini.*" && '
+                             '!"dep:plugin_vm" && '
                              '"dep:android*"'
                              ')'],
                  ignore_test_failures=True,

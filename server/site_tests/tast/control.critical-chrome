@@ -35,6 +35,7 @@ def run(machine):
                              '"group:mainline" && '
                              '!informational && '
                              '"dep:chrome" && '
+                             '!"dep:plugin_vm" && '
                              '!"dep:android*"'
                              ')'],
                  download_data_lazily=False,

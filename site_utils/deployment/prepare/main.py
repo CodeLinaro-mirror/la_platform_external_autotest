@@ -24,6 +24,7 @@ from autotest_lib.server import server_logging_config
 from autotest_lib.server.hosts import file_store
 from autotest_lib.site_utils.deployment.prepare import dut as preparedut
 from autotest_lib.server.hosts import factory
+from autotest_lib.site_utils.admin_audit import rpm_validator
 
 
 RETURN_CODES = autotest_enum.AutotestEnum(
@@ -65,6 +66,8 @@ def main():
             logging.info('DRY RUN: Would have run actions %s', opts.actions)
             return
 
+        is_labstation = (host_info.get().os == "labstation")
+
         if 'stage-usb' in opts.actions:
             try:
                 repair_image = afe_utils.get_stable_cros_image_name_v2(
@@ -90,19 +93,6 @@ def main():
                 logging.error("fail to install firmware: %s", err)
                 return RETURN_CODES.INSTALL_FIRMWARE_FAILURE
 
-        if 'run-pre-deploy-verification' in opts.actions:
-            try:
-                if host_info.get().os == "labstation":
-                    logging.info("testing RPM information on labstation")
-                    preparedut.verify_labstation_RPM_config_unsafe(host)
-                else:
-                    preparedut.verify_servo(host)
-                    preparedut.verify_battery_status(host)
-                    preparedut.verify_ccd_testlab_enable(host)
-            except Exception as err:
-                logging.error("fail on pre-deploy verification: %s", err)
-                return RETURN_CODES.PRE_DEPLOY_VERIFICATION_FAILURE
-
         if 'verify-recovery-mode' in opts.actions:
             try:
                 preparedut.verify_boot_into_rec_mode(host)
@@ -110,6 +100,7 @@ def main():
                 logging.error("fail to boot from recovery mode: %s", err)
                 return RETURN_CODES.BOOT_FROM_RECOVERY_MODE_FAILURE
 
+        # TODO (otabek): mix this step with update-label later.
         if 'setup-labstation' in opts.actions:
             try:
                 preparedut.setup_hwid_and_serialnumber(host)
@@ -120,10 +111,25 @@ def main():
         if 'update-label' in opts.actions:
             try:
                 preparedut.setup_hwid_and_serialnumber(host)
-                host.labels.update_labels(host, task_name='deploy')
+                if not is_labstation:
+                    host.labels.update_labels(host, task_name='deploy')
             except Exception as err:
                 logging.error("fail to update label: %s", err)
                 return RETURN_CODES.UPDATE_LABEL_FAILURE
+
+        if 'run-pre-deploy-verification' in opts.actions:
+            try:
+                if is_labstation:
+                    logging.info("testing RPM information on labstation")
+                    preparedut.verify_labstation_RPM_config_unsafe(host)
+                else:
+                    preparedut.verify_servo(host)
+                    preparedut.verify_battery_status(host)
+                    preparedut.verify_ccd_testlab_enable(host)
+                    rpm_validator.verify_unsafe(host)
+            except Exception as err:
+                logging.error("fail on pre-deploy verification: %s", err)
+                return RETURN_CODES.PRE_DEPLOY_VERIFICATION_FAILURE
 
     return RETURN_CODES.OK
 
