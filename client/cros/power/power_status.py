@@ -1947,7 +1947,10 @@ class MeasurementLogger(threading.Thread):
         """
         for _ in range(REFRESH_RETRY_COUNT):
             try:
-                return [meas.refresh() for meas in self._measurements]
+                return [
+                        val for meas in self._measurements
+                        if (val := meas.refresh()) is not None
+                ]
             except error.TestError as e:
                 logging.warning('Error refreshing measurements: %s', str(e))
                 time.sleep(REFRESH_RETRY_DELAY)
@@ -2279,8 +2282,11 @@ class TempMeasurement(object):
         Returns:
             float, temperature in degrees Celsius
         """
-        return int(utils.read_one_line(self._path)) / 1000.
-
+        try:
+            return int(utils.read_one_line(self._path)) / 1000.
+        except (OSError, IOError, ValueError) as e:
+            logging.info('Failed to read temp from %s: %s', self._path, e)
+            return None
 
 class BatteryTempMeasurement(TempMeasurement):
     """Class to measure battery temperature."""
