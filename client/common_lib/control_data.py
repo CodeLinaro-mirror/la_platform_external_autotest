@@ -93,6 +93,11 @@ class ControlData(object):
         # Defaults
         self.path = path
         self.dependencies = set()
+        # Whether this test needs the Telemetry framework present on the DUT.
+        # Deliberately not expressed via DEPENDENCIES: entries there are matched
+        # against DUT labels for scheduling, and Telemetry is a payload we
+        # install on demand rather than a property of the hardware.
+        self.require_telemetry = False
         self.metadata = {}
         # TODO(jrbarnette): This should be removed once outside
         # code that uses can be changed.
@@ -240,6 +245,10 @@ class ControlData(object):
         self._set_set('dependencies', val)
 
 
+    def set_require_telemetry(self, val):
+        self._set_bool('require_telemetry', val)
+
+
     def set_metadata(self, val):
         self._set_dict('metadata', val)
 
@@ -356,11 +365,12 @@ class ControlData(object):
 
 def _extract_const(expr):
     assert (expr.__class__ in (ast.Str, ast.Constant))
+    val = expr.value if isinstance(expr, ast.Constant) else expr.s
     if six.PY2:
-        assert (expr.s.__class__ in (str, int, float, unicode))
+        assert (val.__class__ in (str, int, float, six.text_type))
     else:
-        assert (expr.s.__class__ in (str, int, float))
-    return str(expr.s).strip()
+        assert (val.__class__ in (str, int, float))
+    return str(val).strip()
 
 
 def _extract_dict(expr):

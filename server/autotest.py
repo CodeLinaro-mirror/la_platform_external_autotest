@@ -27,6 +27,7 @@ from autotest_lib.client.common_lib import utils as client_utils
 from autotest_lib.server import installable_object
 from autotest_lib.server import utils
 from autotest_lib.server import utils as server_utils
+from autotest_lib.server.cros import telemetry_dependency
 from autotest_lib.server.cros.dynamic_suite.constants import JOB_REPO_URL
 from autotest_lib.server import crashcollect
 import six
@@ -570,8 +571,35 @@ class Autotest(installable_object.InstallableObject):
                                       % ", ".join(call_args))
         cfile = "".join(prologue_lines)
 
-        cfile += open(tmppath).read()
+        cfile_orig = open(tmppath).read()
+        cfile += cfile_orig
         open(tmppath, "w").write(cfile)
+
+        # Client tests that use Telemetry import it at module scope, so they
+        # fail during import before any test code runs. Ensure Telemetry is on
+        # the DUT here, where every client execution path (run_timed_test,
+        # client_wrapper, client_trampoline, WrapperTestRunner) converges.
+        #
+        # Unlike TelemetryRunner.__exit__, any deployed tree is intentionally
+        # left on the DUT: a single server job may invoke client_at.run_test()
+        # repeatedly (e.g. login_LoginSuccess across autoupdate or Cr50 steps),
+        # and background=True runs return from execute_control() while the
+        # client test is still running.
+        control_label = (control_file
+                         if isinstance(control_file, six.string_types)
+                         and '\n' not in control_file else tmppath)
+        try:
+            telemetry_dependency.ensure_for_client_control_string(
+                    host, cfile_orig, filename=control_label)
+        except telemetry_dependency.telemetry_deploy.TelemetryDeployError as e:
+            raise error.AutotestRunError(
+                    'Telemetry could not be deployed to %s: %s' %
+                    (host.hostname, e)) from e
+        except Exception as e:
+            # An unexpected error in the static AST check must never take down
+            # tests that never needed Telemetry.
+            logging.warning('Could not check Telemetry dependency for %s: %s',
+                            control_label, e)
 
         # Create and copy state file to remote_control_file + '.state'
         state_file = host.job.preprocess_client_state()
