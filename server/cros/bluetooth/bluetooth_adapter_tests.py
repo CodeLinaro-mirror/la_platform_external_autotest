@@ -916,8 +916,10 @@ class BluetoothAdapterTests(test.test):
             'BLE_PHONE': 'NoInputNoOutput',
             'BLUETOOTH_AUDIO': 'NoInputNoOutput',
             'FAST_PAIR': 'DisplayYesNo',
+            'GAMEPAD': 'NoInputNoOutput',
             'KEYBOARD': 'NoInputNoOutput',
             'MOUSE': 'NoInputNoOutput',
+            'PHONE': 'NoInputNoOutput',
     }
 
     dut_btmon_log_path = ""
