@@ -79,7 +79,7 @@ class firmware_Cr50VirtualNVRam(test.test):
         # Check that size constraints are respected.
         exp_err = '0x146' # TPM_RC_NV_RANGE
         if self.gsc_version == 'ti50':
-            exp_err = '0x18b'  # TPM_RC_HANDLE
+            exp_err = '0x2'  # TPM_BADINDEX
         expect_tpmc_error('read 0x3fffff 0xd', exp_err)
 
         # Check zero-length can be read.
