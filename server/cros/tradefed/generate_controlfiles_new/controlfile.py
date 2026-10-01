@@ -101,7 +101,7 @@ def _render_config(year,
     else:
         rendered_template += '    host_list = [hosts.create_host(machine)]\n'
     if wifi_info_needed:
-        rendered_template += '    ssid, wifipass = wifi_utils.get_wifi_ssid_pass(machine[\'hostname\'])\n'
+        rendered_template += '    ssid, wifipass = wifi_utils.get_wifi_ssid_pass(machine)\n'
     rendered_template += '    job.run_test(\n'
     rendered_template += f'        \'{base_name}\',\n'
     if camera_facing and camera_facing != 'nocamera':

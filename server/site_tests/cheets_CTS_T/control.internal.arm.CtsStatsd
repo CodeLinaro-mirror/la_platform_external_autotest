@@ -26,7 +26,7 @@ DOC = 'n/a'
 
 def run_TS(machine):
     host_list = [hosts.create_host(machine)]
-    ssid, wifipass = wifi_utils.get_wifi_ssid_pass(machine['hostname'])
+    ssid, wifipass = wifi_utils.get_wifi_ssid_pass(machine)
     job.run_test(
         'cheets_CTS_T',
         hosts=host_list,
