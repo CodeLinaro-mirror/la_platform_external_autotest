@@ -294,11 +294,12 @@ class audio_AudioAfterSuspend(audio_test.AudioTest):
             # Active (plugged for external) state after resume
             self.action_plug_jack(plugged_after_resume)
 
-            # Explicitly select the node as there is a known issue
-            # that the selected node might change after a suspension.
-            # We should remove this after the issue is addressed(crbug:987529).
-            self.facade.set_selected_node_types(self.audio_nodes[0],
-                                                self.audio_nodes[1])
+            # Select the target nodes through Chrome so CrasAudioHandler does
+            # not treat the node change as unexpected and revert it.
+            output_nodes, input_nodes = self.audio_nodes
+            audio_test_utils.check_and_set_chrome_active_node_types(
+                    self.facade, output_nodes[0] if output_nodes else None,
+                    input_nodes[0] if input_nodes else None)
 
             if binder_widget != None:
                 with chameleon_audio_helper.bind_widgets(binder_widget):
