@@ -31,7 +31,7 @@ def run_TS(machine):
         max_retry=9,
         tag='internal.arm.all.CtsWidget',
         test_name='cheets_CTS_T.internal.arm.all.CtsWidget',
-        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsWidgetTestCases', '--include-filter', 'CtsWidgetTestCases29', '--include-filter', 'CtsWidgetTestCases29[instant]', '--include-filter', 'CtsWidgetTestCases29[secondary_user]', '--include-filter', 'CtsWidgetTestCases[instant]', '--include-filter', 'CtsWidgetTestCases[secondary_user]', '--logcat-on-failure'],
+        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsWidgetTestCases', '--include-filter', 'CtsWidgetTestCases29', '--include-filter', 'CtsWidgetTestCases29[instant]', '--include-filter', 'CtsWidgetTestCases29[secondary_user]', '--include-filter', 'CtsWidgetTestCases[instant]', '--include-filter', 'CtsWidgetTestCases[secondary_user]', '--logcat-on-failure', '--no-enable-default-logs'],
         retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
         target_module='all.CtsWidget',
         target_plan=None,

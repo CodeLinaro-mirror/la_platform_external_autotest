@@ -290,6 +290,11 @@ def _format_modules_cmd(config,
                     and config['TRADEFED_CTS_COMMAND'] != 'gts'):
             cmd.append('--logcat-on-failure')
 
+        # HACK(b/565195217): Experiment to stabilize CtsWidgetTestCases.
+        # Consider expanding to all tests if proven to work.
+        if 'CtsWidgetTestCases' in modules:
+            cmd.append('--no-enable-default-logs')
+
         if config['TRADEFED_IGNORE_BUSINESS_LOGIC_FAILURE']:
             cmd.append('--ignore-business-logic-failure')
 

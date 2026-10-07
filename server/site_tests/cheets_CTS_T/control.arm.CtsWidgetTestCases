@@ -30,7 +30,7 @@ def run_TS(machine):
         iterations=1,
         tag='arm.CtsWidgetTestCases',
         test_name='cheets_CTS_T.arm.CtsWidgetTestCases',
-        run_template=['run', 'commandAndExit', 'cts', '--module', 'CtsWidgetTestCases'],
+        run_template=['run', 'commandAndExit', 'cts', '--module', 'CtsWidgetTestCases', '--no-enable-default-logs'],
         retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
         target_module='CtsWidgetTestCases',
         target_plan=None,
