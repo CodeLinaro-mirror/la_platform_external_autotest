@@ -71,7 +71,14 @@ DUT_SCP_OPTIONS = ' '.join([
         '-o ServerAliveInterval=900', '-o ServerAliveCountMax=3',
         '-o ConnectionAttempts=4', '-o Protocol=2'
 ])
-DUT_CHROME_RESULTS_DIR = '/usr/local/telemetry/src/tools/perf'
+# Store perf profiles on stateful (/usr/local/tmp) rather than RAM-backed /tmp
+# (multi-GB perf/ETM profiles can exhaust tmpfs) or /usr/local/telemetry
+# (not deployed when telemetry_on_dut=False).
+_DUT_TMP_DIR = '/usr/local/tmp'
+_DUT_PERF_DIR_PREFIX = f'{_DUT_TMP_DIR}/telemetry_afdo.'
+_DUT_PERF_DIR_TEMPLATE = f'{_DUT_PERF_DIR_PREFIX}XXXXXX'
+_CLEANUP_WAIT_SECS = 45
+_CLEANUP_TIMEOUT_SECS = 60
 
 _WAIT_CMD_TEMPLATE = """\
 for _ in {1..%(timeout)d}; do \
@@ -82,15 +89,35 @@ done; \
 """
 
 
-def _wait_for_process(host, pid, timeout=-1):
+def _wait_for_process(
+        host,
+        pid,
+        timeout,
+        ssh_timeout=None,
+        ignore_timeout=False,
+):
     """Waits for a process on the DUT to terminate.
 
-    @param host: A host object representing the DUT.
-    @param pid: The process ID (integer).
-    @param timeout: Number of seconds to wait; default is wait forever.
+    Args:
+        host: A host object representing the DUT.
+        pid: The process ID (integer).
+        timeout: Number of seconds to poll for the process to exit.
+        ssh_timeout: Optional SSH command timeout in seconds passed to
+            `host.run` (`None` uses `host.run`'s default).
+        ignore_timeout: Passed to `host.run` to suppress timeout exceptions.
+
+    Returns:
+        Exit status integer from the polling command, or `None` if `host.run`
+        timed out with `ignore_timeout=True`.
     """
     wait_cmd = _WAIT_CMD_TEMPLATE % {'pid': pid, 'timeout': timeout}
-    return host.run(wait_cmd, ignore_status=True).exit_status
+    run_kwargs = {}
+    if ssh_timeout is not None:
+        run_kwargs['timeout'] = ssh_timeout
+    if ignore_timeout:
+        run_kwargs['ignore_timeout'] = True
+    result = host.run(wait_cmd, ignore_status=True, **run_kwargs)
+    return None if result is None else result.exit_status
 
 
 # List of benchmarks to run to capture profile information. This is
@@ -141,20 +168,27 @@ class telemetry_AFDOGenerate(test.test):
     """
     version = 1
 
-    def _scp_perf_data(self, dut, host_dir):
+    def _scp_perf_data(self, dut, perf_dir, host_dir):
         """Copy perf data from dut.
 
-        @param dut: The autotest host object representing DUT.
-        @param host_dir: The directory on host to put the file .
+        Args:
+            dut: The autotest host object representing DUT.
+            perf_dir: The directory on DUT containing perf.data.
+            host_dir: The directory on host to put the file.
 
-        @returns status code for scp command.
+        Returns:
+            Status code for scp command.
         """
         cmd = []
-        src = f'root@{dut.hostname}:{DUT_CHROME_RESULTS_DIR}/perf.data'
+        src = utils.sh_quote_word(f'root@{dut.hostname}:{perf_dir}/perf.data')
         cmd.extend([
-            'scp', DUT_SCP_OPTIONS, RSA_KEY,
-            '-P %s' % str(dut.port) if dut.port else '', '-v', src,
-            host_dir
+                'scp',
+                DUT_SCP_OPTIONS,
+                RSA_KEY,
+                '-P %s' % str(dut.port) if dut.port else '',
+                '-v',
+                src,
+                utils.sh_quote_word(host_dir),
         ])
         command = ' '.join(cmd)
 
@@ -169,9 +203,79 @@ class telemetry_AFDOGenerate(test.test):
         logging.debug('command return value: %d', exit_code)
         return exit_code
 
+    def _run_cleanup_cmd(self, cmd):
+        """Runs best-effort DUT cleanup without masking primary errors."""
+        # SSHHost.run() still raises AutoservSSHTimeout/CmdTimeoutError under
+        # ignore_status=True and defaults timeout=None to 3600s when the DUT
+        # crashes or hangs; bound timeout and catch exceptions during teardown.
+        try:
+            self._host.run(
+                    cmd,
+                    timeout=_CLEANUP_TIMEOUT_SECS,
+                    ignore_status=True,
+                    ignore_timeout=True,
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            logging.warning('Failed to clean up on DUT (%s): %s', cmd, e)
+
+    def _reap_perf_best_effort(self, perf_pid):
+        """Stops and waits for background perf PID without masking errors."""
+        # Wait for the background subshell (`perf_cmd` trailing echo) to exit
+        # before `_dut_perf_dir()` runs `rm -rf` to avoid an ENOTEMPTY race.
+        # Keep the wait loop budget strictly below `_CLEANUP_TIMEOUT_SECS` so
+        # the trailing `! ps` check completes before `host.run` times out.
+        self._run_cleanup_cmd(f'kill -0 {perf_pid} && killall -2 perf')
+        try:
+            _wait_for_process(
+                    self._host,
+                    perf_pid,
+                    _CLEANUP_WAIT_SECS,
+                    ssh_timeout=_CLEANUP_TIMEOUT_SECS,
+                    ignore_timeout=True,
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            logging.warning('Failed waiting for perf PID %d on DUT: %s',
+                            perf_pid, e)
+
+    @contextmanager
+    def _dut_perf_dir(self):
+        """Creates and cleans up an isolated perf directory on stateful."""
+        # Create /usr/local/tmp with mode 1777 if absent so non-root callers
+        # have a world-writable stateful tmpdir, stop any orphaned perf process
+        # and sweep leftovers from crashed runs whose teardown never ran (safe
+        # because `control` schedules one exclusive single-tenant instance per
+        # DUT), and create a 0700 per-run directory.
+        perf_dir = self._host.run(
+                f'mkdir -p -m 1777 {utils.sh_quote_word(_DUT_TMP_DIR)} && '
+                '(killall -2 perf || true) && '
+                f'rm -rf {utils.sh_quote_word(_DUT_PERF_DIR_PREFIX)}* && '
+                f'mktemp -d {utils.sh_quote_word(_DUT_PERF_DIR_TEMPLATE)}',
+                verbose=True,
+        ).stdout.strip()
+        # Require strictly ASCII `[A-Za-z0-9]+` (`str.isalnum()` alone accepts
+        # non-ASCII Unicode letters) so unquoted interpolation below is safe.
+        suffix = perf_dir[len(_DUT_PERF_DIR_PREFIX):]
+        if (not perf_dir.startswith(_DUT_PERF_DIR_PREFIX)
+                    or not (suffix.isascii() and suffix.isalnum())):
+            raise RuntimeError(
+                    f'Unexpected perf output dir from mktemp: {perf_dir!r}')
+        try:
+            yield perf_dir
+        finally:
+            # Always delete multi-GB perf/ETM profiles even on scp/perf-inject
+            # failure: Swarming DUTs are shared across non-AFDO tests that do
+            # not sweep `/usr/local/tmp/telemetry_afdo.*` (b/563185846).
+            self._run_cleanup_cmd(f'rm -rf {utils.sh_quote_word(perf_dir)}')
+
     @contextmanager
     def _perf_on_dut(self):
         """Start and kill perf process on DUT."""
+        with self._dut_perf_dir() as perf_dir, self._run_perf_in_dir(perf_dir):
+            yield
+
+    @contextmanager
+    def _run_perf_in_dir(self, perf_dir):
+        """Runs perf profiling using `perf_dir` on the DUT."""
         logging.info('Starting perf process in background.')
         # Note that the below makes use of a supported, but rarely-seen, perf
         # feature. e.g., `perf record -a sleep 5` will record _the entire
@@ -200,77 +304,97 @@ class telemetry_AFDOGenerate(test.test):
             profile_args = INTEL_PROFILER_ARGS
             perf_data = 'perf.data'
 
-        perf_out_file = '/tmp/__telemetry_AFDOGenerate_perf_output'
-        perf_started_file = '/tmp/__telemetry_AFDOGenerate_perf_started'
-        # Clean this file up in case it exists, for whatever reason
-        self._host.run(f'rm -f {perf_started_file}', verbose=True)
+        perf_out_file = f'{perf_dir}/perf_output'
+        perf_started_file = f'{perf_dir}/perf_started'
+        perf_data_file = f'{perf_dir}/{perf_data}'
 
         profile_command = f'touch {perf_started_file}; {sleep_loop}'
         perf_cmd = (f'nohup perf {profile_args} '
-                    f'-o {DUT_CHROME_RESULTS_DIR}/{perf_data} '
+                    f'-o {perf_data_file} '
                     f'>{perf_out_file} 2>&1 '
                     f"bash -ec '{profile_command}'; "
                     f'echo "Perf exited with $?" >> {perf_out_file}')
-        perf_pid = self._host.run_background(perf_cmd, verbose=True)
+        raw_pid = self._host.run_background(perf_cmd, verbose=True)
+        try:
+            perf_pid = int(raw_pid.strip())
+        except ValueError as exc:
+            self._run_cleanup_cmd('killall -2 perf')
+            raise RuntimeError(
+                    f'Unexpected PID from run_background: {raw_pid!r}'
+            ) from exc
 
-        # N.B., Number of retries & the sleep multiplier are arbitrarily
-        # selected, but should result in waiting about 2mins for perf to start.
-        # Existing code didn't wait at all and it _generally_ worked, so 2mins
-        # should be plenty.
-        try_pings = 10
-        for i in range(1, try_pings + 1):
-            logging.info('Checking if perf has started (try %d/%d)...', i,
-                         try_pings)
-            test_exit = self._host.run(f'test -e {perf_started_file}',
-                                       ignore_status=True).exit_status
-            # If `perf_started_file` exists, perf has fully started up.
-            if not test_exit:
-                break
+        try:
+            # N.B., Number of retries & the sleep multiplier are arbitrarily
+            # selected, but should result in waiting about 2mins for perf to
+            # start. Existing code didn't wait at all and it _generally_
+            # worked, so 2mins should be plenty.
+            try_pings = 10
+            for i in range(1, try_pings + 1):
+                logging.info('Checking if perf has started (try %d/%d)...', i,
+                             try_pings)
+                test_exit = self._host.run(f'test -e {perf_started_file}',
+                                           ignore_status=True).exit_status
+                # If `perf_started_file` exists, perf has fully started up.
+                if not test_exit:
+                    break
 
-            logging.info('Perf not yet started. Sleeping a bit...')
-            time.sleep(i * 2)
-        else:
-            # Don't ignore the status; this command failing is useful signal,
-            # and we're going to `raise` in a few lines anyway.
-            perf_out = self._host.run(f'cat {perf_out_file}')
-            logging.error(
-                    'Perf process not started correctly on DUT; stdstreams:'
-                    '\n%s',
-                    perf_out.stdout,
-            )
-            raise RuntimeError('Perf failed to start on DUT')
+                logging.info('Perf not yet started. Sleeping a bit...')
+                time.sleep(i * 2)
+            else:
+                # Don't ignore the status; this command failing is useful
+                # signal, and we're going to `raise` in a few lines anyway.
+                perf_out = self._host.run(f'cat {perf_out_file}')
+                logging.error(
+                        'Perf process not started correctly on DUT; stdstreams:'
+                        '\n%s',
+                        perf_out.stdout,
+                )
+                raise RuntimeError('Perf failed to start on DUT')
+        except BaseException:
+            self._reap_perf_best_effort(perf_pid)
+            raise
 
-        logging.info('Perf successfully started; PID: %s', perf_pid)
+        logging.info('Perf successfully started; PID: %d', perf_pid)
         try:
             yield
-        finally:
-            # Check if process is still alive after benchmark run, if yes,
-            # then kill it with -2 (which is SIGINT).
-            kill_cmd = f'kill -0 {perf_pid} && killall -2 perf'
-            if self._host.run(kill_cmd, ignore_status=True).exit_status != 0:
-                logging.error('Perf process is not killed correctly on DUT.')
-                raise RuntimeError
-            # Perf process may not be terminated right after the kill command,
-            # wait until perf process finishes.
-            status = _wait_for_process(self._host, int(perf_pid),
-                                       WAIT_FOR_CMD_TIMEOUT_SECS)
-            if status != 0:
-                logging.error('Error waiting for perf process to be killed.')
-                raise RuntimeError
-            logging.info('Perf has been killed on DUT.')
+        except BaseException:
+            # Use bounded best-effort cleanup when the benchmark body fails so
+            # a wedged/rebooted DUT cannot block for 3600s or clobber the
+            # primary benchmark exception with `AutoservSSHTimeout` or bare
+            # `RuntimeError`.
+            self._reap_perf_best_effort(perf_pid)
+            raise
+
+        # Normal return path: enforce clean `perf` shutdown before harvesting
+        # `perf.data`. Check if process is still alive after benchmark run, and
+        # if so, stop it with -2 (SIGINT).
+        kill_cmd = f'kill -0 {perf_pid} && killall -2 perf'
+        if self._host.run(kill_cmd, ignore_status=True).exit_status != 0:
+            logging.error('Perf process is not killed correctly on DUT.')
+            raise RuntimeError
+        # Perf process may not be terminated right after the kill command,
+        # wait until perf process finishes.
+        status = _wait_for_process(self._host, perf_pid,
+                                   WAIT_FOR_CMD_TIMEOUT_SECS)
+        if status != 0:
+            logging.error('Error waiting for perf process to be killed.')
+            raise RuntimeError
+        logging.info('Perf has been killed on DUT.')
+        perf_out = self._host.run(f'cat {perf_out_file}', ignore_status=True)
+        logging.info('Perf output on DUT:\n%s', perf_out.stdout)
 
         if self._is_arm():
             # Now we need to convert ETM data into Intel's LBR format
             # which allows us to re-use the same AFDO pipeline.
             perf_inject_cmd = ('perf inject --itrace=i1000il --strip '
-                               f'-i {DUT_CHROME_RESULTS_DIR}/perf-etm.data '
-                               f'-o {DUT_CHROME_RESULTS_DIR}/perf.data')
+                               f'-i {perf_dir}/perf-etm.data '
+                               f'-o {perf_dir}/perf.data')
             if self._host.run(perf_inject_cmd).exit_status != 0:
                 logging.error(
                     'Perf inject failed to convert ETM trace into LBR format.')
                 raise RuntimeError
 
-        status = self._scp_perf_data(self._host, self.profdir)
+        status = self._scp_perf_data(self._host, perf_dir, self.profdir)
         if status != 0:
             logging.error('Cannot copy perf.data file to host.')
             raise RuntimeError
