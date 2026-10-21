@@ -5,6 +5,9 @@
 # found in the LICENSE file.
 """Unit tests for server/cros/telemetry_deploy.py."""
 
+import os
+import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -114,10 +117,12 @@ class FakeHost(object):
 # make the deploy look like it had failed verification.
 _ABSENT = telemetry_deploy.TELEMETRY_DUT_SRC + '/tools/perf/run_benchmark'
 
-# Exact commands, so ordering assertions cannot latch onto the wrong rm.
+# Exact commands, so ordering assertions cannot latch onto the wrong rm or .pth
+# check.
 _RM_LIVE_TREE = "rm -rf '%s'" % telemetry_deploy.TELEMETRY_DUT_DIR
 _SWAP = "mv '%s' '%s'" % (telemetry_deploy._STAGING_DIR,
                           telemetry_deploy.TELEMETRY_DUT_DIR)
+_WRITE_PTH = 'umask 022;'
 
 # The two payload formats a build may publish. Looked up by suffix rather than
 # by position, because the module expects the candidate order to be swapped
@@ -164,6 +169,64 @@ class IsTelemetryOnDutTest(unittest.TestCase):
         telemetry_deploy.is_telemetry_on_dut(host)
         self.assertTrue(host.ran(telemetry_deploy.TELEMETRY_DUT_SRC))
         self.assertFalse(host.ran(telemetry_deploy._STAGING_DIR))
+
+    # pylint: disable=protected-access
+    def test_shell_checks_both_sentinels_and_rootfs_or_stateful_pth(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usr = os.path.join(tmpdir, 'usr')
+            rootfs_lib = os.path.join(usr, 'lib', 'python3.11',
+                                      'site-packages')
+            rootfs_lib64 = os.path.join(usr, 'lib64', 'python3.11',
+                                        'site-packages')
+            os.makedirs(rootfs_lib)
+            # A stray /usr/lib64/python3.*/site-packages alongside /usr/lib on
+            # a --with-platlibdir=lib build must not fail the presence check
+            # when /usr/lib/python3.*/site-packages/telemetry.pth is present.
+            os.makedirs(rootfs_lib64)
+            src = os.path.join(usr, 'local', 'telemetry', 'src')
+            for rel in telemetry_deploy._SENTINEL_PATHS:
+                full = os.path.join(src, rel)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, 'w', encoding='utf-8') as f:
+                    f.write('x\n')
+
+            host = _ShellHost(tmpdir)
+            with mock.patch.object(telemetry_deploy,
+                                   'TELEMETRY_DUT_SRC',
+                                   new=src):
+                # Tree present, but neither rootfs nor stateful .pth exists.
+                self.assertFalse(
+                        telemetry_deploy.is_telemetry_on_dut(
+                                host, rootfs_prefix=usr))
+
+                # Pre-installed image: rootfs .pth in lib/ satisfies the check
+                # even when an unpopulated lib64/ site-packages dir also exists.
+                rootfs_pth = os.path.join(rootfs_lib,
+                                          telemetry_deploy._PTH_FILENAME)
+                with open(rootfs_pth, 'w', encoding='utf-8') as f:
+                    f.write(telemetry_deploy._TELEMETRY_PYTHON_PATH + '\n')
+                self.assertTrue(
+                        telemetry_deploy.is_telemetry_on_dut(
+                                host, rootfs_prefix=usr))
+
+                # Option A image: rootfs .pth exists, but live tree is absent.
+                sentinel = os.path.join(src,
+                                        telemetry_deploy._SENTINEL_PATHS[0])
+                os.unlink(sentinel)
+                self.assertFalse(
+                        telemetry_deploy.is_telemetry_on_dut(
+                                host, rootfs_prefix=usr))
+
+                # On-demand deploy: no rootfs .pth, stateful .pth satisfies it.
+                with open(sentinel, 'w', encoding='utf-8') as f:
+                    f.write('x\n')
+                os.unlink(rootfs_pth)
+                telemetry_deploy._ensure_python_path(host, rootfs_prefix=usr)
+                self.assertTrue(
+                        telemetry_deploy.is_telemetry_on_dut(
+                                host, rootfs_prefix=usr))
+
+    # pylint: enable=protected-access
 
 
 class DecompressFlagTest(unittest.TestCase):
@@ -248,12 +311,28 @@ class EnsureTest(unittest.TestCase):
         self.assertTrue(host.ran('tar x'))
 
     def test_extraction_prunes_what_the_image_pruned(self, _enabled, _dep_url):
-        """The deployed tree must match the one the image used to ship."""
+        """Unused upstream test fixtures and corpora must be excluded."""
         host = FakeHost(failures={_ABSENT: 1})
         telemetry_deploy.ensure_telemetry_on_dut(host)
         tar = host.matching('tar x')[0]
         for path in telemetry_deploy._EXCLUDED_PATHS:
             self.assertIn("--exclude='%s'" % path, tar)
+
+    # pylint: disable=protected-access
+    def test_deploy_writes_pth_before_swap(self, _enabled, _dep_url):
+        """telemetry.pth must be written before _swap_into_place commits."""
+        host = FakeHost(failures={_ABSENT: 1})
+        telemetry_deploy.ensure_telemetry_on_dut(host)
+        pth_idx = host.index_of(_WRITE_PTH)
+        self.assertGreater(pth_idx, host.index_of('tar x'))
+        self.assertLess(pth_idx, host.index_of(_SWAP))
+        cmd = host.commands[pth_idx]
+        self.assertIn(telemetry_deploy._PTH_FILENAME, cmd)
+        self.assertIn(telemetry_deploy._SITE_PACKAGES_REL_GLOB, cmd)
+        self.assertIn('$prefix/local/${d#"$prefix"/}', cmd)
+        self.assertIn(telemetry_deploy._TELEMETRY_PYTHON_PATH, cmd)
+
+    # pylint: enable=protected-access
 
     def test_force_deploys_over_existing_tree(self, _enabled, _dep_url):
         host = FakeHost()
@@ -393,11 +472,25 @@ class DutStateOnFailureTest(unittest.TestCase):
             telemetry_deploy.ensure_telemetry_on_dut(host)
         self.assertTrue(self._scratch_removals(host))
 
+    # pylint: disable=protected-access
     def test_staging_removed_when_swap_fails(self, _enabled, _dep_url):
         host = FakeHost(failures={_ABSENT: 1, _SWAP: 1})
         with self.assertRaises(telemetry_deploy.TelemetryDeployError):
             telemetry_deploy.ensure_telemetry_on_dut(host)
         self.assertTrue(self._scratch_removals(host))
+
+    def test_pth_failure_does_not_strand_the_live_tree(self, _enabled,
+                                                       _dep_url):
+        host = FakeHost(failures={
+                _ABSENT: 1,
+                _WRITE_PTH: 1,
+        })
+        with self.assertRaises(telemetry_deploy.TelemetryDeployError):
+            telemetry_deploy.ensure_telemetry_on_dut(host)
+        self.assertFalse(host.ran(_SWAP))
+        self.assertTrue(self._scratch_removals(host))
+
+    # pylint: enable=protected-access
 
     def test_tarball_removed_on_success(self, _enabled, _dep_url):
         host = FakeHost(failures={_ABSENT: 1})
@@ -542,6 +635,156 @@ class SwapIntoPlaceTest(unittest.TestCase):
             telemetry_deploy._swap_into_place(host)
 
 
+# pylint: disable=protected-access
+class _ShellHost(FakeHost):
+    """FakeHost that executes commands against the local /bin/sh."""
+
+    def __init__(self, allowed_prefix):
+        super().__init__()
+        self._allowed_prefix = allowed_prefix
+
+    def run(self,
+            cmd,
+            timeout=None,
+            ignore_status=False,
+            ignore_timeout=False):
+        """Executes cmd under /bin/sh after guarding against host paths."""
+        if (self._allowed_prefix not in cmd
+                    or telemetry_deploy._DUT_FILESYSTEM in cmd):
+            raise AssertionError(
+                    'Refusing to run command without patched temp prefix %r: '
+                    '%s' % (self._allowed_prefix, cmd))
+        self.commands.append(cmd)
+        proc = subprocess.run(['/bin/sh', '-c', cmd],
+                              check=False,
+                              timeout=timeout or 10,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              text=True)
+        return FakeCmdResult(exit_status=proc.returncode,
+                             stdout=proc.stdout,
+                             stderr=proc.stderr)
+
+
+class PythonPathTest(unittest.TestCase):
+    """Tests for _ensure_python_path."""
+
+    def test_mirrors_lib_and_lib64_site_packages(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usr = os.path.join(tmpdir, 'usr')
+            for libdir in ('lib', 'lib64'):
+                os.makedirs(
+                        os.path.join(usr, libdir, 'python3.11',
+                                     'site-packages'))
+            # Non-directory matches must be skipped rather than breaking mkdir.
+            os.makedirs(os.path.join(usr, 'libexec', 'python3.11'))
+            with open(os.path.join(usr, 'libexec', 'python3.11',
+                                   'site-packages'),
+                      'w',
+                      encoding='utf-8') as f:
+                f.write('not a dir\n')
+
+            prev_umask = os.umask(0o077)
+            self.addCleanup(os.umask, prev_umask)
+
+            host = _ShellHost(tmpdir)
+            telemetry_deploy._ensure_python_path(host, rootfs_prefix=usr + '/')
+
+            expected = telemetry_deploy._TELEMETRY_PYTHON_PATH + '\n'
+            for libdir in ('lib', 'lib64'):
+                local_site = os.path.join(usr, 'local', libdir, 'python3.11',
+                                          'site-packages')
+                pth = os.path.join(local_site, telemetry_deploy._PTH_FILENAME)
+                self.assertEqual(os.stat(local_site).st_mode & 0o777, 0o755)
+                self.assertEqual(os.stat(pth).st_mode & 0o777, 0o644)
+                with open(pth, encoding='utf-8') as f:
+                    self.assertEqual(f.read(), expected)
+            self.assertFalse(
+                    os.path.exists(
+                            os.path.join(usr, 'local', 'libexec', 'python3.11',
+                                         'site-packages')))
+
+    def test_replaces_symlink_without_clobbering_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usr = os.path.join(tmpdir, 'usr')
+            os.makedirs(
+                    os.path.join(usr, 'lib64', 'python3.11', 'site-packages'))
+            local_site = os.path.join(usr, 'local', 'lib64', 'python3.11',
+                                      'site-packages')
+            os.makedirs(local_site)
+            victim = os.path.join(tmpdir, 'victim.txt')
+            with open(victim, 'w', encoding='utf-8') as f:
+                f.write('keep-me\n')
+            pth = os.path.join(local_site, telemetry_deploy._PTH_FILENAME)
+            os.symlink(victim, pth)
+
+            telemetry_deploy._ensure_python_path(_ShellHost(tmpdir),
+                                                 rootfs_prefix=usr)
+
+            with open(victim, encoding='utf-8') as f:
+                self.assertEqual(f.read(), 'keep-me\n')
+            self.assertFalse(os.path.islink(pth))
+            with open(pth, encoding='utf-8') as f:
+                self.assertEqual(
+                        f.read(),
+                        telemetry_deploy._TELEMETRY_PYTHON_PATH + '\n')
+
+    def test_replaces_directory_at_pth_destination(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usr = os.path.join(tmpdir, 'usr')
+            os.makedirs(
+                    os.path.join(usr, 'lib64', 'python3.11', 'site-packages'))
+            pth_dir = os.path.join(usr, 'local', 'lib64', 'python3.11',
+                                   'site-packages',
+                                   telemetry_deploy._PTH_FILENAME)
+            os.makedirs(pth_dir)
+            with open(os.path.join(pth_dir, 'stale'), 'w',
+                      encoding='utf-8') as f:
+                f.write('stale\n')
+
+            telemetry_deploy._ensure_python_path(_ShellHost(tmpdir),
+                                                 rootfs_prefix=usr)
+
+            self.assertTrue(os.path.isfile(pth_dir))
+            with open(pth_dir, encoding='utf-8') as f:
+                self.assertEqual(
+                        f.read(),
+                        telemetry_deploy._TELEMETRY_PYTHON_PATH + '\n')
+
+    @unittest.skipIf(os.geteuid() == 0, 'root bypasses 0500 directory mode')
+    def test_cleans_up_temp_file_when_write_fails(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usr = os.path.join(tmpdir, 'usr')
+            os.makedirs(
+                    os.path.join(usr, 'lib64', 'python3.11', 'site-packages'))
+            local_site = os.path.join(usr, 'local', 'lib64', 'python3.11',
+                                      'site-packages')
+            os.makedirs(local_site)
+            os.chmod(local_site, 0o500)
+            try:
+                with self.assertRaises(telemetry_deploy.TelemetryDeployError):
+                    telemetry_deploy._ensure_python_path(_ShellHost(tmpdir),
+                                                         rootfs_prefix=usr)
+                self.assertEqual(os.listdir(local_site), [])
+            finally:
+                os.chmod(local_site, 0o700)
+
+    def test_fails_when_no_site_packages_dir_matches(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usr = os.path.join(tmpdir, 'usr')
+            os.makedirs(usr)
+            with self.assertRaises(
+                    telemetry_deploy.TelemetryDeployError) as cm:
+                telemetry_deploy._ensure_python_path(_ShellHost(tmpdir),
+                                                     rootfs_prefix=usr)
+            self.assertIn('No directory matched', str(cm.exception))
+
+    def test_failure_raises_deploy_error(self):
+        host = FakeHost(failures={_WRITE_PTH: 1})
+        with self.assertRaises(telemetry_deploy.TelemetryDeployError):
+            telemetry_deploy._ensure_python_path(host)
+
+
 class CleanupTest(unittest.TestCase):
     """Tests for cleanup_telemetry_on_dut."""
 
@@ -555,11 +798,68 @@ class CleanupTest(unittest.TestCase):
                      telemetry_deploy._STAGING_DIR,
                      telemetry_deploy._SCRATCH_DIR):
             self.assertIn(path, cmd)
+        self.assertNotIn(telemetry_deploy._PTH_FILENAME, cmd)
+
+    def test_preserves_symlinked_test_image_pth_on_cleanup(self):
+        """On ChromeOS test images, /usr/lib/python3.* symlinks into stateful.
+
+        Specifically, /usr/lib/python3.11 -> /usr/local/usr/lib/python3.11 and
+        /usr/local/usr -> ., so /usr/lib/python3.11/site-packages/telemetry.pth
+        and /usr/local/lib/python3.11/site-packages/telemetry.pth are the same
+        inode. Cleanup must remove the deployed tree without deleting the
+        shared telemetry.pth file, while is_telemetry_on_dut() must return
+        False once the tree is gone.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usr = os.path.join(tmpdir, 'usr')
+            local_site = os.path.join(usr, 'local', 'lib', 'python3.11',
+                                      'site-packages')
+            os.makedirs(local_site)
+            os.symlink('.', os.path.join(usr, 'local', 'usr'))
+            os.makedirs(os.path.join(usr, 'lib'))
+            os.symlink(os.path.join(usr, 'local', 'usr', 'lib', 'python3.11'),
+                       os.path.join(usr, 'lib', 'python3.11'))
+
+            host = _ShellHost(tmpdir)
+            telemetry_deploy._ensure_python_path(host, rootfs_prefix=usr)
+            rootfs_pth = os.path.join(usr, 'lib', 'python3.11',
+                                      'site-packages',
+                                      telemetry_deploy._PTH_FILENAME)
+            local_pth = os.path.join(local_site,
+                                     telemetry_deploy._PTH_FILENAME)
+            self.assertTrue(os.path.samefile(rootfs_pth, local_pth))
+
+            tree = os.path.join(usr, 'local', 'telemetry')
+            src = os.path.join(tree, 'src')
+            for rel in telemetry_deploy._SENTINEL_PATHS:
+                full = os.path.join(src, rel)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, 'w', encoding='utf-8') as f:
+                    f.write('x\n')
+            staging = tree + '.staging'
+            scratch = os.path.join(tmpdir, 'scratch')
+            for path in (staging, scratch):
+                os.makedirs(path)
+
+            with mock.patch.multiple(telemetry_deploy,
+                                     TELEMETRY_DUT_DIR=tree,
+                                     TELEMETRY_DUT_SRC=src,
+                                     _SCRATCH_PATHS=(scratch, staging)):
+                self.assertTrue(
+                        telemetry_deploy.is_telemetry_on_dut(
+                                host, rootfs_prefix=usr))
+                telemetry_deploy.cleanup_telemetry_on_dut(host)
+                self.assertFalse(os.path.exists(tree))
+                self.assertTrue(os.path.exists(rootfs_pth))
+                self.assertFalse(
+                        telemetry_deploy.is_telemetry_on_dut(
+                                host, rootfs_prefix=usr))
 
     def test_never_raises(self):
         """Cleanup runs while an exception may already be propagating."""
         host = FakeHost(raises=('rm -rf', ))
         telemetry_deploy.cleanup_telemetry_on_dut(host)
+# pylint: enable=protected-access
 
 
 class DepUrlTest(unittest.TestCase):

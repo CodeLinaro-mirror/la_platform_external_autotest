@@ -20,7 +20,8 @@ Only two consumers actually need the framework present on the DUT itself:
   A. Server-side tests with telemetry_on_dut=True, which ssh in and run
      /usr/local/telemetry/src/tools/perf/run_benchmark.
   B. Client-side autotest tests that import telemetry.* at module scope (most
-     commonly via client/common_lib/cros/chrome.py).
+     commonly via client/common_lib/cros/chrome.py), resolved through
+     telemetry.pth in Python site-packages.
 
 This module provides the deployment primitive those consumers use so that the
 framework can eventually be dropped from the image entirely. It fetches the
@@ -62,6 +63,12 @@ from autotest_lib.server.cros import telemetry_setup
 # cannot disagree about where the tree is.
 TELEMETRY_DUT_DIR = '/usr/local/telemetry'
 TELEMETRY_DUT_SRC = os.path.join(TELEMETRY_DUT_DIR, 'src')
+_TELEMETRY_REL_PYTHON_PATH = 'third_party/catapult/telemetry'
+_TELEMETRY_PYTHON_PATH = os.path.join(TELEMETRY_DUT_SRC,
+                                      _TELEMETRY_REL_PYTHON_PATH)
+_USR_PREFIX = '/usr'
+_SITE_PACKAGES_REL_GLOB = 'lib*/python3.*/site-packages'
+_PTH_FILENAME = 'telemetry.pth'
 
 # Scratch locations, deliberately on the same filesystem as TELEMETRY_DUT_DIR so
 # that the final move into place is a rename rather than a copy.
@@ -73,7 +80,7 @@ _STAGING_DIR = TELEMETRY_DUT_DIR + '.staging'
 _DUT_FILESYSTEM = '/mnt/stateful_partition'
 _SCRATCH_DIR = os.path.join(_DUT_FILESYSTEM, 'telemetry_deploy')
 
-# Every path this module creates, in the order they should be removed.
+# Temporary staging paths this module creates, in the order they are removed.
 _SCRATCH_PATHS = (_SCRATCH_DIR, _STAGING_DIR)
 
 # The dep tarball published per-build by chromeos-base/chromeos-chrome, via
@@ -102,21 +109,28 @@ _TARBALL_ROOT_DIR = 'test_src'
 # directory means a partially deleted or partially extracted tree is detected
 # and repaired instead of being silently trusted.
 _SENTINEL_PATHS = (
-        'third_party/catapult/telemetry',
+        _TELEMETRY_REL_PYTHON_PATH,
         'tools/perf/run_benchmark',
 )
 
-# Directories the telemetry ebuild deletes after unpacking the same tarball at
-# image build time, so the tree deployed here matches the one the image used to
-# ship rather than being ~420 MiB larger. Nothing in Telemetry needs them, and
-# not writing them at all is faster than writing and then deleting them.
+# Unused test fixtures and corpora excluded when unpacking dep-telemetry_dep:
+#   - 'testing' and 'third_party/catapult/tracing/test_data' (~420 MiB) match
+#     what chromeos-base/telemetry deleted in src_unpack() at image build time.
+#   - 'tools/perf/testdata/task_output_dir' (~48 MiB) holds unit-test fixtures
+#     for tools/perf/process_perf_results_unittest.py that are never read at
+#     runtime (pruned in chromeos-chrome on newer builds and excluded here for
+#     older tarballs).
+# Note: 'third_party/catapult/third_party/gsutil' must NOT be pruned here;
+# Catapult's py_utils/cloud_storage.py falls back to that vendored gsutil on
+# ChromeOS DUTs where depot_tools is not installed.
 #
 # Relative to a Telemetry src/ directory, like _SENTINEL_PATHS, and verified
 # absent after extraction: a pattern that silently stops matching would
-# otherwise cost 420 MiB with nothing to show for it.
+# otherwise waste hundreds of MiB on stateful with nothing to show for it.
 _PRUNED_PATHS = (
         'testing',
         'third_party/catapult/tracing/test_data',
+        'tools/perf/testdata/task_output_dir',
 )
 
 # The same paths as tar sees them, before the rename to src/. GNU tar excludes
@@ -331,19 +345,59 @@ def _paths_state(host, base, paths, present):
     return None if result is None else result.exit_status == 0
 
 
-def is_telemetry_on_dut(host):
-    """Returns whether a usable Telemetry tree is present on the DUT.
+def is_telemetry_on_dut(host, rootfs_prefix=_USR_PREFIX):
+    """Returns whether a usable Telemetry tree and .pth are on the DUT.
 
     An unreachable DUT counts as "not present": the deploy that follows will
     fail against the same DUT and report the connection problem properly, which
     is a better diagnosis than one raised from a presence check.
 
-    @param host: Autotest host object for the DUT.
+    Args:
+        host: Autotest host object for the DUT.
+        rootfs_prefix: Prefix containing rootfs lib*/python3.*/site-packages
+            directories (overridden in unit tests to run against a temp dir).
 
-    @returns True if Telemetry appears usable on the DUT.
+    Returns:
+        True if both the Telemetry sentinel files and a matching rootfs or
+        stateful telemetry.pth exist on the DUT.
     """
-    return _paths_state(host, TELEMETRY_DUT_SRC, _SENTINEL_PATHS,
-                        present=True) is True
+    prefix = rootfs_prefix.rstrip('/')
+    if not prefix:
+        return False
+    sentinel_checks = ' && '.join(
+            'test -e %s' % _quoted(os.path.join(TELEMETRY_DUT_SRC, path))
+            for path in _SENTINEL_PATHS)
+    # Group the .pth loop in braces after '&&' so missing sentinels
+    # short-circuit cleanly on images that ship rootfs telemetry.pth without
+    # the tree, while catching trees stranded without .pth across drone skew.
+    # Require telemetry.pth in at least one matching site-packages dir (rather
+    # than every dir) because ChromeOS Python 3.11 uses --with-platlibdir=lib
+    # and chromeos-base/telemetry only writes /usr/lib/python3.*/site-packages,
+    # whereas another ebuild may also create /usr/lib64/python3.*/site-packages.
+    cmd = ('%(sentinels)s && { '
+           'prefix=%(prefix)s; '
+           'found=0; '
+           'for d in "$prefix"/%(rel_glob)s; do '
+           '[ -d "$d" ] || continue; '
+           'if [ -f "$d"/%(pth)s ] || '
+           '[ -f "$prefix/local/${d#"$prefix"/}"/%(pth)s ]; then '
+           'found=1; break; '
+           'fi; '
+           'done; '
+           '[ "$found" -eq 1 ]; '
+           '}' % {
+                   'sentinels': sentinel_checks,
+                   'prefix': _quoted(prefix),
+                   'rel_glob': _SITE_PACKAGES_REL_GLOB,
+                   'pth': _quoted(_PTH_FILENAME),
+           })
+    try:
+        result = _try_run(host, cmd, _QUICK_CMD_TIMEOUT_SECONDS,
+                          'Checking for %s' % TELEMETRY_DUT_SRC)
+    except TelemetryDeployError as e:
+        logging.warning('%s', e)
+        return False
+    return result is not None and result.exit_status == 0
 
 
 def _resolve_build(host, build):
@@ -693,7 +747,8 @@ def _remove_existing_tree(host):
     this point means the old tree is either unusable (it failed the sentinel
     check) or is being deliberately replaced, so nothing worth keeping is lost.
 
-    @param host: Autotest host object for the DUT.
+    Args:
+        host: Autotest host object for the DUT.
     """
     _run(host,
          'rm -rf %s' % _quoted(TELEMETRY_DUT_DIR),
@@ -714,13 +769,81 @@ def _swap_into_place(host):
     are held exclusively for the duration of a test, so that does not arise in
     practice.
 
-    @param host: Autotest host object for the DUT.
+    Args:
+        host: Autotest host object for the DUT.
     """
     _run(host,
          'rm -rf %s && mv %s' % (_quoted(TELEMETRY_DUT_DIR),
                                  _quoted(_STAGING_DIR, TELEMETRY_DUT_DIR)),
          timeout=_EXTRACT_TIMEOUT_SECONDS,
          description='Moving the staged Telemetry tree into place')
+
+
+def _ensure_python_path(host, rootfs_prefix=_USR_PREFIX):
+    """Ensures site-packages under stateful contains telemetry.pth.
+
+    ChromeOS Python's site.getsitepackages() derives lib/ and sys.platlibdir
+    candidates under every entry in PREFIXES (which includes /usr/local) and
+    processes any candidate directory that exists on disk. On ChromeOS test
+    images, rootfs /usr/lib/python3.* is a symlink to /usr/local/usr/lib/python3.*
+    and /usr/local/usr is a symlink to '.', so /usr/lib/python3.*/site-packages
+    and /usr/local/lib/python3.*/site-packages resolve to the same directory on
+    stateful. Writing telemetry.pth under $prefix/local/${d#"$prefix"/}
+    (matching chromeos-base/telemetry's install_python()) keeps client imports
+    working on stateful without modifying the read-only rootfs, even after
+    chromeos-base/telemetry is removed completely.
+
+    Args:
+        host: Autotest host object for the DUT.
+        rootfs_prefix: Prefix containing rootfs lib*/python3.*/site-packages
+            directories (overridden in unit tests to run against a temp dir).
+
+    Raises:
+        TelemetryDeployError: If no site-packages directory matched or writing
+            telemetry.pth failed.
+    """
+    prefix = rootfs_prefix.rstrip('/')
+    if not prefix:
+        raise TelemetryDeployError('Invalid empty rootfs_prefix: %r' %
+                                   rootfs_prefix)
+    # Enforce world-readable permissions (umask 022) for non-root client
+    # processes, clear any directory occupying the destination path so mv -f
+    # cannot nest inside it, write via a temp file so symlinks on stateful are
+    # never followed as root, and fail if no site-packages directory matched.
+    # On --with-platlibdir=lib builds that also have a stray /usr/lib64
+    # site-packages directory, this also writes a lib64 copy that site.py never
+    # reads, which is harmless and avoids coupling to sys.platlibdir.
+    cmd = ('umask 022; '
+           'prefix=%(prefix)s; '
+           'written=0; '
+           'for d in "$prefix"/%(rel_glob)s; do '
+           '[ -d "$d" ] || continue; '
+           'local_dir="$prefix/local/${d#"$prefix"/}"; '
+           'tmp_pth="$local_dir/.%(pth_raw)s.$$"; '
+           'if ! { mkdir -p "$local_dir" && '
+           '{ [ ! -d "$local_dir"/%(pth)s ] || rm -rf "$local_dir"/%(pth)s; }'
+           ' && rm -f "$tmp_pth" && '
+           "printf '%%s\\n' %(path)s > \"$tmp_pth\" && "
+           'mv -f "$tmp_pth" "$local_dir"/%(pth)s; }; then '
+           'rm -f "$tmp_pth"; '
+           'exit 1; '
+           'fi; '
+           'written=$((written + 1)); '
+           'done; '
+           'if [ "$written" -eq 0 ]; then '
+           'echo "No directory matched $prefix/%(rel_glob)s" >&2; '
+           'exit 1; '
+           'fi' % {
+                   'prefix': _quoted(prefix),
+                   'rel_glob': _SITE_PACKAGES_REL_GLOB,
+                   'path': _quoted(_TELEMETRY_PYTHON_PATH),
+                   'pth': _quoted(_PTH_FILENAME),
+                   'pth_raw': _PTH_FILENAME,
+           })
+    _run(host,
+         cmd,
+         timeout=_QUICK_CMD_TIMEOUT_SECONDS,
+         description='Writing %s on the DUT' % _PTH_FILENAME)
 
 
 def _remove_scratch(host):
@@ -737,7 +860,8 @@ def _remove_scratch(host):
     happen often enough that a dedicated repair action is not worth the surface
     area.
 
-    @param host: Autotest host object for the DUT.
+    Args:
+        host: Autotest host object for the DUT.
     """
     _run_best_effort(host,
                      'rm -rf %s' % _quoted(*_SCRATCH_PATHS),
@@ -792,28 +916,32 @@ def ensure_telemetry_on_dut(host,
     extracted, because the partition does not have room for both. That deletion
     is deferred until the payload is already on the DUT, so everything that can
     fail without one -- an unresolvable build, a 404, a network failure, a full
-    partition -- leaves the DUT exactly as it was. An extraction or swap failure
-    does not, and says so in the log.
+    partition -- leaves the DUT exactly as it was. telemetry.pth is written
+    before _swap_into_place() so the rename into TELEMETRY_DUT_DIR remains the
+    single atomic publish step; any failure prior to that rename leaves no live
+    tree behind and says so in the log if the prior tree was removed.
 
-    @param host: Autotest host object for the DUT.
-    @param build: Build to fetch the dep for. Defaults to the build recorded in
-                  the host info store.
-    @param cache_endpoint: Cache server endpoint (host:port). In CFT this is
-                           resolved outside of tauto and should be passed in.
-    @param bucket: GS bucket to fetch the dep from. Defaults to the same bucket
-                   telemetry_setup uses for the drone-side tree.
-    @param force: Deploy even if Telemetry is already present. Used to canary
-                  the deploy path while images still ship Telemetry, and to
-                  replace an image's Telemetry when a newer Chrome has been
-                  side-loaded onto the DUT.
+    Args:
+        host: Autotest host object for the DUT.
+        build: Build to fetch the dep for. Defaults to the build recorded in the
+            host info store.
+        cache_endpoint: Cache server endpoint (host:port). In CFT this is
+            resolved outside of tauto and should be passed in.
+        bucket: GS bucket to fetch the dep from. Defaults to the same bucket
+            telemetry_setup uses for the drone-side tree.
+        force: Deploy even if Telemetry is already present. Used to canary the
+            deploy path while images still ship Telemetry, and to replace an
+            image's Telemetry when a newer Chrome has been side-loaded onto the
+            DUT.
 
-    @returns True if this call deployed Telemetry, and the caller is therefore
-             responsible for removing it again. False means Telemetry was
-             already present and came from somewhere else.
+    Returns:
+        True if this call deployed Telemetry, and the caller is therefore
+        responsible for removing it again. False means Telemetry was already
+        present and came from somewhere else.
 
-    @raises TelemetryDeployError: If Telemetry is needed but cannot be made
-                                  available, including when deployment is
-                                  disabled by config.
+    Raises:
+        TelemetryDeployError: If Telemetry is needed but cannot be made
+            available, including when deployment is disabled by config.
     """
     if _handle_kill_switch(host, force):
         return False
@@ -841,7 +969,11 @@ def ensure_telemetry_on_dut(host,
         removing_existing_tree = True
         _remove_existing_tree(host)
 
+        # Write telemetry.pth before swapping the staged tree into place so
+        # _swap_into_place() remains the single atomic commit step; site.py
+        # ignores .pth entries until the target directory exists on disk.
         _extract_on_dut(host, tarball_path, tarball)
+        _ensure_python_path(host)
         _swap_into_place(host)
     except Exception:
         if removing_existing_tree:
@@ -867,17 +999,28 @@ def ensure_telemetry_on_dut(host,
 
 
 def cleanup_telemetry_on_dut(host):
-    """Removes the Telemetry tree and any scratch directories from the DUT.
+    """Removes the deployed Telemetry tree and any leftover scratch directories.
 
     Only call this for a tree that this module deployed. Deleting Telemetry that
     came from the image would surprise the next test to run on the DUT, at least
     until images stop shipping it.
 
+    Note that telemetry.pth is deliberately left in place: on ChromeOS test
+    images, rootfs /usr/lib/python3.* is a symlink to
+    /usr/local/usr/lib/python3.* and /usr/local/usr is a symlink to '.', so
+    /usr/lib/python3.*/site-packages/telemetry.pth and
+    /usr/local/lib/python3.*/site-packages/telemetry.pth are the same file on
+    stateful. Removing it here would delete the .pth file shipped by the image,
+    whereas leaving it in place is a no-op once TELEMETRY_DUT_DIR is gone
+    (site.py ignores .pth entries whose target directory does not exist, and
+    is_telemetry_on_dut() checks _SENTINEL_PATHS first).
+
     This is best-effort: it runs at the end of a test, frequently while an
     exception is already propagating, and sometimes against a DUT that has gone
     away. Failing here would replace a real test failure with a cleanup error.
 
-    @param host: Autotest host object for the DUT.
+    Args:
+        host: Autotest host object for the DUT.
     """
     logging.info('Removing the deployed Telemetry tree from %s.',
                  host.hostname)
