@@ -823,10 +823,6 @@ suite:labqual_informational
 suite:labqual_stable
 suite:labstation_verification
 suite:lacros_power_dashboard
-suite:lacros-version-skew-beta
-suite:lacros-version-skew-canary
-suite:lacros-version-skew-dev
-suite:lacros-version-skew-stable
 suite:language_packs_hw_recognition_dlc_download_daily
 suite:launcher_search_quality_daily
 suite:link_perf
