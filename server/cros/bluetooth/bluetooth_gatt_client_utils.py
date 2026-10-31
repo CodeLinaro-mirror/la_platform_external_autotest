@@ -73,7 +73,6 @@ class GATT_Application(object):
     HID_CONTROL_POINT_UUID = UUID_Short2Full('2a4c')
     DATABASE_HASH_UUID = UUID_Short2Full('2b2a')
     CLIENT_SUPPORTED_FEATURES_UUID = UUID_Short2Full('2b29')
-    SERVER_SUPPORTED_FEATURES_UUID = UUID_Short2Full('2b3a')
     CENTRAL_ADDRESS_RESOLUTION_UUID = UUID_Short2Full('2aa6')
 
     def __init__(self):
@@ -795,7 +794,7 @@ class Floss_GATT_HIDApplication(GATT_Application):
         ServiceChanged.add_descriptor(CliChrcConfig)
 
         if is_bookworm:
-            # Add new GATT Caching / EATT characteristics for Bookworm
+            # Add new GATT Caching characteristics for Bookworm
 
             # Client Supported Features (0x2b29) - handle 0x000d (13)
             ClientSupportedFeatures = GATT_Characteristic(
@@ -820,18 +819,6 @@ class Floss_GATT_HIDApplication(GATT_Application):
                     'permissions': 0
             }
             GenericAttributeProfile.add_characteristic(DatabaseHash)
-
-            # Server Supported Features (0x2b3a) - handle 0x0011 (17)
-            ServerSupportedFeatures = GATT_Characteristic(
-                    self.SERVER_SUPPORTED_FEATURES_UUID, None, None)
-            ServerSupportedFeatures.properties = {
-                    'uuid': ServerSupportedFeatures.uuid,
-                    'properties': 2,  # Read
-                    'key_size': 16,
-                    'write_type': 2,
-                    'permissions': 0
-            }
-            GenericAttributeProfile.add_characteristic(ServerSupportedFeatures)
 
 
         DeviceInfo = GATT_Service(self.DEVICE_INFO_UUID, None, None)
