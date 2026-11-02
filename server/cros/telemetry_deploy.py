@@ -225,10 +225,12 @@ def _decompress_flag(tarball_name):
 
     @raises TelemetryDeployError: If the compression format is unrecognized.
     """
-    if tarball_name.endswith('.tar.bz2'):
-        return '-j'
     if tarball_name.endswith('.tar.zst'):
         return '--zstd'
+    # TODO(b/580903568): Drop .tar.bz2 support once pre-R158 branches
+    # (including R156 LTS) reach EOL.
+    if tarball_name.endswith('.tar.bz2'):
+        return '-j'
     if tarball_name.endswith('.tar.gz'):
         return '-z'
     if tarball_name.endswith('.tar'):

@@ -53,6 +53,8 @@ def has_zstd():
     return True
 
 
+# TODO(b/580903568): Drop BZIP2_TARBALL_SUFFIX and legacy .tar.bz2 fallback
+# paths once pre-R158 branches (including R156 LTS) reach EOL.
 BZIP2_TARBALL_SUFFIX = '.tar.bz2'
 ZSTD_TARBALL_SUFFIX = '.tar.zst'
 
@@ -67,7 +69,7 @@ DEFAULT_TARBALL_SUFFIX = ZSTD_TARBALL_SUFFIX
 def _ordered_tarball_suffixes():
     """Returns supported tarball suffixes with DEFAULT_TARBALL_SUFFIX first."""
     return (DEFAULT_TARBALL_SUFFIX, ) + tuple(
-            s for s in (BZIP2_TARBALL_SUFFIX, ZSTD_TARBALL_SUFFIX)
+            s for s in (ZSTD_TARBALL_SUFFIX, BZIP2_TARBALL_SUFFIX)
             if s != DEFAULT_TARBALL_SUFFIX)
 
 

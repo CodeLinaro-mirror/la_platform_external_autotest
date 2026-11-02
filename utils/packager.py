@@ -116,6 +116,8 @@ def get_build_dir(name, dest_dir, pkg_type):
     return build_dir
 
 
+# TODO(b/580903568): Drop _remove_stale_package_formats() and multi-format
+# loops once pre-R158 branches (including R156 LTS) reach EOL.
 def _remove_stale_package_formats(pkgmgr, name, pkg_type, active_pkg_name):
     """Removes non-default candidate tarballs and checksums after upload."""
     for candidate in pkgmgr.get_tarball_names(name, pkg_type):

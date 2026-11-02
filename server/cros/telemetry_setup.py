@@ -190,6 +190,8 @@ class TelemetrySetup(object):
         try:
             self._ExtractTarball(dep_path, self._tlm_src_dir_path)
         except TelemetryExtractError as e:
+            # TODO(b/580903568): Drop the .tar.bz2 fallback once pre-R158
+            # branches (including R156 LTS) reach EOL.
             if not dep_path.endswith(packages.ZSTD_TARBALL_SUFFIX):
                 raise
             logging.warning('%s; falling back to %s.', e,
@@ -220,6 +222,8 @@ class TelemetrySetup(object):
             Full path to the downloaded tarball, or None if this build does not
             publish the dependency in any supported format.
         """
+        # TODO(b/580903568): Simplify multi-format candidate probing once
+        # pre-R158 branches (including R156 LTS) reach EOL.
         all_candidates = packages.PackageManager.get_tarball_names(
                 dep_name, 'dep')
         zstd_missing = not packages.has_zstd()
@@ -397,6 +401,8 @@ class TelemetrySetup(object):
         """
         if tarball_path.endswith(packages.ZSTD_TARBALL_SUFFIX):
             decompress = ['-I', 'zstd']
+        # TODO(b/580903568): Drop .tar.bz2 support once pre-R158 branches
+        # (including R156 LTS) reach EOL.
         elif tarball_path.endswith(packages.BZIP2_TARBALL_SUFFIX):
             decompress = ['-j']
         else:
