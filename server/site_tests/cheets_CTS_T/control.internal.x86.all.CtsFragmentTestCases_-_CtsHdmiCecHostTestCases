@@ -1,0 +1,42 @@
+# Copyright 2022 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# __GENERATED_BY_GENERATE_CONTROLFILES_PY__:LATEST
+
+# This file has been automatically generated. Do not edit!
+
+AUTHOR = 'n/a'
+NAME = 'cheets_CTS_T.internal.x86.all.CtsFragmentTestCases_-_CtsHdmiCecHostTestCases'
+METADATA = {
+    "contacts": ["arc-cts-eng@google.com"],
+    "bug_component": "b:183644",
+    "criteria": "A part of Android CTS",
+}
+ATTRIBUTES = 'suite:arc-cts-qual, suite:arc-cts-qual-x86-9'
+DEPENDENCIES = 'arc, label-bot_size:BOT_SIZE_LARGE, cts_abi_x86'
+HW_DEPS = ['android-vm-tm']
+JOB_RETRIES = 1
+TEST_TYPE = 'server'
+TIME = 'MEDIUM'
+MAX_RESULT_SIZE_KB = 512000
+DOC = 'n/a'
+
+def run_TS(machine):
+    host_list = [hosts.create_host(machine)]
+    job.run_test(
+        'cheets_CTS_T',
+        hosts=host_list,
+        iterations=1,
+        max_retry=9,
+        tag='internal.x86.all.CtsFragmentTestCases_-_CtsHdmiCecHostTestCases',
+        test_name='cheets_CTS_T.internal.x86.all.CtsFragmentTestCases_-_CtsHdmiCecHostTestCases',
+        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsFragmentTestCases', '--include-filter', 'CtsFragmentTestCasesSdk26', '--include-filter', 'CtsFragmentTestCasesSdk26[instant]', '--include-filter', 'CtsFragmentTestCasesSdk26[secondary_user]', '--include-filter', 'CtsFragmentTestCases[instant]', '--include-filter', 'CtsFragmentTestCases[secondary_user]', '--include-filter', 'CtsFrameRateOverrideTestCases', '--include-filter', 'CtsFrameRateOverrideTestCases[instant]', '--include-filter', 'CtsFrameRateOverrideTestCases[secondary_user]', '--include-filter', 'CtsFsMgrTestCases', '--include-filter', 'CtsFsMgrTestCases[secondary_user]', '--include-filter', 'CtsGameManagerTestCases', '--include-filter', 'CtsGameManagerTestCases[instant]', '--include-filter', 'CtsGameManagerTestCases[secondary_user]', '--include-filter', 'CtsGameServiceTestCases', '--include-filter', 'CtsGameServiceTestCases[secondary_user]', '--include-filter', 'CtsGestureTestCases', '--include-filter', 'CtsGestureTestCases[instant]', '--include-filter', 'CtsGestureTestCases[secondary_user]', '--include-filter', 'CtsGpuMetricsHostTestCases', '--include-filter', 'CtsGpuMetricsHostTestCases[secondary_user]', '--include-filter', 'CtsGpuProfilingDataTestCases', '--include-filter', 'CtsGpuProfilingDataTestCases[secondary_user]', '--include-filter', 'CtsGpuToolsHostTestCases', '--include-filter', 'CtsGpuToolsHostTestCases[secondary_user]', '--include-filter', 'CtsGraphicsTestCases', '--include-filter', 'CtsGraphicsTestCases[instant]', '--include-filter', 'CtsGraphicsTestCases[secondary_user]', '--include-filter', 'CtsGwpAsanTestCases', '--include-filter', 'CtsGwpAsanTestCases[instant]', '--include-filter', 'CtsGwpAsanTestCases[secondary_user]', '--include-filter', 'CtsHardwareTestCases', '--include-filter', 'CtsHardwareTestCases[secondary_user]', '--include-filter', 'CtsHarmfulAppWarningHostTestCases', '--include-filter', 'CtsHarmfulAppWarningHostTestCases[secondary_user]', '--include-filter', 'CtsHdmiCecHostTestCases', '--include-filter', 'CtsHdmiCecHostTestCases[secondary_user]', '--logcat-on-failure'],
+        retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
+        target_module='all.CtsFragmentTestCases_-_CtsHdmiCecHostTestCases',
+        target_plan=None,
+        bundle='x86',
+        uri='LATEST',
+        timeout=172800)
+
+parallel_simple(run_TS, machines)

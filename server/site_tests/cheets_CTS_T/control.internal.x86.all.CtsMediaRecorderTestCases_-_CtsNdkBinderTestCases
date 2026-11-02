@@ -1,0 +1,42 @@
+# Copyright 2022 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# __GENERATED_BY_GENERATE_CONTROLFILES_PY__:LATEST
+
+# This file has been automatically generated. Do not edit!
+
+AUTHOR = 'n/a'
+NAME = 'cheets_CTS_T.internal.x86.all.CtsMediaRecorderTestCases_-_CtsNdkBinderTestCases'
+METADATA = {
+    "contacts": ["arc-cts-eng@google.com"],
+    "bug_component": "b:183644",
+    "criteria": "A part of Android CTS",
+}
+ATTRIBUTES = 'suite:arc-cts-qual, suite:arc-cts-qual-x86-19'
+DEPENDENCIES = 'arc, label-bot_size:BOT_SIZE_LARGE, cts_abi_x86'
+HW_DEPS = ['android-vm-tm']
+JOB_RETRIES = 1
+TEST_TYPE = 'server'
+TIME = 'MEDIUM'
+MAX_RESULT_SIZE_KB = 512000
+DOC = 'n/a'
+
+def run_TS(machine):
+    host_list = [hosts.create_host(machine)]
+    job.run_test(
+        'cheets_CTS_T',
+        hosts=host_list,
+        iterations=1,
+        max_retry=9,
+        tag='internal.x86.all.CtsMediaRecorderTestCases_-_CtsNdkBinderTestCases',
+        test_name='cheets_CTS_T.internal.x86.all.CtsMediaRecorderTestCases_-_CtsNdkBinderTestCases',
+        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsMediaRecorderTestCases', '--include-filter', 'CtsMediaRecorderTestCases[instant]', '--include-filter', 'CtsMediaRecorderTestCases[secondary_user]', '--include-filter', 'CtsMediaTranscodingTestCases', '--include-filter', 'CtsMediaTranscodingTestCases[secondary_user]', '--include-filter', 'CtsMidiTestCases', '--include-filter', 'CtsMimeMapTestCases', '--include-filter', 'CtsMimeMapTestCases[secondary_user]', '--include-filter', 'CtsMockingDebuggableTestCases', '--include-filter', 'CtsMockingDebuggableTestCases[instant]', '--include-filter', 'CtsMockingDebuggableTestCases[secondary_user]', '--include-filter', 'CtsMockingTestCases', '--include-filter', 'CtsMockingTestCases[instant]', '--include-filter', 'CtsMockingTestCases[secondary_user]', '--include-filter', 'CtsMultiUserHostTestCases', '--include-filter', 'CtsMultiUserHostTestCases[instant]', '--include-filter', 'CtsMultiUserHostTestCases[secondary_user]', '--include-filter', 'CtsMultiUserTestCases', '--include-filter', 'CtsMultiUserTestCases[instant]', '--include-filter', 'CtsMultiUserTestCases[run-on-clone-profile]', '--include-filter', 'CtsMultiUserTestCases[run-on-private-profile]', '--include-filter', 'CtsMultiUserTestCases[run-on-secondary-user]', '--include-filter', 'CtsMultiUserTestCases[run-on-work-profile]', '--include-filter', 'CtsMultiUserTestCases[secondary_user]', '--include-filter', 'CtsMusicRecognitionTestCases', '--include-filter', 'CtsMusicRecognitionTestCases[secondary_user]', '--include-filter', 'CtsNNAPIBenchmarkTestCases', '--include-filter', 'CtsNNAPIBenchmarkTestCases[instant]', '--include-filter', 'CtsNNAPIBenchmarkTestCases[secondary_user]', '--include-filter', 'CtsNNAPIJavaTestCases', '--include-filter', 'CtsNNAPIJavaTestCases[instant]', '--include-filter', 'CtsNNAPIJavaTestCases[secondary_user]', '--include-filter', 'CtsNNAPIStatsdAtomHostTestCases', '--include-filter', 'CtsNNAPIStatsdAtomHostTestCases[instant]', '--include-filter', 'CtsNNAPIStatsdAtomHostTestCases[secondary_user]', '--include-filter', 'CtsNNAPITestCases', '--include-filter', 'CtsNNAPITestCases[secondary_user]', '--include-filter', 'CtsNativeEncryptionTestCases', '--include-filter', 'CtsNativeEncryptionTestCases[instant]', '--include-filter', 'CtsNativeEncryptionTestCases[secondary_user]', '--include-filter', 'CtsNativeHardwareTestCases', '--include-filter', 'CtsNativeHardwareTestCases[secondary_user]', '--include-filter', 'CtsNativeMediaAAudioTestCases', '--include-filter', 'CtsNativeMediaAAudioTestCases[instant]', '--include-filter', 'CtsNativeMediaAAudioTestCases[secondary_user]', '--include-filter', 'CtsNativeMediaMetricsTestCases', '--include-filter', 'CtsNativeMediaMetricsTestCases[instant]', '--include-filter', 'CtsNativeMediaMetricsTestCases[secondary_user]', '--include-filter', 'CtsNativeMediaSlTestCases', '--include-filter', 'CtsNativeMediaSlTestCases[instant]', '--include-filter', 'CtsNativeMediaSlTestCases[secondary_user]', '--include-filter', 'CtsNativeMediaXaTestCases', '--include-filter', 'CtsNativeMediaXaTestCases[instant]', '--include-filter', 'CtsNativeMediaXaTestCases[secondary_user]', '--include-filter', 'CtsNativeMidiTestCases', '--include-filter', 'CtsNativeMidiTestCases[secondary_user]', '--include-filter', 'CtsNativeNetDnsTestCases', '--include-filter', 'CtsNativeNetDnsTestCases[instant]', '--include-filter', 'CtsNativeNetDnsTestCases[secondary_user]', '--include-filter', 'CtsNativeNetPlatformTestCases', '--include-filter', 'CtsNativeNetPlatformTestCases[instant]', '--include-filter', 'CtsNativeNetPlatformTestCases[secondary_user]', '--include-filter', 'CtsNativeNetTestCases', '--include-filter', 'CtsNativeNetTestCases[instant]', '--include-filter', 'CtsNativeNetTestCases[secondary_user]', '--include-filter', 'CtsNativeVerifiedBootTestCases', '--include-filter', 'CtsNativeVerifiedBootTestCases[instant]', '--include-filter', 'CtsNativeVerifiedBootTestCases[secondary_user]', '--include-filter', 'CtsNdefTestCases', '--include-filter', 'CtsNdefTestCases[secondary_user]', '--include-filter', 'CtsNdkBinderTestCases', '--include-filter', 'CtsNdkBinderTestCases[instant]', '--include-filter', 'CtsNdkBinderTestCases[secondary_user]', '--logcat-on-failure'],
+        retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
+        target_module='all.CtsMediaRecorderTestCases_-_CtsNdkBinderTestCases',
+        target_plan=None,
+        bundle='x86',
+        uri='LATEST',
+        timeout=172800)
+
+parallel_simple(run_TS, machines)

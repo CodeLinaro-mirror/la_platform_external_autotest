@@ -13,7 +13,7 @@ METADATA = {
     "bug_component": "b:183644",
     "criteria": "A part of Android CTS",
 }
-ATTRIBUTES = 'suite:arc-cts, suite:arc-cts-x86-2'
+ATTRIBUTES = 'suite:arc-cts, suite:arc-cts-x86-3'
 DEPENDENCIES = 'arc, label-bot_size:BOT_SIZE_LARGE, cts_abi_x86'
 HW_DEPS = ['android-vm-tm']
 JOB_RETRIES = 1

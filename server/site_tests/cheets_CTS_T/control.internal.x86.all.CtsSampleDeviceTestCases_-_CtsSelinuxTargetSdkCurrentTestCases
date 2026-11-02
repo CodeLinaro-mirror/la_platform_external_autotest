@@ -1,0 +1,42 @@
+# Copyright 2022 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# __GENERATED_BY_GENERATE_CONTROLFILES_PY__:LATEST
+
+# This file has been automatically generated. Do not edit!
+
+AUTHOR = 'n/a'
+NAME = 'cheets_CTS_T.internal.x86.all.CtsSampleDeviceTestCases_-_CtsSelinuxTargetSdkCurrentTestCases'
+METADATA = {
+    "contacts": ["arc-cts-eng@google.com"],
+    "bug_component": "b:183644",
+    "criteria": "A part of Android CTS",
+}
+ATTRIBUTES = 'suite:arc-cts-qual, suite:arc-cts-qual-x86-24'
+DEPENDENCIES = 'arc, label-bot_size:BOT_SIZE_LARGE, cts_abi_x86'
+HW_DEPS = ['android-vm-tm']
+JOB_RETRIES = 1
+TEST_TYPE = 'server'
+TIME = 'LONG'
+MAX_RESULT_SIZE_KB = 512000
+DOC = 'n/a'
+
+def run_TS(machine):
+    host_list = [hosts.create_host(machine)]
+    job.run_test(
+        'cheets_CTS_T',
+        hosts=host_list,
+        iterations=1,
+        max_retry=9,
+        tag='internal.x86.all.CtsSampleDeviceTestCases_-_CtsSelinuxTargetSdkCurrentTestCases',
+        test_name='cheets_CTS_T.internal.x86.all.CtsSampleDeviceTestCases_-_CtsSelinuxTargetSdkCurrentTestCases',
+        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsSampleDeviceTestCases', '--include-filter', 'CtsSampleDeviceTestCases[instant]', '--include-filter', 'CtsSampleDeviceTestCases[secondary_user]', '--include-filter', 'CtsSampleHostTestCases', '--include-filter', 'CtsSampleHostTestCases[secondary_user]', '--include-filter', 'CtsSaxTestCases', '--include-filter', 'CtsSaxTestCases[secondary_user]', '--include-filter', 'CtsScopedStorageCoreHostTest', '--include-filter', 'CtsScopedStorageDeviceOnlyTest', '--include-filter', 'CtsScopedStorageHostTest', '--include-filter', 'CtsScopedStorageHostTest[instant]', '--include-filter', 'CtsScopedStorageHostTest[secondary_user]', '--include-filter', 'CtsSdkExtensionsTestCases', '--include-filter', 'CtsSdkExtensionsTestCases[instant]', '--include-filter', 'CtsSdkExtensionsTestCases[secondary_user]', '--include-filter', 'CtsSearchUiServiceTestCases', '--include-filter', 'CtsSearchUiServiceTestCases[secondary_user]', '--include-filter', 'CtsSeccompHostTestCases', '--include-filter', 'CtsSeccompHostTestCases[instant]', '--include-filter', 'CtsSeccompHostTestCases[secondary_user]', '--include-filter', 'CtsSecureFrpInstallTestCases', '--include-filter', 'CtsSecureFrpInstallTestCases[secondary_user]', '--include-filter', 'CtsSecurityHostTestCases', '--include-filter', 'CtsSecurityHostTestCases[secondary_user]', '--include-filter', 'CtsSecurityTestCases', '--include-filter', 'CtsSecurityTestCases[secondary_user]', '--include-filter', 'CtsSelinuxEphemeralTestCases', '--include-filter', 'CtsSelinuxEphemeralTestCases[instant]', '--include-filter', 'CtsSelinuxTargetSdk25TestCases', '--include-filter', 'CtsSelinuxTargetSdk25TestCases[secondary_user]', '--include-filter', 'CtsSelinuxTargetSdk27TestCases', '--include-filter', 'CtsSelinuxTargetSdk27TestCases[secondary_user]', '--include-filter', 'CtsSelinuxTargetSdk28TestCases', '--include-filter', 'CtsSelinuxTargetSdk28TestCases[secondary_user]', '--include-filter', 'CtsSelinuxTargetSdk29TestCases', '--include-filter', 'CtsSelinuxTargetSdk29TestCases[secondary_user]', '--include-filter', 'CtsSelinuxTargetSdk30TestCases', '--include-filter', 'CtsSelinuxTargetSdk30TestCases[secondary_user]', '--include-filter', 'CtsSelinuxTargetSdkCurrentTestCases', '--include-filter', 'CtsSelinuxTargetSdkCurrentTestCases[secondary_user]', '--logcat-on-failure'],
+        retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
+        target_module='all.CtsSampleDeviceTestCases_-_CtsSelinuxTargetSdkCurrentTestCases',
+        target_plan=None,
+        bundle='x86',
+        uri='LATEST',
+        timeout=172800)
+
+parallel_simple(run_TS, machines)

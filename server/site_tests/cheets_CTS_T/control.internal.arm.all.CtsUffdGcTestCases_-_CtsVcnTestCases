@@ -1,0 +1,42 @@
+# Copyright 2022 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# __GENERATED_BY_GENERATE_CONTROLFILES_PY__:LATEST
+
+# This file has been automatically generated. Do not edit!
+
+AUTHOR = 'n/a'
+NAME = 'cheets_CTS_T.internal.arm.all.CtsUffdGcTestCases_-_CtsVcnTestCases'
+METADATA = {
+    "contacts": ["arc-cts-eng@google.com"],
+    "bug_component": "b:183644",
+    "criteria": "A part of Android CTS",
+}
+ATTRIBUTES = 'suite:arc-cts-qual, suite:arc-cts-qual-arm-28'
+DEPENDENCIES = 'arc, label-bot_size:BOT_SIZE_LARGE'
+HW_DEPS = ['android-vm-tm']
+JOB_RETRIES = 1
+TEST_TYPE = 'server'
+TIME = 'MEDIUM'
+MAX_RESULT_SIZE_KB = 512000
+DOC = 'n/a'
+
+def run_TS(machine):
+    host_list = [hosts.create_host(machine)]
+    job.run_test(
+        'cheets_CTS_T',
+        hosts=host_list,
+        iterations=1,
+        max_retry=9,
+        tag='internal.arm.all.CtsUffdGcTestCases_-_CtsVcnTestCases',
+        test_name='cheets_CTS_T.internal.arm.all.CtsUffdGcTestCases_-_CtsVcnTestCases',
+        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsUffdGcTestCases', '--include-filter', 'CtsUffdGcTestCases[instant]', '--include-filter', 'CtsUffdGcTestCases[secondary_user]', '--include-filter', 'CtsUiAutomationTestCases', '--include-filter', 'CtsUiAutomationTestCases[instant]', '--include-filter', 'CtsUiAutomationTestCases[secondary_user]', '--include-filter', 'CtsUiRenderingTestCases', '--include-filter', 'CtsUiRenderingTestCases27', '--include-filter', 'CtsUiRenderingTestCases27[instant]', '--include-filter', 'CtsUiRenderingTestCases27[secondary_user]', '--include-filter', 'CtsUiRenderingTestCases[instant]', '--include-filter', 'CtsUiRenderingTestCases[secondary_user]', '--include-filter', 'CtsUidIsolationTestCases', '--include-filter', 'CtsUidIsolationTestCases[instant]', '--include-filter', 'CtsUidIsolationTestCases[secondary_user]', '--include-filter', 'CtsUsageStatsTestCases', '--include-filter', 'CtsUsageStatsTestCases[instant]', '--include-filter', 'CtsUsageStatsTestCases[secondary_user]', '--include-filter', 'CtsUsbManagerTestCases', '--include-filter', 'CtsUsbManagerTestCases[secondary_user]', '--include-filter', 'CtsUsbTests', '--include-filter', 'CtsUsbTests[instant]', '--include-filter', 'CtsUsbTests[secondary_user]', '--include-filter', 'CtsUsesLibraryHostTestCases', '--include-filter', 'CtsUsesLibraryHostTestCases[secondary_user]', '--include-filter', 'CtsUsesNativeLibraryTest', '--include-filter', 'CtsUsesNativeLibraryTest[secondary_user]', '--include-filter', 'CtsUtilTestCases', '--include-filter', 'CtsUtilTestCases[instant]', '--include-filter', 'CtsUtilTestCases[secondary_user]', '--include-filter', 'CtsUwbMultiDeviceTestCases', '--include-filter', 'CtsUwbTestCases', '--include-filter', 'CtsUwbTestCases[instant]', '--include-filter', 'CtsUwbTestCases[secondary_user]', '--include-filter', 'CtsVcnTestCases', '--include-filter', 'CtsVcnTestCases[secondary_user]', '--logcat-on-failure'],
+        retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
+        target_module='all.CtsUffdGcTestCases_-_CtsVcnTestCases',
+        target_plan=None,
+        bundle='arm',
+        uri='LATEST',
+        timeout=172800)
+
+parallel_simple(run_TS, machines)

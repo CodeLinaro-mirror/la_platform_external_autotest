@@ -1,0 +1,46 @@
+# Copyright 2022 The ChromiumOS Authors
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+# __GENERATED_BY_GENERATE_CONTROLFILES_PY__:LATEST
+
+# This file has been automatically generated. Do not edit!
+from autotest_lib.server.cros.tradefed import wifi_utils
+import pipes
+
+AUTHOR = 'n/a'
+NAME = 'cheets_CTS_T.internal.arm.all.CtsVrTestCases_-_CtsWifiTestCases'
+METADATA = {
+    "contacts": ["arc-cts-eng@google.com"],
+    "bug_component": "b:183644",
+    "criteria": "A part of Android CTS",
+}
+ATTRIBUTES = 'suite:arc-cts-qual, suite:arc-cts-qual-arm-30'
+DEPENDENCIES = 'arc, label-bot_size:BOT_SIZE_LARGE, wifi_on_site'
+HW_DEPS = ['android-vm-tm']
+JOB_RETRIES = 1
+TEST_TYPE = 'server'
+TIME = 'MEDIUM'
+MAX_RESULT_SIZE_KB = 512000
+DOC = 'n/a'
+
+def run_TS(machine):
+    host_list = [hosts.create_host(machine)]
+    ssid, wifipass = wifi_utils.get_wifi_ssid_pass(machine)
+    job.run_test(
+        'cheets_CTS_T',
+        hosts=host_list,
+        iterations=1,
+        max_retry=9,
+        tag='internal.arm.all.CtsVrTestCases_-_CtsWifiTestCases',
+        test_name='cheets_CTS_T.internal.arm.all.CtsVrTestCases_-_CtsWifiTestCases',
+        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsVrTestCases', '--include-filter', 'CtsVrTestCases[secondary_user]', '--include-filter', 'CtsWallpaperEffectsGenerationServiceTestCases', '--include-filter', 'CtsWallpaperEffectsGenerationServiceTestCases[secondary_user]', '--include-filter', 'CtsWebkitTestCases', '--include-filter', 'CtsWebkitTestCases[instant]', '--include-filter', 'CtsWebkitTestCases[secondary_user]', '--include-filter', 'CtsWifiAwareTestCases', '--include-filter', 'CtsWifiBroadcastsHostTestCases', '--include-filter', 'CtsWifiBroadcastsHostTestCases[instant]', '--include-filter', 'CtsWifiBroadcastsHostTestCases[secondary_user]', '--include-filter', 'CtsWifiTestCases', '--include-filter', 'CtsWifiTestCases[secondary_user]', '--logcat-on-failure'],
+        retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
+        target_module='all.CtsVrTestCases_-_CtsWifiTestCases',
+        target_plan=None,
+        bundle='arm',
+        uri='LATEST',
+        precondition_commands=['adb shell cmd wifi add-network %s %s %s' % (pipes.quote(ssid), 'open' if wifipass == '' else 'wpa', pipes.quote(wifipass)), 'adb shell cmd wifi connect-network %s' % pipes.quote(ssid), 'adb shell dumpsys wifi transports -eth'],
+        timeout=172800)
+
+parallel_simple(run_TS, machines)
