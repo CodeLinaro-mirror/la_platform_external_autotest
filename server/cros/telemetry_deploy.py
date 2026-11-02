@@ -432,9 +432,10 @@ def _dep_url(host, build, cache_endpoint, bucket, tarball):
 
     @param host: Autotest host object for the DUT.
     @param build: Build to fetch the dep for.
-    @param cache_endpoint: Cache server endpoint, with or without a scheme. In
-                           CFT this is resolved outside of tauto and passed in;
-                           when None, tauto resolves the devserver itself.
+    @param cache_endpoint: Cache server endpoint, with or without a scheme.
+                           When None, falls back to the CACHE_SERVER
+                           environment variable (set by autoserv in CFT) before
+                           resolving a devserver via ImageServer.resolve().
     @param bucket: GS bucket name to fetch from, without a gs:// prefix. Must
                    match the bucket the drone-side tree came from, or the two
                    harnesses can end up on different builds.
@@ -444,6 +445,15 @@ def _dep_url(host, build, cache_endpoint, bucket, tarball):
 
     @raises TelemetryDeployError: If no cache server can be resolved.
     """
+    # In CFT, autoserv exports --args="cache_endpoint=..." as CACHE_SERVER in
+    # os.environ; the rack cache server is reachable from the DUT (where curl
+    # runs) rather than from the CloudBot container, so use it directly instead
+    # of probing /check_health from autoserv via ImageServer.resolve().
+    if not cache_endpoint:
+        cache_endpoint = os.getenv('CACHE_SERVER')
+        if cache_endpoint:
+            logging.info('Using cache server %s from CACHE_SERVER.',
+                         cache_endpoint)
     if cache_endpoint:
         # CFT hands the endpoint down from an env var that may or may not carry
         # a scheme, the same way dev_server.get_available_devservers() does.
@@ -635,7 +645,8 @@ def _download_payload(host, build, cache_endpoint, bucket):
 
     @param host: Autotest host object for the DUT.
     @param build: Build to fetch the dep for.
-    @param cache_endpoint: Cache server endpoint, or None to resolve one.
+    @param cache_endpoint: Cache server endpoint, or None to fall back to
+                           CACHE_SERVER / resolve one.
     @param bucket: GS bucket name to fetch from.
 
     @returns A (path on the DUT, tarball name) pair.
@@ -927,8 +938,9 @@ def ensure_telemetry_on_dut(host,
         host: Autotest host object for the DUT.
         build: Build to fetch the dep for. Defaults to the build recorded in the
             host info store.
-        cache_endpoint: Cache server endpoint (host:port). In CFT this is
-            resolved outside of tauto and should be passed in.
+        cache_endpoint: Cache server endpoint (host:port). Defaults to the
+            CACHE_SERVER environment variable (set by autoserv in CFT) if unset,
+            or resolves a devserver via ImageServer.resolve().
         bucket: GS bucket to fetch the dep from. Defaults to the same bucket
             telemetry_setup uses for the drone-side tree.
         force: Deploy even if Telemetry is already present. Used to canary the

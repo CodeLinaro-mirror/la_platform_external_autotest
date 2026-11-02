@@ -871,6 +871,12 @@ class DepUrlTest(unittest.TestCase):
                  'octopus-release/R156-16825.0.0/autotest_packages.tar'
                  '?file=autotest/packages/dep-telemetry_dep.tar.bz2')
 
+    def setUp(self):
+        env_patcher = mock.patch.dict(os.environ)
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+        os.environ.pop('CACHE_SERVER', None)
+
     @mock.patch.object(telemetry_deploy.dev_server, 'ImageServer')
     def test_uses_explicit_cache_endpoint(self, image_server):
         image_server.return_value.url.return_value = 'http://cache:8082'
@@ -880,6 +886,28 @@ class DepUrlTest(unittest.TestCase):
                                         _BZ2)
         image_server.assert_called_once_with('http://cache:8082')
         self.assertEqual(url, self._EXPECTED)
+
+    @mock.patch.dict(os.environ, {'CACHE_SERVER': 'cache:8082'})
+    @mock.patch.object(telemetry_deploy.dev_server, 'ImageServer')
+    def test_uses_cache_server_env_when_no_explicit_endpoint(
+            self, image_server):
+        image_server.return_value.url.return_value = 'http://cache:8082'
+        url = telemetry_deploy._dep_url(FakeHost(),
+                                        'octopus-release/R156-16825.0.0', None,
+                                        'chromeos-image-archive', _BZ2)
+        image_server.assert_called_once_with('http://cache:8082')
+        image_server.resolve.assert_not_called()
+        self.assertEqual(url, self._EXPECTED)
+
+    @mock.patch.dict(os.environ, {'CACHE_SERVER': 'env-cache:8082'})
+    @mock.patch.object(telemetry_deploy.dev_server, 'ImageServer')
+    def test_explicit_endpoint_takes_precedence_over_cache_server_env(
+            self, image_server):
+        image_server.return_value.url.return_value = 'http://explicit:8082'
+        telemetry_deploy._dep_url(FakeHost(), 'octopus/R1', 'explicit:8082',
+                                  'chromeos-image-archive', _BZ2)
+        image_server.assert_called_once_with('http://explicit:8082')
+        image_server.resolve.assert_not_called()
 
     @mock.patch.object(telemetry_deploy.dev_server, 'ImageServer')
     def test_resolves_devserver_when_no_endpoint(self, image_server):
