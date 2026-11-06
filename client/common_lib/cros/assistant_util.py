@@ -7,7 +7,7 @@
 
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import utils
-from autotest_lib.client.common_lib.cros.autotestChrome.core import exceptions
+from telemetry.core import exceptions
 
 
 def enable_assistant(autotest_ext):

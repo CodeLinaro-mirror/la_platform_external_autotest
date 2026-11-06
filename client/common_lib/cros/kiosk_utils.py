@@ -5,10 +5,10 @@
 import logging
 import time
 
-from autotest_lib.client.common_lib.cros.autotestChrome.core import exceptions
 from autotest_lib.client.bin import utils
 from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib.cros import chrome
+from telemetry.core import exceptions
 
 DEFAULT_TIMEOUT = 30
 SHORT_TIMEOUT = 5

@@ -16,7 +16,7 @@ from autotest_lib.client.common_lib import error
 from autotest_lib.client.common_lib import file_utils
 from autotest_lib.client.common_lib.cros import arc_common
 from telemetry.core import exceptions
-from autotest_lib.client.common_lib.cros.autotestChrome.internal.browser import extension_page
+from telemetry.internal.browser import extension_page
 
 _ARC_SUPPORT_HOST_URL = 'chrome-extension://cnbgggchhmkkdmeppjobngjoejnihlei/'
 _ARC_SUPPORT_HOST_PAGENAME = '_generated_background_page.html'
@@ -202,9 +202,9 @@ def enable_play_store(autotest_ext, enabled, enable_managed_policy=True):
     """
 
     if autotest_ext is None:
-         raise error.TestFail(
-                 'Could not change the Play Store enabled state because '
-                 'autotest API does not exist')
+        raise error.TestFail(
+                'Could not change the Play Store enabled state because '
+                'autotest API does not exist')
 
     # Skip enabling for managed users, since value is policy enforced.
     # Return early if a managed user has ArcEnabled set to false.
