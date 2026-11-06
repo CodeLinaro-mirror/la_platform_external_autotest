@@ -431,28 +431,42 @@ def _release_builder_path(host):
 def _ensure_on_dut(host):
     """Deploys Telemetry to the DUT, falling back to /etc/lsb-release in CFT.
 
-    Calls ensure_telemetry_on_dut(host) first so the common fast path
-    (Telemetry already present on the DUT, or cros-version: present in
+    Client tests only import the Catapult Python runtime (telemetry.*, py_utils,
+    etc.) and never execute tools/perf/run_benchmark, so minimal_only=True is
+    passed to accept the pre-installed minimal Catapult subset at
+    /usr/local/telemetry-minimal without downloading the full ~414 MiB dep
+    tarball.
+    TODO(b/582507787): Remove telemetry_dependency.py and REQUIRE_TELEMETRY once
+    images pre-installing /usr/local/telemetry-minimal have rolled out.
+
+    Calls ensure_telemetry_on_dut(host, minimal_only=True) first so the common
+    fast path (Telemetry already present on the DUT, or cros-version: present in
     host_info_store) incurs no extra SSH round-trip to read /etc/lsb-release.
     Only queries host.get_release_builder_path() if ensure_telemetry_on_dut
     fails when host_info_store has no build.
 
-    @param host: Autotest host object for the DUT.
+    Args:
+        host: Autotest host object for the DUT.
 
-    @returns True if Telemetry was deployed by this call.
+    Returns:
+        True if Telemetry was deployed by this call.
 
-    @raises telemetry_deploy.TelemetryDeployError: If Telemetry is needed and
+    Raises:
+        telemetry_deploy.TelemetryDeployError: If Telemetry is needed and
             cannot be deployed.
     """
     try:
-        return telemetry_deploy.ensure_telemetry_on_dut(host)
+        return telemetry_deploy.ensure_telemetry_on_dut(host,
+                                                        minimal_only=True)
     except telemetry_deploy.TelemetryDeployError:
         if _has_host_info_build(host):
             raise
         build = _release_builder_path(host)
         if not build:
             raise
-        return telemetry_deploy.ensure_telemetry_on_dut(host, build=build)
+        return telemetry_deploy.ensure_telemetry_on_dut(host,
+                                                        build=build,
+                                                        minimal_only=True)
 
 
 def ensure_for_client_test(host, test_name):

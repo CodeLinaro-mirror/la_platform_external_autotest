@@ -15,24 +15,27 @@ an on-DUT Telemetry test:
   - Server-side Telemetry tests with telemetry_on_dut=False run the harness on
     the drone and drive the DUT with --browser=cros-chrome --remote=<dut>.
 
-Only two consumers actually need the framework present on the DUT itself:
+Three consumers need Telemetry present on the DUT itself:
 
   A. Server-side tests with telemetry_on_dut=True, which ssh in and run
      /usr/local/telemetry/src/tools/perf/run_benchmark.
   B. Client-side autotest tests that import telemetry.* at module scope (most
      commonly via client/common_lib/cros/chrome.py), resolved through
      telemetry.pth in Python site-packages.
+  C. Standalone scripts and XML-RPC servers invoked directly on the DUT outside
+     any autotest client test (autologin.py, multimedia_xmlrpc_server.py, etc.),
+     which on-demand deployment cannot intercept because no server-side harness
+     runs beforehand.
 
-This module provides the deployment primitive those consumers use so that the
-framework can eventually be dropped from the image entirely. It fetches the
-per-build dep tarball that the Chrome ebuild already publishes inside
-autotest_packages.tar and extracts it into /usr/local/telemetry.
-
-Only consumer A is wired up alongside this module; consumer B is served by
-server/cros/telemetry_dependency.py, which lands separately.
-
-Note that ensure_telemetry_on_dut() is a no-op on images that still ship
-Telemetry, which is what makes it safe to land and bake before the image change.
+To avoid shipping the full ~1.0 GiB tree on stateful while still serving B and C
+without a server-side hook, chromeos-base/telemetry pre-installs a small
+Catapult runtime subset (~8.4 MiB) at /usr/local/telemetry-minimal. Consumer A
+deploys the full per-build dep tarball (published inside autotest_packages.tar)
+on demand into /usr/local/telemetry, with telemetry.pth listing the full tree
+before telemetry-minimal so a deployed tree wins on sys.path and the subset
+remains active after cleanup_telemetry_on_dut(). Meanwhile,
+server/cros/telemetry_dependency.py passes minimal_only=True as a transitional
+fallback for images predating /usr/local/telemetry-minimal.
 
 Every failure raised out of this module is a TelemetryDeployError; _try_run() is
 the single place where a host exception is converted into one, so callers can
@@ -63,9 +66,20 @@ from autotest_lib.server.cros import telemetry_setup
 # cannot disagree about where the tree is.
 TELEMETRY_DUT_DIR = '/usr/local/telemetry'
 TELEMETRY_DUT_SRC = os.path.join(TELEMETRY_DUT_DIR, 'src')
+TELEMETRY_MINIMAL_DUT_DIR = '/usr/local/telemetry-minimal'
+TELEMETRY_MINIMAL_DUT_SRC = os.path.join(TELEMETRY_MINIMAL_DUT_DIR, 'src')
 _TELEMETRY_REL_PYTHON_PATH = 'third_party/catapult/telemetry'
 _TELEMETRY_PYTHON_PATH = os.path.join(TELEMETRY_DUT_SRC,
                                       _TELEMETRY_REL_PYTHON_PATH)
+_TELEMETRY_MINIMAL_PYTHON_PATH = os.path.join(TELEMETRY_MINIMAL_DUT_SRC,
+                                              _TELEMETRY_REL_PYTHON_PATH)
+# Full Telemetry precedes telemetry-minimal so a deployed tree wins on
+# sys.path, while cleanup_telemetry_on_dut() leaves telemetry-minimal active
+# once TELEMETRY_DUT_DIR is removed (site.py ignores missing paths).
+_TELEMETRY_PYTHON_PATHS = (
+        _TELEMETRY_PYTHON_PATH,
+        _TELEMETRY_MINIMAL_PYTHON_PATH,
+)
 _USR_PREFIX = '/usr'
 _SITE_PACKAGES_REL_GLOB = 'lib*/python3.*/site-packages'
 _PTH_FILENAME = 'telemetry.pth'
@@ -104,11 +118,14 @@ TELEMETRY_DEP_TARBALLS = tuple(
 # telemetry ebuild does at image build time.
 _TARBALL_ROOT_DIR = 'test_src'
 
-# Paths (relative to a Telemetry src/ directory) that must exist for a tree to
-# count as a usable installation. Checking these rather than just the top-level
+# Paths (relative to a full Telemetry src/ directory) that must exist for a
+# tree to count as a usable full installation (minimal_only=False and
+# _verify_staged_tree()). Checking these rather than just the top-level
 # directory means a partially deleted or partially extracted tree is detected
-# and repaired instead of being silently trusted.
-_SENTINEL_PATHS = (
+# and repaired instead of being silently trusted. Note that minimal_only=True
+# checks only _TELEMETRY_REL_PYTHON_PATH because TELEMETRY_MINIMAL_DUT_SRC
+# intentionally omits tools/perf/run_benchmark.
+_FULL_SENTINEL_PATHS = (
         _TELEMETRY_REL_PYTHON_PATH,
         'tools/perf/run_benchmark',
 )
@@ -124,8 +141,8 @@ _SENTINEL_PATHS = (
 # Catapult's py_utils/cloud_storage.py falls back to that vendored gsutil on
 # ChromeOS DUTs where depot_tools is not installed.
 #
-# Relative to a Telemetry src/ directory, like _SENTINEL_PATHS, and verified
-# absent after extraction: a pattern that silently stops matching would
+# Relative to a Telemetry src/ directory, like _FULL_SENTINEL_PATHS, and
+# verified absent after extraction: a pattern that silently stops matching would
 # otherwise waste hundreds of MiB on stateful with nothing to show for it.
 _PRUNED_PATHS = (
         'testing',
@@ -347,7 +364,7 @@ def _paths_state(host, base, paths, present):
     return None if result is None else result.exit_status == 0
 
 
-def is_telemetry_on_dut(host, rootfs_prefix=_USR_PREFIX):
+def is_telemetry_on_dut(host, rootfs_prefix=_USR_PREFIX, minimal_only=False):
     """Returns whether a usable Telemetry tree and .pth are on the DUT.
 
     An unreachable DUT counts as "not present": the deploy that follows will
@@ -358,17 +375,34 @@ def is_telemetry_on_dut(host, rootfs_prefix=_USR_PREFIX):
         host: Autotest host object for the DUT.
         rootfs_prefix: Prefix containing rootfs lib*/python3.*/site-packages
             directories (overridden in unit tests to run against a temp dir).
+        minimal_only: If True, accept the pre-installed minimal Catapult subset
+            at /usr/local/telemetry-minimal (needed by client tests that only
+            import telemetry.*) in addition to a full /usr/local/telemetry
+            installation.
 
     Returns:
-        True if both the Telemetry sentinel files and a matching rootfs or
-        stateful telemetry.pth exist on the DUT.
+        True if the required Telemetry sentinel path(s) (_FULL_SENTINEL_PATHS by
+        default, or _TELEMETRY_REL_PYTHON_PATH when minimal_only=True) and a
+        matching rootfs or stateful telemetry.pth exist on the DUT.
     """
     prefix = rootfs_prefix.rstrip('/')
     if not prefix:
         return False
-    sentinel_checks = ' && '.join(
-            'test -e %s' % _quoted(os.path.join(TELEMETRY_DUT_SRC, path))
-            for path in _SENTINEL_PATHS)
+    if minimal_only:
+        # Minimal subset omits tools/perf/run_benchmark; only Catapult's
+        # telemetry/ package directory is required.
+        sentinel_checks = '{ test -e %s || test -e %s; }' % (
+                _quoted(
+                        os.path.join(TELEMETRY_MINIMAL_DUT_SRC,
+                                     _TELEMETRY_REL_PYTHON_PATH)),
+                _quoted(
+                        os.path.join(TELEMETRY_DUT_SRC,
+                                     _TELEMETRY_REL_PYTHON_PATH)),
+        )
+    else:
+        sentinel_checks = ' && '.join(
+                'test -e %s' % _quoted(os.path.join(TELEMETRY_DUT_SRC, path))
+                for path in _FULL_SENTINEL_PATHS)
     # Group the .pth loop in braces after '&&' so missing sentinels
     # short-circuit cleanly on images that ship rootfs telemetry.pth without
     # the tree, while catching trees stranded without .pth across drone skew.
@@ -733,7 +767,7 @@ def _verify_staged_tree(host, staged_src, tarball):
     @raises TelemetryDeployError: If the tree is unusable or unverifiable.
     """
     for paths, present, problem in (
-            (_SENTINEL_PATHS, True, 'one of %s is missing'),
+            (_FULL_SENTINEL_PATHS, True, 'one of %s is missing'),
             (_PRUNED_PATHS, False,
              'one of %s should have been excluded but is '
              'present'),
@@ -836,7 +870,7 @@ def _ensure_python_path(host, rootfs_prefix=_USR_PREFIX):
            'if ! { mkdir -p "$local_dir" && '
            '{ [ ! -d "$local_dir"/%(pth)s ] || rm -rf "$local_dir"/%(pth)s; }'
            ' && rm -f "$tmp_pth" && '
-           "printf '%%s\\n' %(path)s > \"$tmp_pth\" && "
+           "printf '%%s\\n' %(paths)s > \"$tmp_pth\" && "
            'mv -f "$tmp_pth" "$local_dir"/%(pth)s; }; then '
            'rm -f "$tmp_pth"; '
            'exit 1; '
@@ -849,7 +883,7 @@ def _ensure_python_path(host, rootfs_prefix=_USR_PREFIX):
            'fi' % {
                    'prefix': _quoted(prefix),
                    'rel_glob': _SITE_PACKAGES_REL_GLOB,
-                   'path': _quoted(_TELEMETRY_PYTHON_PATH),
+                   'paths': _quoted(*_TELEMETRY_PYTHON_PATHS),
                    'pth': _quoted(_PTH_FILENAME),
                    'pth_raw': _PTH_FILENAME,
            })
@@ -882,18 +916,23 @@ def _remove_scratch(host):
                      description='Removing Telemetry scratch directories')
 
 
-def _handle_kill_switch(host, force):
+def _handle_kill_switch(host, force, minimal_only=False):
     """Acts on the kill switch, if it is off.
 
-    @param host: Autotest host object for the DUT.
-    @param force: Whether the caller asked for an unconditional deploy.
+    Args:
+        host: Autotest host object for the DUT.
+        force: Whether the caller asked for an unconditional deploy.
+        minimal_only: Whether the pre-installed minimal Catapult subset at
+            /usr/local/telemetry-minimal satisfies the caller.
 
-    @returns True if deployment is disabled and the DUT already has Telemetry,
-             so there is nothing to do and nothing to complain about. False if
-             the switch is on and the deploy should proceed.
+    Returns:
+        True if deployment is disabled and the DUT already has Telemetry, so
+        there is nothing to do and nothing to complain about. False if the
+        switch is on and the deploy should proceed.
 
-    @raises TelemetryDeployError: If deployment is disabled and the DUT does not
-                                  have Telemetry.
+    Raises:
+        TelemetryDeployError: If deployment is disabled and the DUT does not
+            have Telemetry.
     """
     if _deploy_enabled():
         return False
@@ -901,7 +940,7 @@ def _handle_kill_switch(host, force):
     # Only worth a round trip on this path: with the switch off, whether the
     # DUT already has Telemetry is the difference between "nothing to do" and
     # "this test cannot possibly work".
-    if not force and is_telemetry_on_dut(host):
+    if not force and is_telemetry_on_dut(host, minimal_only=minimal_only):
         logging.debug(
                 'On-demand Telemetry deployment is disabled via [CROS] %s, but '
                 '%s already has Telemetry.', _ENABLE_CONFIG_KEY, host.hostname)
@@ -918,12 +957,14 @@ def ensure_telemetry_on_dut(host,
                             build=None,
                             cache_endpoint=None,
                             bucket=None,
-                            force=False):
-    """Ensures the Telemetry framework is available at /usr/local/telemetry.
+                            force=False,
+                            minimal_only=False):
+    """Ensures a Telemetry tree usable by the caller is on the DUT.
 
-    On images that still ship Telemetry this returns immediately without
-    modifying the DUT, which is what makes it safe to call unconditionally
-    today.
+    Requires the full framework at /usr/local/telemetry by default, or also
+    accepts the pre-installed subset at /usr/local/telemetry-minimal when
+    minimal_only=True. When a sufficient tree and telemetry.pth are already
+    present, this returns immediately without modifying the DUT.
 
     Ordering note: any pre-existing tree is deleted before the new one is
     extracted, because the partition does not have room for both. That deletion
@@ -947,6 +988,9 @@ def ensure_telemetry_on_dut(host,
             deploy path while images still ship Telemetry, and to replace an
             image's Telemetry when a newer Chrome has been side-loaded onto the
             DUT.
+        minimal_only: If True, treat the pre-installed minimal Catapult subset
+            at /usr/local/telemetry-minimal as sufficient and skip deploying the
+            full archive when it is present.
 
     Returns:
         True if this call deployed Telemetry, and the caller is therefore
@@ -957,10 +1001,10 @@ def ensure_telemetry_on_dut(host,
         TelemetryDeployError: If Telemetry is needed but cannot be made
             available, including when deployment is disabled by config.
     """
-    if _handle_kill_switch(host, force):
+    if _handle_kill_switch(host, force, minimal_only=minimal_only):
         return False
 
-    if not force and is_telemetry_on_dut(host):
+    if not force and is_telemetry_on_dut(host, minimal_only=minimal_only):
         logging.debug('Telemetry is already present on %s; nothing to deploy.',
                       host.hostname)
         return False
@@ -1024,10 +1068,12 @@ def cleanup_telemetry_on_dut(host):
     /usr/local/usr/lib/python3.* and /usr/local/usr is a symlink to '.', so
     /usr/lib/python3.*/site-packages/telemetry.pth and
     /usr/local/lib/python3.*/site-packages/telemetry.pth are the same file on
-    stateful. Removing it here would delete the .pth file shipped by the image,
-    whereas leaving it in place is a no-op once TELEMETRY_DUT_DIR is gone
-    (site.py ignores .pth entries whose target directory does not exist, and
-    is_telemetry_on_dut() checks _SENTINEL_PATHS first).
+    stateful. Removing it here would delete the .pth file shipped by the image
+    (and break imports from TELEMETRY_MINIMAL_DUT_DIR), whereas leaving it in
+    place keeps TELEMETRY_MINIMAL_DUT_DIR on sys.path while making the
+    TELEMETRY_DUT_DIR entry a no-op once that directory is gone (site.py
+    ignores .pth entries whose target directory does not exist, and
+    is_telemetry_on_dut() checks the sentinel paths first).
 
     This is best-effort: it runs at the end of a test, frequently while an
     exception is already propagating, and sometimes against a DUT that has gone

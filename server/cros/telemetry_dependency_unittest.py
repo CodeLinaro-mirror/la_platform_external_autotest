@@ -297,7 +297,7 @@ class ControlExecutionTestCase(DeclarationTestBase):
         self.assertTrue(
                 telemetry_dependency.ensure_for_client_control(
                         host, control_path))
-        ensure.assert_called_once_with(host)
+        ensure.assert_called_once_with(host, minimal_only=True)
 
     @mock.patch.object(telemetry_dependency.telemetry_deploy,
                        'ensure_telemetry_on_dut')
@@ -364,7 +364,7 @@ class EnsureForClientTestCase(unittest.TestCase):
         self.assertTrue(
                 telemetry_dependency.ensure_for_client_test(
                         host, 'login_Test'))
-        ensure.assert_called_once_with(host)
+        ensure.assert_called_once_with(host, minimal_only=True)
 
     @mock.patch.object(telemetry_dependency.telemetry_deploy,
                        'ensure_telemetry_on_dut')
@@ -411,8 +411,10 @@ class EnsureForClientTestCase(unittest.TestCase):
                 telemetry_dependency.ensure_for_client_test(
                         host, 'login_Test'))
         self.assertEqual(ensure.call_args_list, [
-                mock.call(host),
-                mock.call(host, build='octopus-release/R156-16825.0.0'),
+                mock.call(host, minimal_only=True),
+                mock.call(host,
+                          build='octopus-release/R156-16825.0.0',
+                          minimal_only=True),
         ])
 
     @mock.patch.object(telemetry_dependency.telemetry_deploy,
@@ -430,7 +432,7 @@ class EnsureForClientTestCase(unittest.TestCase):
         with self.assertRaises(
                 telemetry_dependency.telemetry_deploy.TelemetryDeployError):
             telemetry_dependency.ensure_for_client_test(host, 'login_Test')
-        ensure.assert_called_once_with(host)
+        ensure.assert_called_once_with(host, minimal_only=True)
 
 
 class ControlDataIntegrationTestCase(unittest.TestCase):

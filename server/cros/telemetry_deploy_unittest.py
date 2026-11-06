@@ -111,11 +111,21 @@ class FakeHost(object):
                              (needle, '\n'.join(self.commands)))
 
 
-# Absolute path of a sentinel under the real install dir. Used to simulate "no
-# Telemetry on the DUT". It must be absolute: the bare relative path would also
-# match the identically-named sentinel under the staging directory, which would
-# make the deploy look like it had failed verification.
+# Absolute path of a full-Telemetry sentinel under TELEMETRY_DUT_SRC. Used to
+# simulate "no full Telemetry on the DUT". It must be absolute: the bare
+# relative path would also match the identically-named sentinel under the
+# staging directory, which would make the deploy look like it had failed
+# verification.
 _ABSENT = telemetry_deploy.TELEMETRY_DUT_SRC + '/tools/perf/run_benchmark'
+
+# Matches only the minimal-only presence probe in is_telemetry_on_dut() so a
+# scripted failure there does not match _verify_staged_tree() or
+# _ensure_python_path().
+# pylint: disable=protected-access
+_MINIMAL_ABSENT = "test -e '%s/%s'" % (
+        telemetry_deploy.TELEMETRY_MINIMAL_DUT_SRC,
+        telemetry_deploy._TELEMETRY_REL_PYTHON_PATH)
+# pylint: enable=protected-access
 
 # Exact commands, so ordering assertions cannot latch onto the wrong rm or .pth
 # check.
@@ -157,10 +167,10 @@ class IsTelemetryOnDutTest(unittest.TestCase):
         host = FakeHost(raises=(_ABSENT, ))
         self.assertFalse(telemetry_deploy.is_telemetry_on_dut(host))
 
-    def test_checks_every_sentinel(self):
+    def test_checks_every_full_sentinel(self):
         host = FakeHost()
         telemetry_deploy.is_telemetry_on_dut(host)
-        for path in telemetry_deploy._SENTINEL_PATHS:
+        for path in telemetry_deploy._FULL_SENTINEL_PATHS:
             self.assertTrue(host.ran(path))
 
     def test_checks_under_the_install_dir(self):
@@ -184,7 +194,7 @@ class IsTelemetryOnDutTest(unittest.TestCase):
             # when /usr/lib/python3.*/site-packages/telemetry.pth is present.
             os.makedirs(rootfs_lib64)
             src = os.path.join(usr, 'local', 'telemetry', 'src')
-            for rel in telemetry_deploy._SENTINEL_PATHS:
+            for rel in telemetry_deploy._FULL_SENTINEL_PATHS:
                 full = os.path.join(src, rel)
                 os.makedirs(os.path.dirname(full), exist_ok=True)
                 with open(full, 'w', encoding='utf-8') as f:
@@ -210,8 +220,8 @@ class IsTelemetryOnDutTest(unittest.TestCase):
                                 host, rootfs_prefix=usr))
 
                 # Option A image: rootfs .pth exists, but live tree is absent.
-                sentinel = os.path.join(src,
-                                        telemetry_deploy._SENTINEL_PATHS[0])
+                sentinel = os.path.join(
+                        src, telemetry_deploy._FULL_SENTINEL_PATHS[0])
                 os.unlink(sentinel)
                 self.assertFalse(
                         telemetry_deploy.is_telemetry_on_dut(
@@ -225,6 +235,41 @@ class IsTelemetryOnDutTest(unittest.TestCase):
                 self.assertTrue(
                         telemetry_deploy.is_telemetry_on_dut(
                                 host, rootfs_prefix=usr))
+
+                # Minimal-only check: satisfied by /usr/local/telemetry-minimal
+                # when /usr/local/telemetry is absent, while full check remains
+                # False because tools/perf/run_benchmark is not on the DUT.
+                minimal_src = os.path.join(usr, 'local', 'telemetry-minimal',
+                                           'src')
+                minimal_sentinel = os.path.join(
+                        minimal_src,
+                        telemetry_deploy._TELEMETRY_REL_PYTHON_PATH)
+                os.makedirs(os.path.dirname(minimal_sentinel), exist_ok=True)
+                with open(minimal_sentinel, 'w', encoding='utf-8') as f:
+                    f.write('x\n')
+                for rel in telemetry_deploy._FULL_SENTINEL_PATHS:
+                    os.unlink(os.path.join(src, rel))
+                with mock.patch.object(telemetry_deploy,
+                                       'TELEMETRY_MINIMAL_DUT_SRC',
+                                       new=minimal_src):
+                    self.assertFalse(
+                            telemetry_deploy.is_telemetry_on_dut(
+                                    host, rootfs_prefix=usr))
+                    self.assertTrue(
+                            telemetry_deploy.is_telemetry_on_dut(
+                                    host, rootfs_prefix=usr,
+                                    minimal_only=True))
+                    os.unlink(minimal_sentinel)
+                    self.assertFalse(
+                            telemetry_deploy.is_telemetry_on_dut(
+                                    host, rootfs_prefix=usr,
+                                    minimal_only=True))
+                    with open(sentinel, 'w', encoding='utf-8') as f:
+                        f.write('x\n')
+                    self.assertTrue(
+                            telemetry_deploy.is_telemetry_on_dut(
+                                    host, rootfs_prefix=usr,
+                                    minimal_only=True))
 
     # pylint: enable=protected-access
 
@@ -331,8 +376,27 @@ class EnsureTest(unittest.TestCase):
         self.assertIn(telemetry_deploy._SITE_PACKAGES_REL_GLOB, cmd)
         self.assertIn('$prefix/local/${d#"$prefix"/}', cmd)
         self.assertIn(telemetry_deploy._TELEMETRY_PYTHON_PATH, cmd)
+        self.assertIn(telemetry_deploy._TELEMETRY_MINIMAL_PYTHON_PATH, cmd)
 
     # pylint: enable=protected-access
+
+    def test_minimal_only_noop_when_minimal_present(self, _enabled, dep_url):
+        host = FakeHost(failures={_ABSENT: 1})
+        self.assertFalse(
+                telemetry_deploy.ensure_telemetry_on_dut(host,
+                                                         minimal_only=True))
+        self.assertTrue(host.ran(telemetry_deploy.TELEMETRY_MINIMAL_DUT_SRC))
+        self.assertFalse(host.ran('curl'))
+        self.assertFalse(dep_url.called)
+
+    def test_minimal_only_deploys_when_minimal_absent(self, _enabled,
+                                                      _dep_url):
+        host = FakeHost(failures={_MINIMAL_ABSENT: 1})
+        self.assertTrue(
+                telemetry_deploy.ensure_telemetry_on_dut(host,
+                                                         minimal_only=True))
+        self.assertTrue(host.ran('curl'))
+        self.assertTrue(host.ran('tar x'))
 
     def test_force_deploys_over_existing_tree(self, _enabled, _dep_url):
         host = FakeHost()
@@ -445,6 +509,24 @@ class KillSwitchTest(unittest.TestCase):
         with self.assertRaises(telemetry_deploy.TelemetryDeployError):
             telemetry_deploy.ensure_telemetry_on_dut(host)
         self.assertFalse(any('rm -rf' in cmd for cmd in host.commands))
+
+    def test_disabled_and_minimal_present_is_a_quiet_noop(self, dep_url):
+        host = FakeHost(failures={_ABSENT: 1})
+        self.assertFalse(
+                telemetry_deploy.ensure_telemetry_on_dut(host,
+                                                         minimal_only=True))
+        self.assertTrue(host.ran(telemetry_deploy.TELEMETRY_MINIMAL_DUT_SRC))
+        self.assertFalse(host.ran('curl'))
+        self.assertFalse(dep_url.called)
+
+    def test_disabled_and_minimal_absent_raises(self, _dep_url):
+        host = FakeHost(failures={_MINIMAL_ABSENT: 1})
+        with self.assertRaises(telemetry_deploy.TelemetryDeployError) as cm:
+            telemetry_deploy.ensure_telemetry_on_dut(host, minimal_only=True)
+        # pylint: disable=protected-access
+        self.assertIn(telemetry_deploy._ENABLE_CONFIG_KEY, str(cm.exception))
+        # pylint: enable=protected-access
+        self.assertFalse(host.ran('curl'))
 
 
 @mock.patch.object(telemetry_deploy, '_dep_url', return_value='http://cache/x')
@@ -690,7 +772,8 @@ class PythonPathTest(unittest.TestCase):
             host = _ShellHost(tmpdir)
             telemetry_deploy._ensure_python_path(host, rootfs_prefix=usr + '/')
 
-            expected = telemetry_deploy._TELEMETRY_PYTHON_PATH + '\n'
+            expected = '\n'.join(
+                    telemetry_deploy._TELEMETRY_PYTHON_PATHS) + '\n'
             for libdir in ('lib', 'lib64'):
                 local_site = os.path.join(usr, 'local', libdir, 'python3.11',
                                           'site-packages')
@@ -727,7 +810,8 @@ class PythonPathTest(unittest.TestCase):
             with open(pth, encoding='utf-8') as f:
                 self.assertEqual(
                         f.read(),
-                        telemetry_deploy._TELEMETRY_PYTHON_PATH + '\n')
+                        '\n'.join(telemetry_deploy._TELEMETRY_PYTHON_PATHS) +
+                        '\n')
 
     def test_replaces_directory_at_pth_destination(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -749,7 +833,8 @@ class PythonPathTest(unittest.TestCase):
             with open(pth_dir, encoding='utf-8') as f:
                 self.assertEqual(
                         f.read(),
-                        telemetry_deploy._TELEMETRY_PYTHON_PATH + '\n')
+                        '\n'.join(telemetry_deploy._TELEMETRY_PYTHON_PATHS) +
+                        '\n')
 
     @unittest.skipIf(os.geteuid() == 0, 'root bypasses 0500 directory mode')
     def test_cleans_up_temp_file_when_write_fails(self):
@@ -831,11 +916,18 @@ class CleanupTest(unittest.TestCase):
 
             tree = os.path.join(usr, 'local', 'telemetry')
             src = os.path.join(tree, 'src')
-            for rel in telemetry_deploy._SENTINEL_PATHS:
+            for rel in telemetry_deploy._FULL_SENTINEL_PATHS:
                 full = os.path.join(src, rel)
                 os.makedirs(os.path.dirname(full), exist_ok=True)
                 with open(full, 'w', encoding='utf-8') as f:
                     f.write('x\n')
+            minimal_tree = os.path.join(usr, 'local', 'telemetry-minimal')
+            minimal_src = os.path.join(minimal_tree, 'src')
+            minimal_sentinel = os.path.join(
+                    minimal_src, telemetry_deploy._TELEMETRY_REL_PYTHON_PATH)
+            os.makedirs(os.path.dirname(minimal_sentinel), exist_ok=True)
+            with open(minimal_sentinel, 'w', encoding='utf-8') as f:
+                f.write('x\n')
             staging = tree + '.staging'
             scratch = os.path.join(tmpdir, 'scratch')
             for path in (staging, scratch):
@@ -844,16 +936,22 @@ class CleanupTest(unittest.TestCase):
             with mock.patch.multiple(telemetry_deploy,
                                      TELEMETRY_DUT_DIR=tree,
                                      TELEMETRY_DUT_SRC=src,
+                                     TELEMETRY_MINIMAL_DUT_DIR=minimal_tree,
+                                     TELEMETRY_MINIMAL_DUT_SRC=minimal_src,
                                      _SCRATCH_PATHS=(scratch, staging)):
                 self.assertTrue(
                         telemetry_deploy.is_telemetry_on_dut(
                                 host, rootfs_prefix=usr))
                 telemetry_deploy.cleanup_telemetry_on_dut(host)
                 self.assertFalse(os.path.exists(tree))
+                self.assertTrue(os.path.exists(minimal_sentinel))
                 self.assertTrue(os.path.exists(rootfs_pth))
                 self.assertFalse(
                         telemetry_deploy.is_telemetry_on_dut(
                                 host, rootfs_prefix=usr))
+                self.assertTrue(
+                        telemetry_deploy.is_telemetry_on_dut(
+                                host, rootfs_prefix=usr, minimal_only=True))
 
     def test_never_raises(self):
         """Cleanup runs while an exception may already be propagating."""
