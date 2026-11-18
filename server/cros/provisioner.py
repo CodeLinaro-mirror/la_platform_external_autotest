@@ -287,7 +287,8 @@ class ChromiumOSProvisioner(object):
     def _reset_stateful_partition(self):
         """Clear any pending stateful update request."""
         cmd = ['rm', '-rf']
-        for f in ('var_new', 'dev_image_new', '.update_available'):
+        for f in ('var_new', 'dev_image_new',
+                  'unencrypted/dev_image_new.block', '.update_available'):
             cmd += [os.path.join('/mnt/stateful_partition', f)]
         # TODO(b/165024723): This is a temporary measure until we figure out the
         # root cause of this bug.
@@ -296,6 +297,31 @@ class ChromiumOSProvisioner(object):
             cmd += [os.path.join('/mnt/stateful_partition', f)]
         cmd += [_TARGET_VERSION, '2>&1']
         self._run(cmd)
+
+    def _promote_defaultkey_dev_image_block(self):
+        """Promote staged dev_image_new.block on defaultkey_encrypted DUTs.
+
+        `_complete_update` sets `clear_tpm_owner_request=1` before rebooting.
+        On `defaultkey_encrypted` DUTs without a backed-up `system.key`, TPM
+        clear causes `chromeos_startup` on unpatched target builds to reformat
+        stateful via `FilePreseeder`, which preserves
+        `unencrypted/dev_image.block` while dropping
+        `unencrypted/dev_image_new.block` and `.update_available`. Promoting
+        the staged block file before reboot ensures `FilePreseeder` preserves
+        the target build's `/usr/local` image. Also remove the skeleton
+        `dev_image_new` and `var_new` directories unpacked from `stateful.tgz`
+        so `DevPerformStatefulUpdate` does not delete the promoted block file
+        on boots where stateful is not reformatted.
+        """
+        self._run(
+                'if [ "$(findmnt -n -o SOURCE /mnt/stateful_partition '
+                '2>/dev/null)" = "/dev/mapper/defaultkey_encrypted" ] && '
+                '[ -f /mnt/stateful_partition/unencrypted/dev_image_new.block '
+                ']; then rm -rf /mnt/stateful_partition/dev_image_new '
+                '/mnt/stateful_partition/var_new && mv -f '
+                '/mnt/stateful_partition/unencrypted/dev_image_new.block '
+                '/mnt/stateful_partition/unencrypted/dev_image.block && sync; '
+                'fi')
 
     def _set_target_version(self):
         """Set the "target version" for the update."""
@@ -490,7 +516,10 @@ class ChromiumOSProvisioner(object):
                         provision_command, server_name, image_name)
 
             self._set_target_version()
-            return kernel_utils.verify_kernel_state_after_update(self.host)
+            expected_kernel = kernel_utils.verify_kernel_state_after_update(
+                    self.host)
+            self._promote_defaultkey_dev_image_block()
+            return expected_kernel
         except error.TestNAError:
             raise
         except Exception:

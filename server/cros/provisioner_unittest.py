@@ -153,6 +153,38 @@ class TestProvisioner2(unittest.TestCase):
         host.run.assert_any_call(
                 f'/usr/local/bin/quick-provision --noreboot {image} '
                 f'{expected_url}')
+        host.run.assert_any_call(
+                'if [ "$(findmnt -n -o SOURCE /mnt/stateful_partition '
+                '2>/dev/null)" = "/dev/mapper/defaultkey_encrypted" ] && '
+                '[ -f /mnt/stateful_partition/unencrypted/dev_image_new.block '
+                ']; then rm -rf /mnt/stateful_partition/dev_image_new '
+                '/mnt/stateful_partition/var_new && mv -f '
+                '/mnt/stateful_partition/unencrypted/dev_image_new.block '
+                '/mnt/stateful_partition/unencrypted/dev_image.block && sync; '
+                'fi')
+
+    def testDoNotPromoteWhenVerifyKernelFails(self):
+        """Tests no block promotion if kernel slot verification fails."""
+        host = mock.MagicMock()
+        provisioner.dev_server = mock.MagicMock()
+        provisioner.metrics = mock.MagicMock()
+        cros_provisioner = provisioner.ChromiumOSProvisioner(
+                'http://mock_devserver/update/foo/R159-16883.10.0', host)
+        cros_provisioner._promote_defaultkey_dev_image_block = mock.MagicMock()
+        kernel_utils.verify_kernel_state_after_update = mock.MagicMock(
+                side_effect=Exception('slot did not switch'))
+        self.assertIsNone(cros_provisioner._install_update())
+        cros_provisioner._promote_defaultkey_dev_image_block.assert_not_called()
+
+    def testResetStatefulPartitionRemovesDevImageNewBlock(self):
+        """Tests that _reset_stateful_partition cleans dev_image_new.block."""
+        host = mock.MagicMock()
+        cros_provisioner = provisioner.ChromiumOSProvisioner(
+                'http://mock_devserver/update/foo/R159-16883.10.0', host)
+        cros_provisioner._reset_stateful_partition()
+        cmd = host.run.call_args[0][0]
+        self.assertIn('/mnt/stateful_partition/unencrypted/dev_image_new.block',
+                      cmd)
 
 
 if __name__ == '__main__':
