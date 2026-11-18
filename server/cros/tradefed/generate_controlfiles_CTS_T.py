@@ -183,7 +183,7 @@ CONFIG['SPLIT_SUITES'] = {
                 'CtsIntentSignature': 482,
                 'CtsJdwp': 2024,
                 'CtsJni': 553,
-                'CtsJobScheduler': 3381,
+                'CtsJobScheduler': 99999,  # b/582986953
                 'CtsJvmti': 2337,
                 'CtsKernelConfigTestCases': 392,
                 'CtsKeystore': 10004,

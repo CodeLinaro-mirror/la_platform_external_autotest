@@ -7,7 +7,7 @@
 # This file has been automatically generated. Do not edit!
 
 AUTHOR = 'n/a'
-NAME = 'cheets_CTS_T.internal.x86.all.CtsMediaAudioTestCases_-_CtsMediaBitstreamsTestCases'
+NAME = 'cheets_CTS_T.internal.x86.all.CtsMediaBitstreamsTestCases_-_CtsMediaDrmFrameworkTestCases'
 METADATA = {
     "contacts": ["arc-cts-eng@google.com"],
     "bug_component": "b:183644",
@@ -30,15 +30,14 @@ def run_TS(machine):
         iterations=1,
         max_retry=9,
         needs_push_media=True,
-        tag='internal.x86.all.CtsMediaAudioTestCases_-_CtsMediaBitstreamsTestCases',
-        test_name='cheets_CTS_T.internal.x86.all.CtsMediaAudioTestCases_-_CtsMediaBitstreamsTestCases',
-        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsMediaAudioTestCases', '--include-filter', 'CtsMediaAudioTestCases[instant]', '--include-filter', 'CtsMediaAudioTestCases[secondary_user]', '--include-filter', 'CtsMediaBitstreamsTestCases', '--include-filter', 'CtsMediaBitstreamsTestCases[secondary_user]', '--module-arg', 'CtsMediaBitstreamsTestCases:simple-caching-semantics:true', '--logcat-on-failure'],
+        tag='internal.x86.all.CtsMediaBitstreamsTestCases_-_CtsMediaDrmFrameworkTestCases',
+        test_name='cheets_CTS_T.internal.x86.all.CtsMediaBitstreamsTestCases_-_CtsMediaDrmFrameworkTestCases',
+        run_template=['run', 'commandAndExit', 'cts', '--include-filter', 'CtsMediaBitstreamsTestCases', '--include-filter', 'CtsMediaBitstreamsTestCases[secondary_user]', '--include-filter', 'CtsMediaCodecTestCases', '--include-filter', 'CtsMediaCodecTestCases[instant]', '--include-filter', 'CtsMediaCodecTestCases[secondary_user]', '--include-filter', 'CtsMediaDrmFrameworkTestCases', '--include-filter', 'CtsMediaDrmFrameworkTestCases[instant]', '--include-filter', 'CtsMediaDrmFrameworkTestCases[secondary_user]', '--module-arg', 'CtsMediaBitstreamsTestCases:simple-caching-semantics:true', '--logcat-on-failure'],
         retry_template=['run', 'commandAndExit', 'retry', '--retry', '{session_id}'],
-        target_module='all.CtsMediaAudioTestCases_-_CtsMediaBitstreamsTestCases',
+        target_module='all.CtsMediaBitstreamsTestCases_-_CtsMediaDrmFrameworkTestCases',
         target_plan=None,
         bundle='x86',
         uri='LATEST',
-        precondition_commands=['adb shell settings put system sound_effects_enabled 0'],
         timeout=172800)
 
 parallel_simple(run_TS, machines)
