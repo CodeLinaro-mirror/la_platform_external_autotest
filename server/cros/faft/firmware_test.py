@@ -2061,8 +2061,11 @@ class FirmwareTest(test.test):
         return bool(self._backup_firmware_identity)
 
     def restore_firmware(
-        self, suffix=".original", restore_ec=True, reboot_ec=False
-    ):
+            self,
+            suffix: str = ".original",
+            restore_ec: bool = True,
+            reboot_ec: bool = False,
+    ) -> bool:
         """Restore firmware from host in resultsdir.
 
         @param suffix: a string appended to backup file name
@@ -2090,8 +2093,18 @@ class FirmwareTest(test.test):
             ec_remote = os.path.join(remote_temp_dir, "ec%s" % suffix)
             self._client.send_file(ec_local, ec_remote)
             ec_cmd = self.faft_client.ec.get_write_cmd(ec_remote)
-            if not self._client.has_battery() and it83xx:
-                logging.warning("ITE EC and no battery, add -i WP_RO option")
+            self.faft_client.bios.reload()
+            gbb_flags = ctypes.c_uint32(
+                    self.faft_client.bios.get_gbb_flags()).value
+            ec_sw_sync_enabled = not (
+                    gbb_flags & vboot.GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC)
+            if ec_sw_sync_enabled or (not self._client.has_battery()
+                                      and it83xx):
+                logging.info(
+                        "Restoring only EC WP_RO (ec_sw_sync=%s, it83xx=%s)",
+                        ec_sw_sync_enabled,
+                        it83xx,
+                )
                 ec_cmd += " -i WP_RO"
             try:
                 self._client.run(ec_cmd, timeout=300)
