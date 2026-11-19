@@ -4,7 +4,7 @@
 
 NAME = 'audio_CrasDevSwitchStress.input'
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "Fail if device buffer drifts too high.."
 }

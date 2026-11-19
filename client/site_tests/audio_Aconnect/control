@@ -4,7 +4,7 @@
 
 NAME = 'audio_Aconnect'
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "Fails if /dev/snd/seq is inaccessible."
 }

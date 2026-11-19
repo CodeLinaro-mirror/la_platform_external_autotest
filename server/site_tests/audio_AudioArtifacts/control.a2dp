@@ -8,7 +8,7 @@ from autotest_lib.server import utils
 
 NAME = "audio_AudioArtifacts.a2dp"
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "This test will fail if the recorded audio contains artifacts",
     "doc" : " Tests BT 2dp audio artifacts against DUT"

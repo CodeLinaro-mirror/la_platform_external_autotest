@@ -6,7 +6,7 @@ from autotest_lib.server import utils
 
 NAME = "audio_AudioWebRTCLoopback.quality.256"
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "This test will fail if the captured audio does not match original file.",
     "doc" : "This test remotely tests USB and headphone WebRTC loopback with quality check."

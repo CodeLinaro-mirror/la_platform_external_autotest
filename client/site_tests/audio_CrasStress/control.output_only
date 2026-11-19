@@ -4,7 +4,7 @@
 
 NAME = 'audio_CrasStress.output_only'
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     'variant_category': '{"name": "Audio_SoC_Codec_Amp"}',
     "criteria": "Fail if device buffer drifts too high."

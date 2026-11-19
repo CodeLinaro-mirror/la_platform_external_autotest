@@ -6,7 +6,7 @@ from autotest_lib.server import utils
 
 NAME = "audio_AudioTestAssumptionCheck.suspend"
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "This test will fail if functions that audio tests rely on are broken after suspend-resume.",
     "doc" : "This test audio functions work correctly after suspend.",

@@ -6,7 +6,7 @@ from autotest_lib.server import utils
 
 NAME = "audio_AudioBasicHotwording.suspend"
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "This test will fail if the captured audio after hotword does not match the original file",
     "doc" : "Tests hotwording function after suspend"

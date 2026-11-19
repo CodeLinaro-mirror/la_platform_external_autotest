@@ -8,7 +8,7 @@ from autotest_lib.server import utils
 
 NAME = "audio_AudioVolume.hdmi"
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "This test will fail if the recorded volume does not change.",
     "doc" : "This test remotely tests HDMI audio volume against DUT.",

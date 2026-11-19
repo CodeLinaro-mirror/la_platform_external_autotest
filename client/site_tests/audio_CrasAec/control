@@ -4,7 +4,7 @@
 
 NAME = 'audio_CrasAec'
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "Check if the echo cancellation works good under various recording formats."
 }

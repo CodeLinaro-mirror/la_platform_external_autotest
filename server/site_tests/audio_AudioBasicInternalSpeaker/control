@@ -6,7 +6,7 @@ from autotest_lib.server import utils
 
 NAME = "audio_AudioBasicInternalSpeaker"
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "This test will fail if the captured audio does not match original file.",
     "doc" : "Tests internal speaker audio",

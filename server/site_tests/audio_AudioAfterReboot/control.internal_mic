@@ -9,7 +9,7 @@ from autotest_lib.server import utils
 
 NAME = "audio_AudioAfterReboot.internal_mic"
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "This test will fail if the captured audio does not match original file.",
     "doc" : " Tests internal_mic audio function against DUT after reboot",

@@ -4,6 +4,9 @@
 
 AUTHOR = "chromeos-chameleon"
 NAME = "chameleon_audio_perbuild"
+METADATA = {
+    "contacts": ["lt-audio-tests@google.com"],
+}
 PURPOSE = "A Chameleon audio test suite."
 
 TIME = "LENGTHY"
@@ -43,7 +46,7 @@ _BUG_TEMPLATE = {
     'summary': None,
     'title': None,
     'cc': ['kalin@chromium.org', 'conradlo@chromium.org',
-           'chromeos-audio-bugs@google.com']
+           'lt-audio-tests@google.com']
 }
 
 args_dict['name'] = NAME

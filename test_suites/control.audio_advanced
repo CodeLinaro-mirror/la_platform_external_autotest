@@ -2,8 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-AUTHOR = "The ChromiumOS Authors,chromeos-audio-bugs@google.com"
+AUTHOR = "The ChromiumOS Authors,lt-audio-tests@google.com"
 NAME = "audio_advanced"
+METADATA = {
+    "contacts": ["lt-audio-tests@google.com"],
+}
 PURPOSE = "Suite for testing advanced audio functionalities."
 
 TIME = "LONG"
@@ -38,7 +41,7 @@ _BUG_TEMPLATE = {
     'summary': None,
     'title': None,
     'cc': ['kalin@chromium.org', 'conradlo@chromium.org',
-           'chromeos-audio-bugs@google.com']
+           'lt-audio-tests@google.com']
 }
 
 args_dict['name'] = NAME

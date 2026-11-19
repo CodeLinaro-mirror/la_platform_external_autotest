@@ -8,7 +8,7 @@ from autotest_lib.server import utils
 
 NAME = "audio_AudioNodeSwitch.HDMI_while_playing_audio"
 METADATA = {
-    "contacts": ["chromeos-audio-bugs@google.com"],
+    "contacts": ["lt-audio-tests@google.com"],
     "bug_component": "b:875558",
     "criteria": "This test will fail if the audio node is not as expected.",
     "doc" : "Check if audio is routing through HDMI node"
