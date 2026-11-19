@@ -17,6 +17,7 @@ import time
 from six.moves import range
 import six.moves.xmlrpc_client
 from contextlib import contextmanager
+from typing import Any
 
 try:
     from PIL import Image
@@ -39,6 +40,25 @@ BOOKWORM_BLUETOOTH_LOG_REMOTE_PATH = '/tmp/bluetooth.log'
 BOOKWORM_AUDIO_SERVER_LOG_REMOTE_PATH = '/tmp/audio_server.log'
 BOOKWORM_DBUS_LOG_REMOTE_PATH = '/tmp/dbus.log'
 CHAMELEON_READY_TEST = 'GetSupportedPorts'
+CHAMELEON_XMLRPC_TIMEOUT_SECONDS = 60
+
+
+class _TimeoutXMLRPCTransport(six.moves.xmlrpc_client.Transport):
+    """XML-RPC HTTP transport with a per-request socket timeout."""
+
+    def __init__(self,
+                 timeout: float = CHAMELEON_XMLRPC_TIMEOUT_SECONDS,
+                 *args: Any,
+                 **kwargs: Any) -> None:
+        super(_TimeoutXMLRPCTransport, self).__init__(*args, **kwargs)
+        self._timeout = timeout
+
+    def make_connection(self,
+                        host: Any) -> six.moves.http_client.HTTPConnection:
+        """Creates or returns a cached HTTPConnection with timeout set."""
+        conn = super(_TimeoutXMLRPCTransport, self).make_connection(host)
+        conn.timeout = self._timeout
+        return conn
 
 
 class ChameleonConnectionError(error.TestError):
@@ -168,7 +188,11 @@ class ChameleonConnection(object):
 
         """
         remote = 'http://%s:%s' % (self._hostname, self._port)
-        chameleond_proxy = six.moves.xmlrpc_client.ServerProxy(remote, allow_none=True)
+        chameleond_proxy = six.moves.xmlrpc_client.ServerProxy(
+                remote,
+                transport=_TimeoutXMLRPCTransport(
+                        timeout=CHAMELEON_XMLRPC_TIMEOUT_SECONDS),
+                allow_none=True)
         logging.info('ChameleonConnection._create_server_proxy() called')
         # Call a RPC to test.
         try:
@@ -198,15 +222,20 @@ class ChameleonConnection(object):
         @raise ChameleonConnectionError if the call failed after a reconnection.
 
         """
+        if self._chameleond_proxy is None:
+            self._reconnect()
         try:
             return getattr(self._chameleond_proxy, name)(*args, **kwargs)
-        except (AttributeError, socket.error):
-            # Reconnect and invoke the method again.
+        except (socket.error, six.moves.http_client.BadStatusLine):
+            # Reconnect and invoke the method again, except for
+            # restart_chameleond which intentionally drops the connection.
             logging.info('Reconnecting chameleond proxy: %s', name)
             self._reconnect()
+            if name == 'restart_chameleond':
+                return None
             try:
                 return getattr(self._chameleond_proxy, name)(*args, **kwargs)
-            except (socket.error) as e:
+            except (socket.error, six.moves.http_client.BadStatusLine) as e:
                 raise ChameleonConnectionError(
                         ("The RPC call %s still failed with %s"
                          " after a reconnection.") % (name, e))

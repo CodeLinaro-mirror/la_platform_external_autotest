@@ -78,9 +78,12 @@ class ChameleonHost(ssh_host.SSHHost):
                 # whenever needed, e.g., after a reboot.
                 proxy_generator = (
                         lambda: self.rpc_server_tracker.xmlrpc_connect(
-                                None, chameleon_port,
+                                None,
+                                chameleon_port,
                                 ready_test_name=chameleon.CHAMELEON_READY_TEST,
-                                timeout_seconds=60))
+                                timeout_seconds=60,
+                                request_timeout_seconds=chameleon.
+                                CHAMELEON_XMLRPC_TIMEOUT_SECONDS))
                 reasons = []
                 if not self._is_in_lab:
                     reasons.append('self._is_in_lab: False')
