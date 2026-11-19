@@ -11,6 +11,7 @@ import json
 import logging
 import threading
 from datetime import datetime
+from typing import Optional
 
 import common
 from autotest_lib.client.bin import utils
@@ -330,13 +331,19 @@ class BluetoothDevice(object):
         return self._proxy.set_wake_enabled(value)
 
 
-    def get_hci(self):
-        """Get hci of the adapter; normally, it is 'hci0'.
+    def get_hci(self) -> Optional[str]:
+        """Gets hci of the adapter; normally, it is 'hci0'.
 
-        @returns: the hci name of the adapter.
-
+        Returns:
+            The hci name of the adapter, or None if no active hci is present.
         """
-        dev_info = self.get_dev_info()
+        try:
+            dev_info = self.get_dev_info()
+        except Exception as e:
+            if 'No active hci' in str(e):
+                logging.warning('No active hci found in get_hci: %s', e)
+                return None
+            raise
         hci = (dev_info[1] if isinstance(dev_info, list) and
                len(dev_info) > 1 else None)
         return hci
