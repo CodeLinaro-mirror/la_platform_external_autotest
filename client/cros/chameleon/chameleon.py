@@ -208,6 +208,10 @@ class ChameleonConnection(object):
         """Reconnect to chameleond."""
         self._chameleond_proxy = self._proxy_generator()
 
+    def reconnect(self) -> None:
+        """Reconnects the underlying XMLRPC server proxy."""
+        self._reconnect()
+
 
     def __call_server(self, name, *args, **kwargs):
         """Bind the name to the chameleond proxy and execute the method.
@@ -344,9 +348,35 @@ class ChameleonBoard(object):
         """
         return self._chameleond_proxy.is_ready()
 
-    def restart_chameleond(self):
+    def cleanup(self) -> None:
+        """Cleans up active peripheral services on the remote device."""
+        self._chameleond_proxy.cleanup()
+
+    def restart_chameleond(self) -> None:
         """Restarts the chameleond on the remote device."""
-        self._chameleond_proxy.restart_chameleond()
+        if self.host is not None:
+            self.host.run(
+                    'sudo service chameleond stop; '
+                    'sudo pkill -9 -f "[r]un_chameleond" || true; '
+                    'if [ ! -e /sys/class/bluetooth/hci0 ] && '
+                    '[ -e /sys/bus/serial/devices/serial0-0 ]; '
+                    'then '
+                    'sudo service bluetooth stop; '
+                    'if [ -e '
+                    '/sys/bus/serial/drivers/hci_uart_bcm/serial0-0 ]; then '
+                    'echo serial0-0 | sudo tee '
+                    '/sys/bus/serial/drivers/hci_uart_bcm/unbind >/dev/null; '
+                    'sleep 1; '
+                    'fi; '
+                    'echo serial0-0 | sudo tee '
+                    '/sys/bus/serial/drivers/hci_uart_bcm/bind >/dev/null; '
+                    'sleep 1; '
+                    'sudo service bluetooth start; '
+                    'fi; '
+                    'sudo service chameleond start')
+            self._chameleond_proxy.reconnect()
+        else:
+            self._chameleond_proxy.restart_chameleond()
 
     def reset(self):
         """Resets Chameleon board."""

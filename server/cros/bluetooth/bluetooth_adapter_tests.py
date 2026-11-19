@@ -1445,6 +1445,13 @@ class BluetoothAdapterTests(test.test):
         @param peer: The remote Bluetooth peer.
         @param device: proxy object of peripheral device
         """
+        try:
+            peer.cleanup()
+        except Exception as e:
+            if not (e.__class__.__name__ == 'Fault'
+                    and 'is not supported' in str(e)):
+                logging.warning('Ignoring cleanup error before ResetStack: %s',
+                                e)
 
         device.ResetStack(next_device_type, False)
 

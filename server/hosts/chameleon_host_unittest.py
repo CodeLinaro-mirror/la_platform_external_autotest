@@ -9,9 +9,10 @@ import socket
 import unittest
 from unittest import mock
 
+import common  # isort: split
+
 from autotest_lib.client.cros.chameleon import chameleon
 from autotest_lib.server.hosts import chameleon_host
-import common
 
 
 class ChameleonConnectionTests(unittest.TestCase):
@@ -88,6 +89,27 @@ class ChameleonConnectionTests(unittest.TestCase):
                 request_timeout_seconds=(
                         chameleon.CHAMELEON_XMLRPC_TIMEOUT_SECONDS),
         )
+
+    def test_board_restart_chameleond_uses_ssh_when_host_present(self) -> None:
+        """Verifies ChameleonBoard.restart_chameleond restarts over SSH."""
+        conn = mock.MagicMock()
+        conn.HasAudioBoard.return_value = False
+        ssh_host_mock = mock.MagicMock()
+        board = chameleon.ChameleonBoard(conn, chameleon_host=ssh_host_mock)
+
+        board.restart_chameleond()
+
+        ssh_host_mock.run.assert_called_once()
+        cmd = ssh_host_mock.run.call_args[0][0]
+        self.assertIn("sudo service chameleond stop", cmd)
+        self.assertIn('sudo pkill -9 -f "[r]un_chameleond" || true', cmd)
+        self.assertNotIn("pkill -9 -f run_chameleond", cmd)
+        self.assertIn("/sys/bus/serial/devices/serial0-0", cmd)
+        self.assertIn("/sys/bus/serial/drivers/hci_uart_bcm/serial0-0", cmd)
+        self.assertIn("/sys/bus/serial/drivers/hci_uart_bcm/bind", cmd)
+        self.assertIn("sudo service chameleond start", cmd)
+        conn.reconnect.assert_called_once_with()
+        conn.restart_chameleond.assert_not_called()
 
 
 if __name__ == "__main__":
